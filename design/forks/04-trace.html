@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<!-- 意图：放飞。表面仍是对话产品，思考过程展开后是糖包的手写草稿。故意比前三稿更明显，用来试边界。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包</title>
+  <style>
+    :root {
+      --bg: #f7f6f3;
+      --panel: #fffcf9;
+      --ink: #1c1b19;
+      --muted: #8d877e;
+      --faint: #b7b1a8;
+      --line: #e5e1d8;
+      --col: 40rem;
+      --fine: 12px;
+      --trace: 1.05rem;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: -0.011em;
+    }
+    .app { min-height: 100%; display: flex; flex-direction: column; padding-bottom: 2.7rem; }
+    header {
+      width: min(var(--col), calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 0.9rem 0 0;
+      font-weight: 640;
+      letter-spacing: -0.03em;
+    }
+    .thread {
+      flex: 1;
+      width: min(var(--col), calc(100% - 2rem));
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .app.has-log .thread { justify-content: flex-start; padding-top: 1.2rem; }
+    .hello h1 {
+      margin: 0;
+      text-align: center;
+      font-weight: 560;
+      letter-spacing: -0.035em;
+      font-size: clamp(1.7rem, 3vw, 2rem);
+    }
+    .log { display: flex; flex-direction: column; gap: 1.1rem; }
+    .msg p { margin: 0.2rem 0 0; line-height: 1.7; white-space: pre-wrap; }
+    .msg b { font-size: 0.75rem; color: var(--muted); }
+    details.trace {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 0.45rem 0.75rem 0.55rem;
+    }
+    details.trace summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    details.trace .draft {
+      margin: 0.55rem 0 0.15rem;
+      font-family: "KaiTi", "STKaiti", "Songti SC", serif;
+      font-size: var(--trace);
+      line-height: 1.7;
+      color: #3f3428;
+    }
+    .dock { width: min(var(--col), calc(100% - 2rem)); margin: 0 auto 0.9rem; }
+    form.composer {
+      display: flex; gap: 0.5rem; align-items: flex-end;
+      padding: 0.55rem 0.55rem 0.55rem 0.95rem;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    }
+    textarea {
+      flex: 1; border: 0; outline: 0; resize: none; background: transparent;
+      font: inherit; color: inherit; line-height: 1.5; padding: 0.45rem 0; max-height: 8rem;
+    }
+    button.send {
+      border: 0; width: 2rem; height: 2rem; border-radius: 10px;
+      background: var(--ink); color: #fff; cursor: pointer;
+    }
+    button.send:disabled { opacity: 0.3; cursor: default; }
+    .fine { margin: 0.55rem 0 0; text-align: center; color: var(--faint); font-size: var(--fine); line-height: 1.5; }
+    .playground {
+      position: fixed; inset: auto 0 0 0;
+      display: flex; flex-wrap: wrap; gap: 0.7rem 1rem; align-items: center;
+      padding: 0.4rem 0.85rem; background: #fff; border-top: 1px solid var(--line);
+      font-size: 12px; color: var(--muted); z-index: 5;
+    }
+    .playground label { display: flex; gap: 0.35rem; align-items: center; }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>糖包</header>
+    <main class="thread">
+      <div class="hello" id="hello"><h1>需要我做什么？</h1></div>
+      <div class="log" id="log" hidden></div>
+    </main>
+    <div class="dock">
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="给糖包发消息"></textarea>
+        <button class="send" type="submit" aria-label="发送" disabled>↑</button>
+      </form>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。这里的 AI 是人工。</p>
+    </div>
+  </div>
+  <form class="playground" id="playground">
+    <span>稿面</span>
+    <label>背景 <input type="color" value="#f7f6f3" data-var="--bg"></label>
+    <label>栏宽 <input type="range" min="30" max="52" value="40" data-var="--col" data-unit="rem"></label>
+    <label>草稿字号 <input type="range" min="14" max="24" value="17" data-var="--trace" data-unit="px"></label>
+  </form>
+  <script>
+    const root = document.documentElement;
+    document.getElementById("playground").oninput = (e) => {
+      const el = e.target;
+      if (!el.dataset.var) return;
+      root.style.setProperty(el.dataset.var, el.value + (el.dataset.unit || ""));
+    };
+    const input = document.getElementById("input");
+    const send = document.querySelector(".send");
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 128) + "px";
+      send.disabled = !input.value.trim();
+    };
+    input.addEventListener("input", grow);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById("composer").requestSubmit();
+      }
+    });
+    document.getElementById("composer").onsubmit = (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      document.getElementById("hello").hidden = true;
+      const log = document.getElementById("log");
+      log.hidden = false;
+      document.getElementById("app").classList.add("has-log");
+      const item = document.createElement("article");
+      item.className = "msg";
+      const who = document.createElement("b");
+      who.textContent = "你";
+      const body = document.createElement("p");
+      body.textContent = text;
+      const details = document.createElement("details");
+      details.className = "trace";
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = "思考过程";
+      const draft = document.createElement("p");
+      draft.className = "draft";
+      draft.textContent = "先别装成模型。这句我得自己看。如果我想岔了，就让它错得有名字。";
+      details.append(summary, draft);
+      item.append(who, body);
+      log.append(item, details);
+      input.value = "";
+      grow();
+    };
+  </script>
+</body>
+</html>

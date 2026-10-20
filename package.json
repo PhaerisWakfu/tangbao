@@ -1,0 +1,18 @@
+{
+  "name": "tangbao",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "design": "node scripts/design-server.mjs",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "migrate:local": "wrangler d1 migrations apply tangbao --local",
+    "migrate:remote": "wrangler d1 migrations apply tangbao --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.42.0"
+  }
+}

@@ -1,0 +1,482 @@
+const STORE_KEY = "tangbao.v1";
+const POLL_MS = 30000;
+const WAIT = {
+  awake: "他在看这句，不是在生成。",
+  asleep: "他睡了，这句会留到他起来。",
+};
+const STEAM =
+  '<svg class="steam" viewBox="0 0 26 18" aria-hidden="true">' +
+  '<path d="M8 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M13 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M18 17c-3-3 3-5 0-8s3-5 0-8"/></svg>';
+
+const $ = (selector) => document.querySelector(selector);
+const body = document.body;
+const stage = $("#stage");
+const log = $("#log");
+const input = $("#input");
+const send = $(".send");
+const composer = $("#composer");
+const sys = $("#sys");
+const card = $("#card");
+const modelBtn = $("#model");
+const history = $("#history");
+const titleEl = $("#title");
+
+let store = loadStore();
+let current = store.threads.find((item) => item.id === store.activeId) || null;
+let status = { state: "available", label: "可用", note: "他醒着", awake: true };
+let messages = [];
+let painted = "";
+let timer = 0;
+let sending = false;
+
+function loadStore() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "");
+    if (!parsed || !Array.isArray(parsed.threads)) throw new Error("empty");
+    return { threads: parsed.threads, activeId: parsed.activeId || null };
+  } catch {
+    return { threads: [], activeId: null };
+  }
+}
+
+function saveStore() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+}
+
+class ApiError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+async function api(path, options = {}) {
+  const headers = {};
+  if (options.body) headers["content-type"] = "application/json";
+  if (options.token) headers.authorization = `Bearer ${options.token}`;
+  let response;
+  try {
+    response = await fetch(path, {
+      method: options.method || "GET",
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      credentials: "same-origin",
+    });
+  } catch {
+    throw new ApiError("消息没送出去。糖包那边暂时没应。", 0);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(data.error || "消息没送出去。糖包那边暂时没应。", response.status);
+  return data;
+}
+
+function spent(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} 小时${minutes % 60 ? ` ${minutes % 60} 分` : ""}`;
+  return `${Math.floor(hours / 24)} 天${hours % 24 ? ` ${hours % 24} 小时` : ""}`;
+}
+
+function throughput(chars, ms) {
+  const perMinute = chars / Math.max(ms / 60000, 1 / 60);
+  if (perMinute >= 10) return String(Math.round(perMinute));
+  if (perMinute >= 1) return perMinute.toFixed(1);
+  return perMinute.toFixed(2);
+}
+
+function clock(ts) {
+  const date = new Date(ts);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function showSys(text) {
+  sys.hidden = !text;
+  sys.textContent = text || "";
+}
+
+function applyStatus(next) {
+  status = next;
+  body.dataset.presence = next.awake ? "awake" : "asleep";
+  try {
+    localStorage.setItem("tangbao.presence", body.dataset.presence);
+  } catch {}
+  if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
+  $("#status-label").textContent = next.label;
+  $("#status-note").textContent = next.note;
+  $("#status").title = next.awake ? "他醒着，消息会被看到" : "他睡了，消息会留到他起来";
+  tickPending();
+}
+
+function botRow(message, askedAt) {
+  const took = Math.max(0, message.createdAt - askedAt);
+  const row = document.createElement("article");
+  row.className = "b";
+  row.innerHTML =
+    '<svg class="avatar"><use href="#pleat"/></svg>' +
+    '<div class="b-body">' +
+    '<details class="thought"><summary></summary>' +
+    '<div class="thought-body"><dl></dl><p>思考过程由一个人完成，没有留下草稿。</p></div></details>' +
+    '<p class="b-text"></p>' +
+    '<div class="acts">' +
+    '<button type="button" class="copy" data-tip="复制" aria-label="复制"><svg class="i"><use href="#i-copy"/></svg></button>' +
+    '<button type="button" aria-disabled="true" data-tip="他只写一遍" aria-label="重新生成"><svg class="i"><use href="#i-redo"/></svg></button>' +
+    "<time></time>" +
+    "</div></div>";
+  const summary = row.querySelector("summary");
+  summary.textContent = `已思考（用时 ${spent(took)}）`;
+  summary.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-chev"/></svg>');
+  const facts = [
+    ["推理核心", "1 个（糖包本人）"],
+    ["用时", spent(took)],
+    ["吞吐", `约 ${throughput([...message.body].length, took)} 字/分钟`],
+  ];
+  const list = row.querySelector("dl");
+  for (const [term, value] of facts) {
+    const dt = document.createElement("dt");
+    dt.textContent = term;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    list.append(dt, dd);
+  }
+  row.querySelector(".b-text").textContent = message.body;
+  const time = row.querySelector("time");
+  time.textContent = clock(message.createdAt);
+  time.dateTime = new Date(message.createdAt).toISOString();
+  return row;
+}
+
+function pendingRow(since) {
+  const row = document.createElement("div");
+  row.className = "pending";
+  row.dataset.since = String(since);
+  row.innerHTML =
+    `<span class="pot">${STEAM}<svg class="avatar"><use href="#pleat"/></svg></span>` +
+    "<div><b>思考中</b><small></small></div>";
+  return row;
+}
+
+function tickPending() {
+  const row = log.querySelector(".pending");
+  if (!row) return;
+  const wait = status.awake ? WAIT.awake : WAIT.asleep;
+  row.querySelector("small").textContent = `已用时 ${spent(Date.now() - Number(row.dataset.since))} · ${wait}`;
+}
+
+function paint(list) {
+  const key = JSON.stringify(list);
+  if (key === painted) {
+    tickPending();
+    return;
+  }
+  painted = key;
+  messages = list;
+  body.dataset.state = list.length ? "chat" : "empty";
+  titleEl.textContent = list.length && current ? current.title || "" : "";
+  log.replaceChildren();
+  let askedAt = 0;
+  for (const message of list) {
+    if (message.role === "visitor") {
+      if (!askedAt) askedAt = message.createdAt;
+      const bubble = document.createElement("p");
+      bubble.className = "u";
+      bubble.textContent = message.body;
+      log.append(bubble);
+    } else {
+      log.append(botRow(message, askedAt || message.createdAt));
+      askedAt = 0;
+    }
+  }
+  if (askedAt) log.append(pendingRow(askedAt));
+  tickPending();
+  stage.scrollTop = stage.scrollHeight;
+}
+
+function renderHistory() {
+  history.replaceChildren();
+  if (!store.threads.length) {
+    const empty = document.createElement("p");
+    empty.className = "hist-empty";
+    empty.textContent = "还没有对话。问的第一句会出现在这里。";
+    history.append(empty);
+    return;
+  }
+  const today = new Date().toDateString();
+  const groups = new Map();
+  for (const thread of store.threads) {
+    const label = new Date(thread.updatedAt || Date.now()).toDateString() === today ? "今天" : "更早";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(thread);
+  }
+  for (const [label, threads] of groups) {
+    const heading = document.createElement("h3");
+    heading.textContent = label;
+    history.append(heading);
+    for (const thread of threads) {
+      const row = document.createElement("div");
+      row.className = "hist-row";
+      if (current && current.id === thread.id) row.dataset.current = "true";
+      const link = document.createElement("a");
+      link.href = "/";
+      link.textContent = thread.title || "新对话";
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void openThread(thread.id);
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "hist-x";
+      remove.setAttribute("aria-label", "删除这段对话");
+      const icon = '<svg class="i"><use href="#i-x"/></svg>';
+      remove.innerHTML = icon;
+      remove.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (remove.dataset.confirm !== "1") {
+          remove.dataset.confirm = "1";
+          remove.setAttribute("aria-label", "确认删除");
+          remove.textContent = "删";
+          window.setTimeout(() => {
+            if (remove.dataset.confirm !== "1") return;
+            remove.dataset.confirm = "";
+            remove.setAttribute("aria-label", "删除这段对话");
+            remove.innerHTML = icon;
+          }, 2200);
+          return;
+        }
+        void removeThread(thread);
+      });
+      row.append(link, remove);
+      history.append(row);
+    }
+  }
+}
+
+function remember(thread) {
+  store.threads = [thread, ...store.threads.filter((item) => item.id !== thread.id)];
+  store.activeId = thread.id;
+  saveStore();
+  renderHistory();
+}
+
+async function removeThread(thread) {
+  try {
+    await api(`/api/threads/${thread.id}`, { method: "DELETE", token: thread.token });
+  } catch (err) {
+    showSys(err.message || "这段对话还在。过一会儿再删。");
+    return;
+  }
+  forget(thread.id);
+  showSys("");
+}
+
+function forget(id) {
+  store.threads = store.threads.filter((item) => item.id !== id);
+  if (store.activeId === id) store.activeId = null;
+  saveStore();
+  current = null;
+  painted = "";
+  paint([]);
+  renderHistory();
+}
+
+async function refresh() {
+  if (!current) {
+    applyStatus(await api("/api/status"));
+    return;
+  }
+  try {
+    const data = await api(`/api/threads/${current.id}`, { token: current.token });
+    applyStatus(data.status);
+    if (data.title && data.title !== current.title) {
+      current.title = data.title;
+      saveStore();
+      renderHistory();
+    }
+    paint(data.messages || []);
+  } catch (err) {
+    if (err instanceof ApiError && err.statusCode === 401) {
+      forget(current.id);
+      showSys(err.message);
+      return;
+    }
+    throw err;
+  }
+}
+
+function arm() {
+  clearTimeout(timer);
+  if (document.hidden) return;
+  timer = setTimeout(() => {
+    void tick();
+  }, POLL_MS);
+}
+
+async function tick() {
+  try {
+    await refresh();
+  } catch {
+    // 下一轮再看。失败不改掉已经写在页面上的话。
+  }
+  arm();
+}
+
+function closeSide() {
+  body.classList.remove("drawer");
+}
+
+async function openThread(id) {
+  const found = store.threads.find((item) => item.id === id);
+  if (!found) return;
+  current = found;
+  store.activeId = id;
+  saveStore();
+  renderHistory();
+  closeSide();
+  showSys("");
+  painted = "";
+  log.replaceChildren();
+  body.dataset.state = "chat";
+  titleEl.textContent = found.title || "";
+  try {
+    await refresh();
+  } catch (err) {
+    showSys(err.message);
+  }
+}
+
+function newChat() {
+  current = null;
+  store.activeId = null;
+  saveStore();
+  painted = "";
+  paint([]);
+  renderHistory();
+  closeSide();
+  showSys("");
+  input.focus();
+}
+
+function grow() {
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+  send.disabled = sending || !input.value.trim();
+}
+
+async function sendText(text) {
+  const trimmed = text.trim();
+  if (!trimmed || sending) return;
+  sending = true;
+  send.disabled = true;
+  showSys("");
+  const prior = messages.slice();
+  paint(prior.concat([{ id: "local", role: "visitor", body: trimmed, createdAt: Date.now() }]));
+  if (!current) titleEl.textContent = trimmed;
+  input.value = "";
+  grow();
+  try {
+    if (!current) {
+      const created = await api("/api/threads", { method: "POST", body: { body: trimmed } });
+      current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
+    } else {
+      const data = await api(`/api/threads/${current.id}/messages`, {
+        method: "POST",
+        token: current.token,
+        body: { body: trimmed },
+      });
+      if (data.status) applyStatus(data.status);
+      current.updatedAt = Date.now();
+    }
+    remember(current);
+  } catch (err) {
+    painted = "";
+    paint(prior);
+    input.value = trimmed;
+    sending = false;
+    grow();
+    showSys(err.message || "消息没送出去。糖包那边暂时没应。");
+    return;
+  }
+  try {
+    await refresh();
+  } catch (err) {
+    showSys(err.message || "消息送到了，这一页还没刷新。");
+  } finally {
+    sending = false;
+    grow();
+  }
+}
+
+function closeCard() {
+  card.hidden = true;
+  modelBtn.setAttribute("aria-expanded", "false");
+}
+
+modelBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = card.hidden;
+  card.hidden = !open;
+  modelBtn.setAttribute("aria-expanded", String(open));
+});
+card.addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", closeCard);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  closeCard();
+  closeSide();
+});
+
+$("#new").addEventListener("click", newChat);
+$("#new-top").addEventListener("click", newChat);
+$("#open-side").addEventListener("click", () => body.classList.add("drawer"));
+$("#close-side").addEventListener("click", closeSide);
+$("#scrim").addEventListener("click", closeSide);
+
+$("#chips").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button) void sendText(button.textContent);
+});
+
+log.addEventListener("click", async (event) => {
+  const button = event.target.closest(".copy");
+  if (!button) return;
+  const text = button.closest(".b-body").querySelector(".b-text").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    return;
+  }
+  button.dataset.tip = "已复制";
+  button.querySelector("use").setAttribute("href", "#i-check");
+  setTimeout(() => {
+    button.dataset.tip = "复制";
+    button.querySelector("use").setAttribute("href", "#i-copy");
+  }, 1600);
+});
+
+input.addEventListener("input", grow);
+input.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    composer.requestSubmit();
+  }
+});
+composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void sendText(input.value);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearTimeout(timer);
+  else void tick();
+});
+
+setInterval(tickPending, 15000);
+renderHistory();
+if (current) {
+  body.dataset.state = "chat";
+  titleEl.textContent = current.title || "";
+}
+void tick();

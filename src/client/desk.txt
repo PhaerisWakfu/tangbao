@@ -1,0 +1,241 @@
+const POLL_MS = 30000;
+const $ = (selector) => document.querySelector(selector);
+const body = document.body;
+const gate = $("#gate");
+const desk = $("#desk");
+const pile = $("#pile");
+const thread = $("#thread");
+const reply = $("#reply");
+const answer = $("#answer");
+const lamp = $("#lamp");
+const count = $("#count");
+const loginErr = $("#login-err");
+const replyErr = $("#reply-err");
+
+let awake = true;
+let selected = null;
+let shown = "";
+let timer = 0;
+
+class ApiError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+async function api(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: options.method || "GET",
+      headers: options.body ? { "content-type": "application/json" } : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      credentials: "same-origin",
+    });
+  } catch {
+    throw new ApiError("桌子这边晃了一下。", 0);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(data.error || "桌子这边晃了一下。", response.status);
+  return data;
+}
+
+function spent(ms) {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} 小时${minutes % 60 ? ` ${minutes % 60} 分` : ""}`;
+  return `${Math.floor(hours / 24)} 天${hours % 24 ? ` ${hours % 24} 小时` : ""}`;
+}
+
+function clock(ts) {
+  const date = new Date(ts);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function showDesk(on) {
+  gate.hidden = on;
+  desk.hidden = !on;
+}
+
+function applyAwake(next) {
+  awake = next;
+  body.dataset.presence = next ? "awake" : "asleep";
+  try {
+    localStorage.setItem("tangbao.presence", body.dataset.presence);
+  } catch {}
+  if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
+  lamp.setAttribute("aria-checked", String(next));
+  lamp.querySelector("b").textContent = next ? "灯亮着" : "灯灭了";
+  lamp.querySelector("small").textContent = next ? "前台显示：可用 · 他醒着" : "前台显示：繁忙 · 他睡了";
+}
+
+function slip(item, waiting) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = waiting ? "slip waiting" : "slip";
+  if (item.id === selected) button.setAttribute("aria-current", "true");
+  const title = document.createElement("b");
+  title.textContent = item.title;
+  button.append(title);
+  const head = item.title.replace(/…$/, "");
+  const latest = (item.preview || "").replace(/…$/, "");
+  if (latest && !latest.startsWith(head)) {
+    const preview = document.createElement("span");
+    preview.textContent = item.preview;
+    button.append(preview);
+  }
+  const meta = document.createElement("small");
+  meta.textContent = waiting ? `等了 ${spent(Date.now() - item.updatedAt)}` : `回于 ${clock(item.updatedAt)}`;
+  button.append(meta);
+  button.addEventListener("click", () => {
+    void openSlip(item.id);
+  });
+  return button;
+}
+
+function renderQueue(data) {
+  applyAwake(Boolean(data.awake));
+  const waiting = data.waiting || [];
+  const recent = data.recent || [];
+  count.textContent = waiting.length
+    ? `${waiting.length} 条待写。这些 token 还没生成，GPU 是你的手指。`
+    : "桌上空着。GPU 在休息。";
+  pile.replaceChildren();
+  const waitingTitle = document.createElement("h3");
+  waitingTitle.textContent = "待你亲自处理";
+  pile.append(waitingTitle);
+  if (!waiting.length) {
+    const none = document.createElement("p");
+    none.className = "none";
+    none.textContent = "没有新消息。";
+    pile.append(none);
+  }
+  for (const item of waiting) pile.append(slip(item, true));
+  if (recent.length) {
+    const recentTitle = document.createElement("h3");
+    recentTitle.textContent = "刚回过";
+    pile.append(recentTitle);
+    for (const item of recent) pile.append(slip(item, false));
+  }
+}
+
+function renderThread(data) {
+  $("#slip-title").textContent = data.thread.title;
+  $("#slip-meta").textContent = data.thread.awaiting ? `等了 ${spent(Date.now() - data.thread.updatedAt)}` : "已回复";
+  const key = JSON.stringify(data.messages);
+  if (key === shown) return;
+  shown = key;
+  thread.replaceChildren();
+  for (const message of data.messages) {
+    const wrap = document.createElement("div");
+    wrap.className = message.role === "tangbao" ? "me" : "them";
+    const text = document.createElement("p");
+    text.textContent = message.body;
+    const meta = document.createElement("small");
+    meta.textContent = `${message.role === "tangbao" ? "你" : "对方"} · ${clock(message.createdAt)}`;
+    wrap.append(text, meta);
+    thread.append(wrap);
+  }
+  thread.scrollTop = thread.scrollHeight;
+}
+
+async function loadQueue() {
+  const data = await api("/api/admin/queue");
+  showDesk(true);
+  renderQueue(data);
+}
+
+async function openSlip(id) {
+  if (id !== selected) shown = "";
+  selected = id;
+  reply.hidden = false;
+  replyErr.textContent = "";
+  try {
+    renderThread(await api(`/api/admin/threads/${id}`));
+    await loadQueue();
+  } catch (err) {
+    replyErr.textContent = err.message;
+  }
+  if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
+  answer.focus();
+}
+
+function arm() {
+  clearTimeout(timer);
+  if (document.hidden || desk.hidden) return;
+  timer = setTimeout(() => {
+    void tick();
+  }, POLL_MS);
+}
+
+async function tick() {
+  try {
+    await loadQueue();
+    if (selected) renderThread(await api(`/api/admin/threads/${selected}`));
+  } catch (err) {
+    if (err instanceof ApiError && err.statusCode === 401) {
+      showDesk(false);
+      return;
+    }
+  }
+  arm();
+}
+
+$("#login").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginErr.textContent = "";
+  try {
+    await api("/api/admin/login", { method: "POST", body: { password: $("#password").value } });
+    $("#password").value = "";
+    await loadQueue();
+    arm();
+  } catch (err) {
+    loginErr.textContent = err.message;
+  }
+});
+
+$("#look").addEventListener("click", () => {
+  void tick();
+});
+
+lamp.addEventListener("click", async () => {
+  try {
+    const data = await api("/api/admin/status", { method: "POST", body: { awake: !awake } });
+    applyAwake(data.awake);
+  } catch (err) {
+    count.textContent = err.message;
+  }
+});
+
+answer.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+    event.preventDefault();
+    reply.requestSubmit();
+  }
+});
+
+reply.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selected) return;
+  replyErr.textContent = "";
+  try {
+    await api(`/api/admin/threads/${selected}`, { method: "POST", body: { body: answer.value } });
+    answer.value = "";
+    shown = "";
+    renderThread(await api(`/api/admin/threads/${selected}`));
+    await loadQueue();
+  } catch (err) {
+    replyErr.textContent = err.message;
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearTimeout(timer);
+  else if (!desk.hidden) void tick();
+});
+
+void tick();

@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<!-- 意图：克制。按标本做：chat.deepseek.com 的标志在上、问候在下，以及「已思考（用时…）」；claude.ai 的两层输入框；chatgpt.com 的居中输入框和思考微光。标志是红糖色的包子褶。人工只在小字、提示和模型卡里。 -->
+<!-- 改过一处：标志原来贴在问候左边，加上米色底和衬线，整页像 claude.ai 的空对话。挪到问候上方，底色调白。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包</title>
+  <style>
+    @font-face {
+      font-family: "TB Serif";
+      src: url("../assets/tb-serif.woff2") format("woff2");
+      font-weight: 600;
+      font-display: swap;
+    }
+    :root {
+      --bg: #fcfbf9;
+      --side: #f4f2ee;
+      --panel: #ffffff;
+      --ink: #1f1d1a;
+      --ink-2: #48443e;
+      --muted: #7a746b;
+      --faint: #aaa49a;
+      --line: #e9e5dd;
+      --line-2: #dcd6cb;
+      --hover: rgba(31, 29, 26, 0.055);
+      --bubble: #efebe4;
+      --accent: #a8622a;
+      --dot: #4b8a5f;
+      --col: 46rem;
+      --greet: 34px;
+      --fine: 12px;
+      --serif: "TB Serif", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.55 var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    body[data-presence="asleep"] { --dot: #b38b45; }
+    button, textarea, input, select { font: inherit; color: inherit; }
+    a { color: inherit; }
+    ::selection { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+    :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+    textarea:focus-visible { outline: none; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    svg.i {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    svg.mark { flex: none; color: var(--accent); }
+
+    [data-tip] { position: relative; }
+    [data-tip]:hover::after, [data-tip]:focus-visible::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      transform: translateX(-50%);
+      padding: 5px 8px;
+      border-radius: 7px;
+      background: var(--ink);
+      color: var(--bg);
+      font-size: 12px;
+      line-height: 1.3;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 30;
+    }
+
+    .app { display: grid; grid-template-columns: 264px minmax(0, 1fr); height: 100dvh; }
+
+    .side {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 10px 10px 12px;
+      background: var(--side);
+    }
+    .side-top { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 2px 0 8px; }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      text-decoration: none;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: 18px;
+      letter-spacing: 0.06em;
+    }
+    .brand svg.mark { width: 23px; height: 23px; }
+    .icon-btn {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .icon-btn:hover { background: var(--hover); color: var(--ink); }
+    .new {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      height: 40px;
+      margin-top: 10px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .new:hover { background: var(--hover); }
+    .new .plus {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--bg);
+    }
+    .new .plus svg.i { width: 14px; height: 14px; stroke-width: 2; }
+    .hist {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      margin: 12px -4px 0;
+      padding: 0 4px;
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
+    .hist:hover { scrollbar-color: #d6d0c5 transparent; }
+    .hist h3 { margin: 16px 10px 6px; font-size: 12px; font-weight: 500; color: var(--faint); }
+    .hist a {
+      display: block;
+      padding: 7px 10px;
+      border-radius: 9px;
+      font-size: 14px;
+      color: var(--ink-2);
+      text-decoration: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background-color 0.15s;
+    }
+    .hist a:hover { background: var(--hover); }
+    .hist a[aria-current="page"] { background: rgba(31, 29, 26, 0.075); color: var(--ink); }
+    .side-foot { padding-top: 10px; border-top: 1px solid var(--line); }
+    .side-foot a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      color: var(--ink-2);
+      text-decoration: none;
+      transition: background-color 0.15s;
+    }
+    .side-foot a:hover { background: var(--hover); }
+    .side-foot small { margin-left: auto; font-size: 11px; color: var(--faint); }
+
+    .main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100dvh; }
+    .top { flex: none; display: flex; align-items: center; gap: 6px; height: 56px; padding: 0 16px 0 22px; }
+    .title {
+      min-width: 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    body[data-state="empty"] .title { visibility: hidden; }
+    .status {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: 12.5px;
+      color: var(--ink-2);
+      white-space: nowrap;
+    }
+    .status i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--dot);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent);
+    }
+    .status em { font-style: normal; font-size: 11.5px; color: var(--faint); }
+
+    .stage { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; }
+    .hello { display: none; }
+    .log {
+      width: min(var(--col), calc(100% - 48px));
+      margin: 0 auto;
+      padding: 16px 0 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+    .u {
+      align-self: flex-end;
+      max-width: min(80%, 34rem);
+      margin: 0;
+      padding: 10px 16px;
+      border-radius: 20px;
+      background: var(--bubble);
+      font-size: 15.5px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .b, .pending { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 16px; }
+    svg.avatar { width: 26px; height: 26px; margin-top: 2px; color: var(--accent); }
+    .b-body { min-width: 0; }
+    .thought { margin: 0 0 10px; }
+    .thought summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px 4px 10px;
+      border-radius: 8px;
+      background: rgba(31, 29, 26, 0.045);
+      font-size: 13px;
+      color: var(--muted);
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .thought summary::-webkit-details-marker { display: none; }
+    .thought summary:hover { background: rgba(31, 29, 26, 0.07); color: var(--ink-2); }
+    .thought summary svg.i { width: 14px; height: 14px; transition: transform 0.2s; }
+    .thought[open] summary svg.i { transform: rotate(180deg); }
+    .thought p {
+      margin: 10px 0 2px;
+      padding: 1px 0 1px 12px;
+      border-left: 2px solid var(--line-2);
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+    .b-text { margin: 0; font-size: 15.5px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .acts { display: flex; align-items: center; gap: 2px; margin: 8px 0 0 -7px; }
+    .acts button {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--faint);
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .acts button:hover { background: var(--hover); color: var(--ink); }
+    .acts button[aria-disabled="true"] { cursor: help; }
+    .acts button[aria-disabled="true"]:hover { background: transparent; color: var(--faint); }
+    .acts svg.i { width: 16px; height: 16px; }
+    .acts time { margin-left: 6px; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .pending svg.avatar { animation: knead 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+    .pending b {
+      display: inline-block;
+      font-weight: 500;
+      font-size: 15px;
+      line-height: 30px;
+      background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 38%, var(--ink) 50%, var(--muted) 62%, var(--muted) 100%);
+      background-size: 260% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: shimmer 2.6s linear infinite;
+    }
+    .pending small { display: block; font-size: 12px; line-height: 1.5; color: var(--faint); }
+    @keyframes knead { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(40deg); } }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+    .dock { position: relative; flex: none; width: min(var(--col), calc(100% - 32px)); margin: 0 auto; }
+    .dock::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 100%;
+      height: 36px;
+      background: linear-gradient(color-mix(in srgb, var(--bg) 0%, transparent), var(--bg));
+      pointer-events: none;
+    }
+    .composer {
+      position: relative;
+      padding: 14px 12px 10px 18px;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: var(--panel);
+      box-shadow: 0 1px 2px rgba(31, 29, 26, 0.04), 0 14px 36px -18px rgba(31, 29, 26, 0.18);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .composer:focus-within {
+      border-color: var(--line-2);
+      box-shadow:
+        0 1px 2px rgba(31, 29, 26, 0.04),
+        0 14px 36px -18px rgba(31, 29, 26, 0.22),
+        0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
+    }
+    .composer textarea {
+      display: block;
+      width: 100%;
+      min-height: 28px;
+      max-height: 220px;
+      padding: 2px 0 0;
+      border: 0;
+      outline: none;
+      resize: none;
+      background: transparent;
+      font-size: 15.5px;
+      line-height: 1.65;
+    }
+    .composer textarea::placeholder { color: var(--faint); }
+    .bar { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+    .model {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      height: 32px;
+      margin-left: -8px;
+      padding: 0 7px 0 10px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .model:hover, .model[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+    .model svg.i { width: 14px; height: 14px; }
+    .send {
+      margin-left: auto;
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--bg);
+      cursor: pointer;
+      transition: background-color 0.15s, color 0.15s, transform 0.1s;
+    }
+    .send svg.i { width: 17px; height: 17px; stroke-width: 2; }
+    .send:disabled { background: #ebe7e0; color: #b4ada3; cursor: default; }
+    .send:not(:disabled):active { transform: scale(0.94); }
+    .card {
+      position: absolute;
+      left: 8px;
+      bottom: calc(100% + 10px);
+      z-index: 20;
+      width: 304px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 24px 60px -24px rgba(31, 29, 26, 0.28), 0 2px 8px rgba(31, 29, 26, 0.05);
+    }
+    .card[hidden] { display: none; }
+    .card header { display: flex; align-items: center; gap: 12px; }
+    .card header svg.mark { width: 34px; height: 34px; }
+    .card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    .card header p { margin: 1px 0 0; font-size: 12px; color: var(--faint); }
+    .card header svg.ok { margin-left: auto; color: var(--accent); }
+    .card dl {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 8px 16px;
+      margin: 14px 0 0;
+      padding: 14px 0 0;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+    .card dt { color: var(--muted); }
+    .card dd { margin: 0; text-align: right; }
+    .card footer { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 12px; color: var(--faint); }
+    .card footer a { color: var(--muted); text-decoration: none; }
+    .card footer a:hover { color: var(--ink); }
+    .chips { display: none; }
+    .fine {
+      flex: none;
+      margin: 10px auto 12px;
+      padding: 0 16px;
+      text-align: center;
+      font-size: var(--fine);
+      line-height: 1.55;
+      color: var(--faint);
+    }
+    .fine span { display: block; font-size: 0.92em; }
+
+    body[data-state="empty"] .stage { flex: 0 0 auto; margin-top: auto; overflow: visible; }
+    body[data-state="empty"] .hello { display: block; padding: 0 16px; text-align: center; }
+    body[data-state="empty"] .log { display: none; }
+    body[data-state="empty"] .dock { margin-bottom: auto; padding-bottom: 9vh; }
+    body[data-state="empty"] .dock::before { display: none; }
+    body[data-state="empty"] .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+    .hello svg.mark { display: block; width: 46px; height: 46px; margin: 0 auto 18px; }
+    .hello h1 {
+      margin: 0 0 30px;
+      font-family: var(--serif);
+      font-size: var(--greet);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      line-height: 1.2;
+    }
+    .chips button {
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      font-size: 13.5px;
+      color: var(--ink-2);
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .chips button:hover { border-color: var(--line-2); background: var(--panel); color: var(--ink); }
+
+    .scrim, .only-narrow { display: none; }
+
+    .pg {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 60;
+      display: grid;
+      gap: 8px;
+      width: 230px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 16px 40px -20px rgba(31, 29, 26, 0.3);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pg[hidden] { display: none; }
+    .pg strong { color: var(--ink); }
+    .pg label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .pg input[type="range"] { width: 112px; }
+
+    @media (max-width: 768px) {
+      .app { grid-template-columns: minmax(0, 1fr); }
+      .side {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 40;
+        width: min(300px, 84vw);
+        transform: translateX(-102%);
+        transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      body.drawer .side { transform: none; box-shadow: 30px 0 60px -30px rgba(31, 29, 26, 0.35); }
+      .scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        border: 0;
+        background: rgba(31, 29, 26, 0.28);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+      }
+      body.drawer .scrim { opacity: 1; pointer-events: auto; }
+      .only-narrow { display: inline-grid; }
+      .top { height: 52px; padding: 0 8px; }
+      .title { display: none; }
+      .status { margin-left: auto; }
+      .log { width: calc(100% - 32px); gap: 26px; }
+      .b, .pending { grid-template-columns: 24px minmax(0, 1fr); column-gap: 12px; }
+      svg.avatar { width: 22px; height: 22px; }
+      .u { max-width: 86%; }
+      .dock { width: calc(100% - 20px); }
+      .hello h1 { font-size: calc(var(--greet) * 0.82); }
+      body[data-state="empty"] .dock { padding-bottom: 4vh; }
+      .fine span { display: inline; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .pending svg.avatar, .pending b { animation: none; }
+      .pending b { background: none; color: var(--muted); }
+    }
+  </style>
+</head>
+<body data-state="empty" data-presence="awake">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
+    <symbol id="i-side" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="3"/><path d="M8 4.5v11"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"/></symbol>
+    <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="2.2"/><path d="M13 7V5.7A1.7 1.7 0 0 0 11.3 4H5.7A1.7 1.7 0 0 0 4 5.7v5.6A1.7 1.7 0 0 0 5.7 13H7"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 20 20"><path d="M15.6 7.6A6.2 6.2 0 1 0 16.2 12"/><path d="M16.2 4v3.8h-3.8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="m5 10.5 3.2 3.2L15 7"/></symbol>
+    <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9.3v4.4M10 6.6v.1"/></symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="side" id="side">
+      <div class="side-top">
+        <a class="brand" href="#"><svg class="mark"><use href="#pleat"/></svg>糖包</a>
+        <button class="icon-btn only-narrow" type="button" id="close-side" aria-label="收起侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+      </div>
+      <button class="new" type="button" id="new"><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span>新对话</button>
+      <nav class="hist" id="hist" aria-label="对话">
+        <h3>今天</h3>
+        <a href="#" aria-current="page">今晚要不要早一点睡</a>
+        <a href="#">怎样把拒绝说软一点</a>
+        <h3>前 7 天</h3>
+        <a href="#">一件事值不值得做，看什么</a>
+        <a href="#">我是不是想太多了</a>
+      </nav>
+      <div class="side-foot">
+        <a href="#"><svg class="i"><use href="#i-info"/></svg>关于模型<small>糖包 1</small></a>
+      </div>
+    </aside>
+    <button class="scrim" type="button" id="scrim" aria-label="关闭侧栏"></button>
+
+    <main class="main">
+      <header class="top">
+        <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+        <span class="title" id="title">今晚要不要早一点睡</span>
+        <span class="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></span>
+        <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>
+      </header>
+
+      <section class="stage" id="stage">
+        <div class="hello">
+          <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
+          <h1>需要我做什么？</h1>
+        </div>
+        <div class="log" id="log">
+          <p class="u">今晚要不要早一点睡</p>
+          <article class="b">
+            <svg class="avatar"><use href="#pleat"/></svg>
+            <div class="b-body">
+              <details class="thought">
+                <summary>已思考（用时 2 小时 13 分）<svg class="i"><use href="#i-chev"/></svg></summary>
+                <p>思考过程由一个人完成，没有留下草稿。</p>
+              </details>
+              <p class="b-text">要。你会问这句，说明心里已经有答案了。
+没做完的事，明天的你会比现在清醒。</p>
+              <div class="acts">
+                <button type="button" class="copy" data-tip="复制" aria-label="复制"><svg class="i"><use href="#i-copy"/></svg></button>
+                <button type="button" aria-disabled="true" data-tip="他只写一遍" aria-label="重新生成"><svg class="i"><use href="#i-redo"/></svg></button>
+                <time>23:41</time>
+              </div>
+            </div>
+          </article>
+          <p class="u">那明天早上的会怎么办</p>
+          <div class="pending" data-since="-720000">
+            <svg class="avatar"><use href="#pleat"/></svg>
+            <div><b>思考中</b><small></small></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="dock">
+        <form class="composer" id="composer">
+          <label class="sr" for="input">消息</label>
+          <textarea id="input" rows="1" placeholder="给糖包发消息"></textarea>
+          <div class="bar">
+            <button class="model" type="button" id="model" aria-expanded="false" aria-controls="card">糖包 1<svg class="i"><use href="#i-chev"/></svg></button>
+            <button class="send" type="submit" aria-label="发送" disabled><svg class="i"><use href="#i-up"/></svg></button>
+          </div>
+          <div class="card" id="card" hidden>
+            <header>
+              <svg class="mark"><use href="#pleat"/></svg>
+              <div><h2>糖包 1</h2><p>人工语言模型</p></div>
+              <svg class="i ok"><use href="#i-check"/></svg>
+            </header>
+            <dl>
+              <dt>参数量</dt><dd>1 个糖包</dd>
+              <dt>上下文</dt><dd>他今天还没忘掉的事</dd>
+              <dt>并发</dt><dd>1</dd>
+              <dt>温度</dt><dd>室温</dd>
+              <dt>训练截止</dt><dd>他上次睡觉</dd>
+            </dl>
+            <footer><span>目前只有这一个模型</span><a href="#">完整说明</a></footer>
+          </div>
+        </form>
+        <div class="chips" id="chips">
+          <button type="button">今晚要不要早一点睡</button>
+          <button type="button">怎样把拒绝说软一点</button>
+          <button type="button">一件事值不值得做，看什么</button>
+          <button type="button">我是不是想太多了</button>
+        </div>
+      </div>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是人工，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
+    </main>
+  </div>
+
+  <form class="pg" id="pg" hidden>
+    <strong>操场</strong>
+    <label>底色 <input type="color" value="#fcfbf9" data-var="--bg"></label>
+    <label>侧栏 <input type="color" value="#f4f2ee" data-var="--side"></label>
+    <label>红糖 <input type="color" value="#a8622a" data-var="--accent"></label>
+    <label>气泡 <input type="color" value="#efebe4" data-var="--bubble"></label>
+    <label>问候字号 <input type="range" min="26" max="46" value="34" data-var="--greet" data-unit="px"></label>
+    <label>栏宽 <input type="range" min="36" max="56" value="46" data-var="--col" data-unit="rem"></label>
+    <label>小字 <input type="range" min="10" max="14" value="12" data-var="--fine" data-unit="px"></label>
+    <label>页面 <select name="state"><option value="empty">空对话</option><option value="chat">对话中</option></select></label>
+    <label>糖包 <select name="presence"><option value="awake">醒着</option><option value="asleep">睡着</option></select></label>
+  </form>
+
+  <template id="pending-tpl">
+    <div class="pending">
+      <svg class="avatar"><use href="#pleat"/></svg>
+      <div><b>思考中</b><small></small></div>
+    </div>
+  </template>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const body = document.body;
+    body.dataset.state = params.get("state") || "empty";
+    body.dataset.presence = params.get("presence") || "awake";
+
+    const $ = (sel) => document.querySelector(sel);
+    const stage = $("#stage");
+    const log = $("#log");
+    const input = $("#input");
+    const send = $(".send");
+    const card = $("#card");
+    const modelBtn = $("#model");
+    const words = {
+      awake: { label: "可用", note: "他醒着", wait: "他在看这句，不是在生成。" },
+      asleep: { label: "繁忙", note: "他睡了", wait: "他睡了，这句会留到他起来。" },
+    };
+
+    function spent(ms) {
+      const m = Math.floor(ms / 60000);
+      if (m < 1) return "不到 1 分钟";
+      if (m < 60) return m + " 分钟";
+      const h = Math.floor(m / 60);
+      return h + " 小时" + (m % 60 ? " " + (m % 60) + " 分" : "");
+    }
+
+    function paint() {
+      const w = words[body.dataset.presence];
+      $("#status-label").textContent = w.label;
+      $("#status-note").textContent = w.note;
+      for (const row of document.querySelectorAll(".log .pending")) {
+        row.querySelector("small").textContent = "已用时 " + spent(Date.now() - Number(row.dataset.start)) + " · " + w.wait;
+      }
+    }
+
+    for (const row of document.querySelectorAll(".log .pending")) {
+      row.dataset.start = String(Date.now() + Number(row.dataset.since || 0));
+    }
+    paint();
+    setInterval(paint, 20000);
+    stage.scrollTop = stage.scrollHeight;
+
+    function grow() {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 220) + "px";
+      send.disabled = !input.value.trim();
+    }
+    input.addEventListener("input", grow);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        $("#composer").requestSubmit();
+      }
+    });
+
+    function ask(text) {
+      if (body.dataset.state === "empty") {
+        log.replaceChildren();
+        $("#title").textContent = text;
+      }
+      body.dataset.state = "chat";
+      log.querySelector(".pending")?.remove();
+      const bubble = document.createElement("p");
+      bubble.className = "u";
+      bubble.textContent = text;
+      const row = $("#pending-tpl").content.firstElementChild.cloneNode(true);
+      row.dataset.start = String(Date.now());
+      log.append(bubble, row);
+      paint();
+      stage.scrollTop = stage.scrollHeight;
+    }
+    $("#composer").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      grow();
+      ask(text);
+    });
+    $("#chips").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (button) ask(button.textContent);
+    });
+
+    const closeSide = () => body.classList.remove("drawer");
+    const fresh = () => {
+      body.dataset.state = "empty";
+      closeSide();
+      input.focus();
+    };
+    $("#new").addEventListener("click", fresh);
+    $("#new-top").addEventListener("click", fresh);
+    $("#open-side").addEventListener("click", () => body.classList.add("drawer"));
+    $("#close-side").addEventListener("click", closeSide);
+    $("#scrim").addEventListener("click", closeSide);
+    $("#hist").addEventListener("click", (event) => {
+      if (!event.target.closest("a")) return;
+      event.preventDefault();
+      body.dataset.state = "chat";
+      closeSide();
+    });
+
+    const closeCard = () => {
+      card.hidden = true;
+      modelBtn.setAttribute("aria-expanded", "false");
+    };
+    modelBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = card.hidden;
+      card.hidden = !open;
+      modelBtn.setAttribute("aria-expanded", String(open));
+    });
+    card.addEventListener("click", (event) => event.stopPropagation());
+    document.addEventListener("click", closeCard);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      closeCard();
+      closeSide();
+    });
+
+    log.addEventListener("click", async (event) => {
+      const button = event.target.closest(".copy");
+      if (!button) return;
+      const text = button.closest(".b-body").querySelector(".b-text").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {}
+      button.dataset.tip = "已复制";
+      button.querySelector("use").setAttribute("href", "#i-check");
+      setTimeout(() => {
+        button.dataset.tip = "复制";
+        button.querySelector("use").setAttribute("href", "#i-copy");
+      }, 1600);
+    });
+
+    const pg = $("#pg");
+    if (params.has("playground")) pg.hidden = false;
+    pg.elements.namedItem("state").value = body.dataset.state;
+    pg.elements.namedItem("presence").value = body.dataset.presence;
+    pg.addEventListener("input", (event) => {
+      const el = event.target;
+      if (el.dataset.var) document.documentElement.style.setProperty(el.dataset.var, el.value + (el.dataset.unit || ""));
+      if (el.name === "state") body.dataset.state = el.value;
+      if (el.name === "presence") {
+        body.dataset.presence = el.value;
+        paint();
+      }
+    });
+  </script>
+</body>
+</html>

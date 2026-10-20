@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>桌子背面 · 糖包</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/desk.css">
+</head>
+<body data-presence="awake">
+  <script>
+    try {
+      if (localStorage.getItem("tangbao.presence") === "asleep") document.body.dataset.presence = "asleep";
+    } catch {}
+  </script>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M15.6 7.6A6.2 6.2 0 1 0 16.2 12"/><path d="M16.2 4v3.8h-3.8"/></symbol>
+  </svg>
+
+  <main class="gate" id="gate">
+    <form class="gate-card" id="login">
+      <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
+      <h1>桌子背面</h1>
+      <p>前台穿着模型的衣服。这里是糖包坐的那一侧。</p>
+      <label class="field"><span>口令</span><input id="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">坐下</button>
+      <p class="err" id="login-err" role="alert"></p>
+    </form>
+  </main>
+
+  <div class="desk" id="desk" hidden>
+    <aside class="pile-col">
+      <header class="desk-top">
+        <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>桌子背面</a>
+        <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+      </header>
+      <button class="lamp" type="button" id="lamp" role="switch" aria-checked="true">
+        <span class="track" aria-hidden="true"></span>
+        <b>灯亮着</b>
+        <small>前台显示：可用 · 他醒着</small>
+      </button>
+      <p class="count" id="count"></p>
+      <nav class="pile" id="pile" aria-label="消息"></nav>
+    </aside>
+
+    <section class="reader" id="reader">
+      <header class="reader-top"><h2 id="slip-title">还没选消息</h2><small id="slip-meta"></small></header>
+      <div class="thread" id="thread">
+        <p class="quiet">左边是还没回的消息。选一条，在下面写回复。</p>
+      </div>
+      <form class="reply composer" id="reply" hidden>
+        <label class="sr" for="answer">回复</label>
+        <textarea id="answer" rows="3" placeholder="写一句可能没用的话"></textarea>
+        <div class="bar">
+          <small class="hint">Ctrl + Enter 写下</small>
+          <button class="send" type="submit" aria-label="写下"><svg class="i"><use href="#i-up"/></svg></button>
+        </div>
+        <p class="err" id="reply-err" role="alert"></p>
+      </form>
+    </section>
+  </div>
+  <script src="/assets/desk.js"></script>
+</body>
+</html>

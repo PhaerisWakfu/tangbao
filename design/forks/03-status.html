@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!-- 意图：有表现力。对话壳仍像模型。在线点做成监控指标，更小的注释随状态变，不另起一块背景。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包</title>
+  <style>
+    :root {
+      --bg: #f4f3ef;
+      --panel: #fffcf8;
+      --ink: #1b1a17;
+      --muted: #847e74;
+      --faint: #aea89e;
+      --line: #e3dfd6;
+      --dot: #3d7a56;
+      --col: 42rem;
+      --fine: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: -0.011em;
+    }
+    .app { min-height: 100%; display: flex; flex-direction: column; padding-bottom: 2.6rem; }
+    header.top {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem 0.4rem;
+      width: min(var(--col), calc(100% - 1.5rem));
+      margin: 0 auto;
+    }
+    .name { font-weight: 640; letter-spacing: -0.03em; }
+    .metric {
+      margin-left: auto;
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric b { font-weight: 560; font-size: 12px; color: var(--ink); }
+    .metric i {
+      width: 0.42rem;
+      height: 0.42rem;
+      border-radius: 50%;
+      background: var(--dot);
+      display: inline-block;
+      transform: translateY(-1px);
+    }
+    .metric .label { font-size: 12px; color: var(--muted); }
+    .metric .note { font-size: 11px; color: var(--faint); }
+    body[data-presence="asleep"] { --dot: #a6843c; }
+    .thread {
+      flex: 1;
+      width: min(var(--col), calc(100% - 2rem));
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .app.has-log .thread { justify-content: flex-start; padding-top: 1rem; }
+    .hello h1 {
+      margin: 0;
+      text-align: center;
+      font-size: clamp(1.8rem, 3vw, 2.1rem);
+      font-weight: 560;
+      letter-spacing: -0.035em;
+    }
+    .log { display: flex; flex-direction: column; gap: 1.3rem; }
+    .msg { display: grid; gap: 0.28rem; }
+    .msg b { font-size: 0.75rem; color: var(--muted); }
+    .msg p { margin: 0; line-height: 1.7; white-space: pre-wrap; }
+    .wait { margin: 0; color: var(--muted); font-size: 0.92rem; }
+    .wait span { display: block; margin-top: 0.15rem; color: var(--faint); font-size: 11px; }
+    .dock { width: min(var(--col), calc(100% - 2rem)); margin: 0 auto 0.9rem; }
+    form.composer {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-end;
+      padding: 0.55rem 0.55rem 0.55rem 0.95rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+    textarea {
+      flex: 1; border: 0; outline: 0; resize: none; background: transparent;
+      color: inherit; font: inherit; line-height: 1.5; max-height: 8rem; padding: 0.45rem 0;
+    }
+    button.send {
+      border: 0; width: 2rem; height: 2rem; border-radius: 10px;
+      background: var(--ink); color: #fff; cursor: pointer;
+    }
+    button.send:disabled { opacity: 0.3; cursor: default; }
+    .fine { margin: 0.55rem 0 0; text-align: center; color: var(--faint); font-size: var(--fine); line-height: 1.5; }
+    .fine em { font-style: normal; font-size: 0.92em; }
+    .playground {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      display: flex; flex-wrap: wrap; gap: 0.7rem 1rem; align-items: center;
+      padding: 0.4rem 0.85rem; background: #fff; border-top: 1px solid var(--line);
+      font-size: 12px; color: var(--muted); z-index: 5;
+    }
+    .playground label { display: flex; gap: 0.35rem; align-items: center; }
+  </style>
+</head>
+<body data-presence="awake">
+  <div class="app" id="app">
+    <header class="top">
+      <span class="name">糖包</span>
+      <span class="metric">
+        <i></i>
+        <b>并发 1</b>
+        <span class="label" id="label">可用</span>
+        <span class="note" id="note">他醒着</span>
+      </span>
+    </header>
+    <main class="thread">
+      <div class="hello" id="hello"><h1>需要我做什么？</h1></div>
+      <div class="log" id="log" hidden></div>
+    </main>
+    <div class="dock">
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="给糖包发消息"></textarea>
+        <button class="send" type="submit" aria-label="发送" disabled>↑</button>
+      </form>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<br><em>这里的 AI 是人工，回复的是一个叫糖包的人。</em></p>
+    </div>
+  </div>
+  <form class="playground" id="playground">
+    <span>稿面</span>
+    <label>背景 <input type="color" value="#f4f3ef" data-var="--bg"></label>
+    <label>状态点 <input type="color" value="#3d7a56" data-var="--dot"></label>
+    <label>栏宽 <input type="range" min="32" max="56" value="42" data-var="--col" data-unit="rem"></label>
+    <label>小字 <input type="range" min="10" max="15" value="12" data-var="--fine" data-unit="px"></label>
+    <label>状态
+      <select id="presence">
+        <option value="awake">醒着</option>
+        <option value="water">倒水</option>
+        <option value="asleep">睡着</option>
+      </select>
+    </label>
+  </form>
+  <script>
+    const root = document.documentElement;
+    const copy = {
+      awake: ["可用", "他醒着", "他在看这句，不是在生成。"],
+      water: ["可用", "他去倒水了", "座位还在，手暂时不在。"],
+      asleep: ["繁忙", "他睡了", "这句话会留着，等他起来再看。"]
+    };
+    const label = document.getElementById("label");
+    const note = document.getElementById("note");
+    const app = document.getElementById("app");
+    const hello = document.getElementById("hello");
+    const log = document.getElementById("log");
+    const input = document.getElementById("input");
+    const send = document.querySelector(".send");
+    let presence = "awake";
+
+    document.getElementById("playground").oninput = (e) => {
+      const el = e.target;
+      if (el.dataset.var) root.style.setProperty(el.dataset.var, el.value + (el.dataset.unit || ""));
+    };
+    document.getElementById("presence").onchange = (e) => {
+      presence = e.target.value;
+      document.body.dataset.presence = presence;
+      label.textContent = copy[presence][0];
+      note.textContent = copy[presence][1];
+    };
+
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 128) + "px";
+      send.disabled = !input.value.trim();
+    };
+    input.addEventListener("input", grow);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById("composer").requestSubmit();
+      }
+    });
+
+    document.getElementById("composer").onsubmit = (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      hello.hidden = true;
+      log.hidden = false;
+      app.classList.add("has-log");
+      const item = document.createElement("article");
+      item.className = "msg";
+      const who = document.createElement("b");
+      who.textContent = "你";
+      const body = document.createElement("p");
+      body.textContent = text;
+      item.append(who, body);
+      const wait = document.createElement("p");
+      wait.className = "wait";
+      wait.append(document.createTextNode("思考中"));
+      const caption = document.createElement("span");
+      caption.textContent = copy[presence][2];
+      wait.append(caption);
+      log.append(item, wait);
+      input.value = "";
+      grow();
+    };
+  </script>
+</body>
+</html>

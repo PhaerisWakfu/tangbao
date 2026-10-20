@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<!-- 意图：克制。按标本做成完整产品壳。人工放在免责小字、模型卡和关于页，不放进主标题。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包</title>
+  <style>
+    :root {
+      --bg: #f4f3ef;
+      --sidebar: #ebe9e3;
+      --panel: #fffcf8;
+      --ink: #1b1a17;
+      --muted: #847e74;
+      --faint: #aea89e;
+      --line: #e3dfd6;
+      --dot: #3d7a56;
+      --col: 42rem;
+      --fine: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      letter-spacing: -0.011em;
+    }
+    .shell {
+      min-height: 100%;
+      display: grid;
+      grid-template-columns: 16.5rem 1fr;
+      padding-bottom: 2.5rem;
+    }
+    .sidebar {
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      padding: 0.9rem 0.7rem 0.8rem;
+      min-height: 100%;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.2rem 0.45rem 0.8rem;
+      font-weight: 640;
+      letter-spacing: -0.03em;
+    }
+    .brand small { font-weight: 500; color: var(--faint); font-size: 11px; }
+    .new {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: inherit;
+      border-radius: 10px;
+      padding: 0.55rem 0.7rem;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+    .new:hover { border-color: #cfc9be; }
+    .history { flex: 1; margin-top: 1rem; padding: 0 0.35rem; }
+    .history p { margin: 0 0 0.4rem; font-size: 11px; color: var(--faint); letter-spacing: 0.04em; }
+    .history button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.4rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .history button:hover, .history button[aria-current="true"] { background: rgba(255,255,255,0.55); }
+    .side-foot { display: flex; flex-direction: column; gap: 0.15rem; }
+    .side-foot button, .menu-btn {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.86rem;
+      text-align: left;
+      padding: 0.4rem 0.45rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .side-foot button:hover { background: rgba(255,255,255,0.45); color: var(--ink); }
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 100%; }
+    header.top {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.7rem 0.9rem;
+    }
+    .menu-btn { display: none; padding: 0.35rem 0.5rem; }
+    .model {
+      position: relative;
+    }
+    .model > button {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      padding: 0.35rem 0.45rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .model > button:hover { background: rgba(0,0,0,0.04); }
+    .card, .pro-panel {
+      position: absolute;
+      top: calc(100% + 0.35rem);
+      z-index: 4;
+      width: 18rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 12px 40px rgba(28, 27, 25, 0.08);
+      padding: 0.85rem 0.9rem 0.75rem;
+    }
+    .card[hidden], .pro-panel[hidden] { display: none; }
+    .card h2 { margin: 0; font-size: 0.95rem; }
+    .card .kind { margin: 0.15rem 0 0.7rem; color: var(--faint); font-size: 11px; }
+    .card dl { margin: 0; display: grid; gap: 0.35rem; }
+    .card div { display: grid; grid-template-columns: 5.2rem 1fr; gap: 0.4rem; font-size: 12.5px; }
+    .card dt { color: var(--muted); }
+    .card dd { margin: 0; }
+    .card footer { margin-top: 0.7rem; color: var(--faint); font-size: 11px; }
+    .spacer { flex: 1; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .status i {
+      width: 0.45rem;
+      height: 0.45rem;
+      border-radius: 50%;
+      background: var(--dot);
+      display: block;
+    }
+    .pro { position: relative; }
+    .pro > button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12px;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .pro-panel { right: 0; width: 16rem; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+    .stage { flex: 1; display: flex; flex-direction: column; }
+    .thread {
+      flex: 1;
+      width: min(var(--col), calc(100% - 2rem));
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .stage.has-log .thread { justify-content: flex-start; padding-top: 1.2rem; }
+    .hello { text-align: center; }
+    .hello h1 {
+      margin: 0 0 1.1rem;
+      font-size: clamp(1.8rem, 3vw, 2.15rem);
+      font-weight: 560;
+      letter-spacing: -0.035em;
+    }
+    .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; }
+    .chips button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      font: inherit;
+      font-size: 0.88rem;
+      padding: 0.45rem 0.7rem;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .chips button:hover { border-color: #c9c3b6; }
+    .log { display: flex; flex-direction: column; gap: 1.4rem; padding-bottom: 1rem; }
+    .msg { display: grid; gap: 0.28rem; max-width: 40rem; }
+    .msg b { font-size: 0.75rem; font-weight: 620; color: var(--muted); }
+    .msg p { margin: 0; line-height: 1.7; white-space: pre-wrap; }
+    .wait { margin: 0; color: var(--muted); font-size: 0.92rem; }
+    .dock {
+      width: min(var(--col), calc(100% - 2rem));
+      margin: 0 auto 0.8rem;
+    }
+    form.composer {
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-end;
+      padding: 0.55rem 0.55rem 0.55rem 0.95rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }
+    textarea {
+      flex: 1;
+      border: 0;
+      outline: 0;
+      resize: none;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      line-height: 1.5;
+      max-height: 9rem;
+      padding: 0.45rem 0;
+    }
+    button.send {
+      border: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 10px;
+      background: var(--ink);
+      color: white;
+      cursor: pointer;
+    }
+    button.send:disabled { opacity: 0.3; cursor: default; }
+    .fine {
+      margin: 0.55rem 0 0;
+      text-align: center;
+      color: var(--faint);
+      font-size: var(--fine);
+      line-height: 1.5;
+    }
+    .fine em { font-style: normal; font-size: 0.92em; }
+    .about {
+      width: min(40rem, calc(100% - 2.4rem));
+      margin: 1.5rem auto 2rem;
+    }
+    .about h1 { font-size: 1.7rem; letter-spacing: -0.03em; font-weight: 580; margin-bottom: 0.3rem; }
+    .about .lede { color: var(--muted); margin-top: 0; }
+    .about section { padding: 1rem 0; border-top: 1px solid var(--line); }
+    .about h2 { font-size: 1rem; margin: 0 0 0.35rem; }
+    .about p { margin: 0; line-height: 1.65; }
+    .about small { display: block; margin-top: 0.35rem; color: var(--faint); font-size: var(--fine); line-height: 1.5; }
+    .playground {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem 1rem;
+      align-items: center;
+      padding: 0.35rem 0.8rem;
+      background: #fff;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--muted);
+      z-index: 6;
+    }
+    .playground label { display: flex; gap: 0.35rem; align-items: center; }
+    @media (max-width: 800px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar {
+        display: none;
+        position: fixed;
+        z-index: 5;
+        inset: 0 auto 0 0;
+        width: min(18rem, 88vw);
+        box-shadow: 12px 0 40px rgba(0,0,0,0.08);
+      }
+      .sidebar.open { display: flex; }
+      .menu-btn { display: inline-block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">糖包 <small>1</small></div>
+      <button class="new" type="button" id="new">新对话</button>
+      <div class="history">
+        <p>今天</p>
+        <button type="button" id="sample">把一封信改短</button>
+      </div>
+      <div class="side-foot">
+        <button type="button" id="open-about">关于模型</button>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="top">
+        <button class="menu-btn" type="button" id="menu" aria-label="打开侧栏">目录</button>
+        <div class="model">
+          <button type="button" id="model-btn" aria-expanded="false">糖包 ▾</button>
+          <div class="card" id="card" hidden>
+            <h2>糖包</h2>
+            <p class="kind">人工语言模型</p>
+            <dl>
+              <div><dt>参数量</dt><dd>1 个糖包</dd></div>
+              <div><dt>上下文</dt><dd>他今天还没忘掉的事</dd></div>
+              <div><dt>并发</dt><dd>1</dd></div>
+              <div><dt>温度</dt><dd>室温</dd></div>
+              <div><dt>训练截止</dt><dd>他上次睡觉</dd></div>
+            </dl>
+            <footer>完整说明在关于模型。</footer>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <span class="status"><i></i>可用</span>
+        <div class="pro">
+          <button type="button" id="pro-btn" aria-expanded="false">专业版</button>
+          <div class="pro-panel" id="pro" hidden>专业版不改变顺序，也不缩短等待。这里不收钱。给了钱，糖包也不会打得更快。</div>
+        </div>
+      </header>
+      <div class="stage" id="chat">
+        <div class="thread" id="thread">
+          <div class="hello" id="hello">
+            <h1>需要我做什么？</h1>
+            <div class="chips">
+              <button type="button">把这段话改得更短</button>
+              <button type="button">这个决定只给一个理由</button>
+              <button type="button">帮我想一句回复</button>
+              <button type="button">我是不是想太多了</button>
+            </div>
+          </div>
+          <div class="log" id="log" hidden></div>
+        </div>
+        <div class="dock">
+          <form class="composer" id="composer">
+            <textarea id="input" rows="1" placeholder="给糖包发消息"></textarea>
+            <button class="send" type="submit" aria-label="发送" disabled>↑</button>
+          </form>
+          <p class="fine">糖包也会犯错。重要的事请自己判断。<br><em>这里的 AI 是人工，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</em></p>
+        </div>
+      </div>
+      <article class="about" id="about" hidden>
+        <h1>糖包</h1>
+        <p class="lede">模型说明</p>
+        <section>
+          <h2>推理</h2>
+          <p>每次输出都经过单一操作员。没有混合专家，只有他当天的状态。</p>
+          <small>操作员是糖包本人。他读完，想一想，再打字。</small>
+        </section>
+        <section>
+          <h2>延迟</h2>
+          <p>响应时间反映的是认真程度，不是队列里的算力。</p>
+          <small>他可能在睡觉。不在座位上的时候，延迟会变得很诚实。</small>
+        </section>
+        <section>
+          <h2>准确度</h2>
+          <p>这个模型不优化「看起来对」。答错的时候，错也有出处。</p>
+          <small>出处就是糖包。请自己决定信不信。</small>
+        </section>
+        <section>
+          <h2>并发</h2>
+          <p>为了不把回答做糊，并发被限制为 1。</p>
+          <small>一个人，两只手。这是上限，也是设计。</small>
+        </section>
+      </article>
+    </div>
+  </div>
+  <form class="playground" id="playground">
+    <span>稿面</span>
+    <label>背景 <input type="color" value="#f4f3ef" data-var="--bg"></label>
+    <label>侧栏 <input type="color" value="#ebe9e3" data-var="--sidebar"></label>
+    <label>字色 <input type="color" value="#1b1a17" data-var="--ink"></label>
+    <label>状态点 <input type="color" value="#3d7a56" data-var="--dot"></label>
+    <label>栏宽 <input type="range" min="32" max="56" value="42" data-var="--col" data-unit="rem"></label>
+    <label>小字 <input type="range" min="10" max="15" value="12" data-var="--fine" data-unit="px"></label>
+  </form>
+  <script>
+    const root = document.documentElement;
+    const chat = document.getElementById("chat");
+    const about = document.getElementById("about");
+    const hello = document.getElementById("hello");
+    const log = document.getElementById("log");
+    const input = document.getElementById("input");
+    const send = document.querySelector(".send");
+    const composer = document.getElementById("composer");
+    const card = document.getElementById("card");
+    const pro = document.getElementById("pro");
+    const sidebar = document.getElementById("sidebar");
+
+    document.getElementById("playground").oninput = (e) => {
+      const el = e.target;
+      if (!el.dataset.var) return;
+      root.style.setProperty(el.dataset.var, el.value + (el.dataset.unit || ""));
+    };
+
+    const showChat = () => { chat.hidden = false; about.hidden = true; };
+    document.getElementById("open-about").onclick = () => {
+      chat.hidden = true;
+      about.hidden = false;
+      sidebar.classList.remove("open");
+    };
+    document.getElementById("new").onclick = () => {
+      showChat();
+      hello.hidden = false;
+      log.hidden = true;
+      log.replaceChildren();
+      chat.classList.remove("has-log");
+      sidebar.classList.remove("open");
+    };
+    document.getElementById("menu").onclick = () => sidebar.classList.toggle("open");
+    document.getElementById("sample").onclick = () => {
+      showChat();
+      hello.hidden = true;
+      log.hidden = false;
+      chat.classList.add("has-log");
+      log.replaceChildren();
+      add("你", "这封信太长了，帮我留住意思，去掉客气。");
+      add("糖包", "留下你真正要的那句，其余的谢谢都可以先拿掉。");
+      sidebar.classList.remove("open");
+    };
+
+    function toggle(btn, panel) {
+      const open = panel.hidden;
+      card.hidden = true;
+      pro.hidden = true;
+      document.getElementById("model-btn").setAttribute("aria-expanded", "false");
+      document.getElementById("pro-btn").setAttribute("aria-expanded", "false");
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", String(open));
+    }
+    document.getElementById("model-btn").onclick = (e) => { e.stopPropagation(); toggle(e.currentTarget, card); };
+    document.getElementById("pro-btn").onclick = (e) => { e.stopPropagation(); toggle(e.currentTarget, pro); };
+    document.addEventListener("click", () => {
+      card.hidden = true;
+      pro.hidden = true;
+    });
+    card.onclick = (e) => e.stopPropagation();
+    pro.onclick = (e) => e.stopPropagation();
+
+    const grow = () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 140) + "px";
+      send.disabled = !input.value.trim();
+    };
+    input.addEventListener("input", grow);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+
+    function add(role, text) {
+      const item = document.createElement("article");
+      item.className = "msg";
+      const who = document.createElement("b");
+      who.textContent = role;
+      const body = document.createElement("p");
+      body.textContent = text;
+      item.append(who, body);
+      log.append(item);
+    }
+
+    function ask(text) {
+      showChat();
+      hello.hidden = true;
+      log.hidden = false;
+      chat.classList.add("has-log");
+      add("你", text);
+      const wait = document.createElement("p");
+      wait.className = "wait";
+      wait.textContent = "思考中";
+      log.append(wait);
+    }
+
+    document.querySelectorAll(".chips button").forEach((btn) => {
+      btn.onclick = () => ask(btn.textContent);
+    });
+    composer.onsubmit = (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      grow();
+      ask(text);
+    };
+  </script>
+</body>
+</html>
