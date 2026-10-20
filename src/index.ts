@@ -16,6 +16,7 @@ class HttpError extends Error {
 type AppEnv = Env & {
   ADMIN_PASSWORD?: string;
   ADMIN_SECRET?: string;
+  IMAGES: R2Bucket;
 };
 
 type StatusPayload = {
@@ -30,6 +31,9 @@ const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const QUEUE_CAP = 400;
 const BODY_LIMIT = 2000;
 const REQUEST_LIMIT = 20_000;
+const IMAGE_LIMIT = 2_000_000;
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_IMAGES = 6;
 
 const encoder = new TextEncoder();
 
@@ -62,6 +66,9 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   if (path === "/api/admin/logout" && method === "POST") return logout(request);
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
   if (path === "/api/admin/status" && method === "POST") return setStatus(request, env);
+
+  const image = path.match(/^\/api\/images\/([A-Za-z0-9_-]{16,80})$/);
+  if (image && method === "GET") return serveImage(env, image[1]);
 
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
@@ -108,43 +115,48 @@ async function createThread(request: Request, env: AppEnv): Promise<Response> {
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) {
     throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   }
-  const payload = await readJson(request);
-  const body = cleanBody(payload.body);
+  const incoming = await readIncoming(request, "先写一句，或放一张图。");
   await assertQueue(env, false);
 
   const id = randomId(16);
   const token = randomId(32);
   const now = Date.now();
-  const title = titleFrom(body);
-  const preview = previewFrom(body);
+  const shown = caption(incoming.body, incoming.images.length);
+  const title = titleFrom(shown);
+  const preview = previewFrom(shown);
+  const messageId = randomId(16);
+  const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting) VALUES (?, ?, ?, ?, ?, ?, 1)",
     ).bind(id, await sha256(token), title, preview, now, now),
     env.DB.prepare(
       "INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, 'visitor', ?, ?)",
-    ).bind(randomId(16), id, body, now),
+    ).bind(messageId, id, incoming.body, now),
+    ...imageInserts(env, messageId, stored),
   ]);
   return json({ id, token, title });
 }
 
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request));
-  const messages = await env.DB.prepare(
-    "SELECT id, role, body, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
-  )
-    .bind(id)
-    .all<{ id: string; role: string; body: string; createdAt: number }>();
+  const messages = await listMessages(env, id);
   const status = await publicStatus(env);
-  return json({ title: thread.title, messages: messages.results, status });
+  return json({ title: thread.title, messages, status });
 }
 
 async function deleteThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   await loadOwned(env, id, bearer(request));
+  const images = await env.DB.prepare(
+    "SELECT image_key FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
+  )
+    .bind(id)
+    .all<{ image_key: string }>();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM messages WHERE thread_id = ?").bind(id),
     env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(id),
   ]);
+  await Promise.all(images.results.map((row) => env.IMAGES.delete(row.image_key)));
   return json({ ok: true });
 }
 
@@ -154,20 +166,9 @@ async function visitorMessage(request: Request, env: AppEnv, id: string): Promis
   if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
     throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
   }
-  const payload = await readJson(request);
-  const body = cleanBody(payload.body);
+  const incoming = await readIncoming(request, "先写一句，或放一张图。");
   await assertQueue(env, thread.awaiting === 1);
-  const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, 'visitor', ?, ?)",
-    ).bind(randomId(16), id, body, now),
-    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = 1 WHERE id = ?").bind(
-      previewFrom(body),
-      now,
-      id,
-    ),
-  ]);
+  await writeMessage(env, id, "visitor", incoming, 1);
   return json({ ok: true, status: await publicStatus(env) });
 }
 
@@ -224,32 +225,109 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
     .bind(id)
     .first<{ id: string; title: string; awaiting: number; updatedAt: number }>();
   if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
-  const messages = await env.DB.prepare(
-    "SELECT id, role, body, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
-  )
-    .bind(id)
-    .all<{ id: string; role: string; body: string; createdAt: number }>();
-  return json({ thread, messages: messages.results });
+  const messages = await listMessages(env, id);
+  return json({ thread, messages });
 }
 
 async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireAdmin(request, env);
   const exists = await env.DB.prepare("SELECT id FROM threads WHERE id = ?").bind(id).first();
   if (!exists) throw new HttpError(404, "这张纸条不在桌上。");
-  const payload = await readJson(request);
-  const body = cleanBody(payload.body, "写一句可能没用的话，但得有字。");
+  const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
+  await writeMessage(env, id, "tangbao", incoming, 0);
+  return json({ ok: true });
+}
+
+async function serveImage(env: AppEnv, id: string): Promise<Response> {
+  const row = await env.DB.prepare("SELECT image_key, image_type FROM message_images WHERE id = ?")
+    .bind(id)
+    .first<{ image_key: string; image_type: string }>();
+  if (!row) throw new HttpError(404, "这张图不在桌上。");
+  const object = await env.IMAGES.get(row.image_key);
+  if (!object) throw new HttpError(404, "这张图不在桌上。");
+  return new Response(object.body, {
+    headers: {
+      "content-type": row.image_type || "application/octet-stream",
+      "cache-control": "private, max-age=86400",
+    },
+  });
+}
+
+async function listMessages(env: AppEnv, threadId: string) {
+  const messages = await env.DB.prepare(
+    "SELECT id, role, body, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
+  )
+    .bind(threadId)
+    .all<{ id: string; role: string; body: string; createdAt: number }>();
+  const ids = messages.results.map((message) => message.id);
+  const grouped = new Map<string, { id: string; type: string }[]>();
+  if (ids.length) {
+    const marks = ids.map(() => "?").join(", ");
+    const images = await env.DB.prepare(
+      `SELECT id, message_id AS messageId, image_type AS imageType FROM message_images WHERE message_id IN (${marks}) ORDER BY position ASC`,
+    )
+      .bind(...ids)
+      .all<{ id: string; messageId: string; imageType: string }>();
+    for (const image of images.results) {
+      const list = grouped.get(image.messageId) ?? [];
+      list.push({ id: image.id, type: image.imageType });
+      grouped.set(image.messageId, list);
+    }
+  }
+  return messages.results.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] }));
+}
+
+async function writeMessage(
+  env: AppEnv,
+  threadId: string,
+  role: "visitor" | "tangbao",
+  incoming: Incoming,
+  awaiting: number,
+): Promise<void> {
+  const messageId = randomId(16);
   const now = Date.now();
+  const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, 'tangbao', ?, ?)",
-    ).bind(randomId(16), id, body, now),
-    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = 0 WHERE id = ?").bind(
-      previewFrom(body),
+    env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+      messageId,
+      threadId,
+      role,
+      incoming.body,
       now,
-      id,
+    ),
+    ...imageInserts(env, messageId, stored),
+    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ? WHERE id = ?").bind(
+      previewFrom(caption(incoming.body, stored.length)),
+      now,
+      awaiting,
+      threadId,
     ),
   ]);
-  return json({ ok: true });
+}
+
+async function storeImages(env: AppEnv, images: Incoming["images"]) {
+  const stored: { id: string; key: string; type: string }[] = [];
+  for (const image of images) {
+    const id = randomId(16);
+    const key = `img/${id}`;
+    await env.IMAGES.put(key, image.bytes, { httpMetadata: { contentType: image.type } });
+    stored.push({ id, key, type: image.type });
+  }
+  return stored;
+}
+
+function imageInserts(env: AppEnv, messageId: string, stored: { id: string; key: string; type: string }[]) {
+  return stored.map((image, position) =>
+    env.DB.prepare(
+      "INSERT INTO message_images (id, message_id, image_key, image_type, position) VALUES (?, ?, ?, ?, ?)",
+    ).bind(image.id, messageId, image.key, image.type, position),
+  );
+}
+
+function caption(body: string, count: number): string {
+  if (body) return body;
+  if (count <= 1) return "一张图片";
+  return `${count} 张图片`;
 }
 
 async function publicStatus(env: AppEnv): Promise<StatusPayload> {
@@ -388,12 +466,47 @@ async function readJson(request: Request): Promise<{ body?: unknown; password?: 
   }
 }
 
+type Incoming = {
+  body: string;
+  images: { bytes: ArrayBuffer; type: string }[];
+};
+
+async function readIncoming(request: Request, empty: string): Promise<Incoming> {
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const declared = Number(request.headers.get("content-length") || "0");
+    if (declared > MAX_IMAGES * IMAGE_LIMIT + 100_000) throw new HttpError(413, "这些图太大了。先收一收再发。");
+    const form = await request.formData();
+    const raw = form.get("body");
+    const text = typeof raw === "string" ? sanitize(raw) : "";
+    if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");
+    const files = [...form.getAll("images"), ...form.getAll("image")].filter(
+      (file): file is File => file instanceof File && file.size > 0,
+    );
+    if (files.length > MAX_IMAGES) throw new HttpError(400, `一次最多 ${MAX_IMAGES} 张。`);
+    const images: Incoming["images"] = [];
+    for (const file of files) {
+      if (file.size > IMAGE_LIMIT) throw new HttpError(413, "有一张图太大了。先收一收再发。");
+      if (!IMAGE_TYPES.has(file.type)) throw new HttpError(400, "有一张图糖包打不开。换 jpg、png、webp 或 gif。");
+      images.push({ bytes: await file.arrayBuffer(), type: file.type });
+    }
+    if (!text && !images.length) throw new HttpError(400, empty);
+    return { body: text, images };
+  }
+  const payload = await readJson(request);
+  return { body: cleanBody(payload.body, empty), images: [] };
+}
+
 function cleanBody(input: unknown, empty = "先写一句再发送。"): string {
   if (typeof input !== "string") throw new HttpError(400, empty);
-  const text = input.replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
+  const text = sanitize(input);
   if (!text) throw new HttpError(400, empty);
   if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");
   return text;
+}
+
+function sanitize(input: string): string {
+  return input.replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
 }
 
 function titleFrom(text: string): string {

@@ -4,6 +4,24 @@
 
 访客写下问题，糖包在后台亲手打字回复。他醒着的时候页面是白天，关灯之后整页转成夜色。人工身份写在小字、模型卡和关于页里。
 
+## 目录
+
+```text
+src/                  站点逻辑和页面
+  index.ts            Worker：接口、登录、开关灯记录
+  pages/              对话页、关于页、后台页
+  client/             这两个页面用的脚本
+public/               样式、字体、图标
+migrations/           数据库表结构
+design/               做正式页之前的设计稿，不参与运行
+  forks/              第一轮 01–04，第二轮 05–08
+  shots/              各稿的截图
+  index.html          稿子索引
+scripts/              本地预览设计稿、跑测试、截图
+wrangler.jsonc        Cloudflare 配置
+.dev.vars.example     口令模板。真正的 .dev.vars 不进仓库
+```
+
 ## 本地运行
 
 需要 Node.js 22 以上。
@@ -42,6 +60,7 @@ npm run design
 ```bash
 npx wrangler login
 npx wrangler d1 create tangbao
+npx wrangler r2 bucket create tangbao-images
 ```
 
 把命令输出的 `database_id` 写进 `wrangler.jsonc`，然后：

@@ -16,6 +16,8 @@ let awake = true;
 let selected = null;
 let shown = "";
 let timer = 0;
+let pendingImages = [];
+const MAX_IMAGES = 6;
 
 class ApiError extends Error {
   constructor(message, statusCode) {
@@ -25,12 +27,13 @@ class ApiError extends Error {
 }
 
 async function api(path, options = {}) {
+  const form = options.body instanceof FormData;
   let response;
   try {
     response = await fetch(path, {
       method: options.method || "GET",
-      headers: options.body ? { "content-type": "application/json" } : undefined,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      headers: options.body && !form ? { "content-type": "application/json" } : undefined,
+      body: form ? options.body : options.body ? JSON.stringify(options.body) : undefined,
       credentials: "same-origin",
     });
   } catch {
@@ -133,11 +136,27 @@ function renderThread(data) {
   for (const message of data.messages) {
     const wrap = document.createElement("div");
     wrap.className = message.role === "tangbao" ? "me" : "them";
-    const text = document.createElement("p");
-    text.textContent = message.body;
+    if (message.body) {
+      const text = document.createElement("p");
+      text.textContent = message.body;
+      wrap.append(text);
+    }
+    const sources = (message.images || []).map((image) => `/api/images/${image.id}`);
+    if (sources.length) {
+      const shots = document.createElement("div");
+      shots.className = "shots";
+      for (const src of sources) {
+        const img = document.createElement("img");
+        img.className = "shot";
+        img.alt = "图片";
+        img.src = src;
+        shots.append(img);
+      }
+      wrap.append(shots);
+    }
     const meta = document.createElement("small");
     meta.textContent = `${message.role === "tangbao" ? "你" : "对方"} · ${clock(message.createdAt)}`;
-    wrap.append(text, meta);
+    wrap.append(meta);
     thread.append(wrap);
   }
   thread.scrollTop = thread.scrollHeight;
@@ -221,15 +240,136 @@ answer.addEventListener("keydown", (event) => {
 reply.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selected) return;
+  const text = answer.value.trim();
+  const images = pendingImages.slice();
+  if (!text && !images.length) {
+    replyErr.textContent = "写一句可能没用的话，或放图片。";
+    return;
+  }
   replyErr.textContent = "";
+  const payload = images.length ? new FormData() : { body: text };
+  if (images.length) {
+    payload.set("body", text);
+    for (const item of images) payload.append("images", item.file, item.file.name);
+  }
   try {
-    await api(`/api/admin/threads/${selected}`, { method: "POST", body: { body: answer.value } });
+    await api(`/api/admin/threads/${selected}`, { method: "POST", body: payload });
     answer.value = "";
+    clearAttach();
     shown = "";
     renderThread(await api(`/api/admin/threads/${selected}`));
     await loadQueue();
   } catch (err) {
     replyErr.textContent = err.message;
+  }
+});
+
+async function shrinkImage(file) {
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+    throw new Error("这张图打不开。换 jpg、png、webp 或 gif。");
+  }
+  if (file.type === "image/gif") {
+    if (file.size > 2_000_000) throw new Error("这张图太大了。先收一收再发。");
+    return file;
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (!blob || blob.size > 2_000_000) throw new Error("这张图太大了。先收一收再发。");
+  return new File([blob], "image.jpg", { type: "image/jpeg" });
+}
+
+function showAttach() {
+  const box = $("#attach");
+  box.replaceChildren();
+  if (!pendingImages.length) {
+    box.hidden = true;
+    return;
+  }
+  pendingImages.forEach((item, index) => {
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.alt = "";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", "拿掉这张图");
+    remove.addEventListener("click", () => {
+      const [gone] = pendingImages.splice(index, 1);
+      if (gone) URL.revokeObjectURL(gone.url);
+      showAttach();
+    });
+    thumb.append(img, remove);
+    box.append(thumb);
+  });
+  box.hidden = false;
+}
+
+function clearAttach() {
+  for (const item of pendingImages) URL.revokeObjectURL(item.url);
+  pendingImages = [];
+  const file = $("#file");
+  if (file) file.value = "";
+  showAttach();
+}
+
+async function addImages(files) {
+  const list = [...files].filter(Boolean);
+  if (!list.length) return;
+  if (pendingImages.length + list.length > MAX_IMAGES) replyErr.textContent = `一次最多 ${MAX_IMAGES} 张。`;
+  const room = MAX_IMAGES - pendingImages.length;
+  for (const file of list.slice(0, room)) {
+    const shrunk = await shrinkImage(file);
+    pendingImages.push({ file: shrunk, url: URL.createObjectURL(shrunk) });
+  }
+  showAttach();
+}
+
+function closePlus() {
+  $("#plus-menu").hidden = true;
+  $("#plus").setAttribute("aria-expanded", "false");
+}
+$("#plus").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = $("#plus-menu");
+  const open = menu.hidden;
+  menu.hidden = !open;
+  $("#plus").setAttribute("aria-expanded", String(open));
+});
+$("#pick-image").addEventListener("click", () => {
+  closePlus();
+  $("#file").click();
+});
+$("#plus-menu").addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", closePlus);
+$("#file").addEventListener("change", async () => {
+  const files = $("#file").files;
+  $("#file").value = "";
+  if (!files || !files.length) return;
+  try {
+    await addImages(files);
+  } catch (err) {
+    replyErr.textContent = err.message || "这张图打不开。换 jpg、png、webp 或 gif。";
+  }
+});
+answer.addEventListener("paste", async (event) => {
+  const files = [...event.clipboardData.items]
+    .filter((item) => item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  try {
+    await addImages(files);
+  } catch (err) {
+    replyErr.textContent = err.message || "这张图打不开。换 jpg、png、webp 或 gif。";
   }
 });
 

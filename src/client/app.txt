@@ -28,6 +28,8 @@ let messages = [];
 let painted = "";
 let timer = 0;
 let sending = false;
+let pendingImages = [];
+const MAX_IMAGES = 6;
 
 function loadStore() {
   try {
@@ -52,14 +54,15 @@ class ApiError extends Error {
 
 async function api(path, options = {}) {
   const headers = {};
-  if (options.body) headers["content-type"] = "application/json";
+  const form = options.body instanceof FormData;
+  if (options.body && !form) headers["content-type"] = "application/json";
   if (options.token) headers.authorization = `Bearer ${options.token}`;
   let response;
   try {
     response = await fetch(path, {
       method: options.method || "GET",
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: form ? options.body : options.body ? JSON.stringify(options.body) : undefined,
       credentials: "same-origin",
     });
   } catch {
@@ -141,7 +144,10 @@ function botRow(message, askedAt) {
     dd.textContent = value;
     list.append(dt, dd);
   }
-  row.querySelector(".b-text").textContent = message.body;
+  const text = row.querySelector(".b-text");
+  if (message.body) text.textContent = message.body;
+  else text.remove();
+  appendShot(row.querySelector(".b-body"), message);
   const time = row.querySelector("time");
   time.textContent = clock(message.createdAt);
   time.dateTime = new Date(message.createdAt).toISOString();
@@ -180,9 +186,10 @@ function paint(list) {
   for (const message of list) {
     if (message.role === "visitor") {
       if (!askedAt) askedAt = message.createdAt;
-      const bubble = document.createElement("p");
+      const bubble = document.createElement("div");
       bubble.className = "u";
-      bubble.textContent = message.body;
+      if (message.body) bubble.append(document.createTextNode(message.body));
+      appendShot(bubble, message);
       log.append(bubble);
     } else {
       log.append(botRow(message, askedAt || message.createdAt));
@@ -359,32 +366,138 @@ function newChat() {
   input.focus();
 }
 
+function appendShot(parent, message) {
+  const sources = message.imageUrls?.length
+    ? message.imageUrls
+    : (message.images || []).map((image) => `/api/images/${image.id}`);
+  if (!sources.length) return;
+  const row = document.createElement("div");
+  row.className = "shots";
+  for (const src of sources) {
+    const img = document.createElement("img");
+    img.className = "shot";
+    img.alt = "图片";
+    img.src = src;
+    row.append(img);
+  }
+  parent.append(row);
+}
+
+async function shrinkImage(file) {
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+    throw new Error("这张图糖包打不开。换 jpg、png、webp 或 gif。");
+  }
+  if (file.type === "image/gif") {
+    if (file.size > 2_000_000) throw new Error("这张图太大了。先收一收再发。");
+    return file;
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (!blob || blob.size > 2_000_000) throw new Error("这张图太大了。先收一收再发。");
+  return new File([blob], "image.jpg", { type: "image/jpeg" });
+}
+
+function showAttach() {
+  const box = $("#attach");
+  box.replaceChildren();
+  if (!pendingImages.length) {
+    box.hidden = true;
+    return;
+  }
+  pendingImages.forEach((item, index) => {
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.alt = "";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", "拿掉这张图");
+    remove.addEventListener("click", () => removeImage(index));
+    thumb.append(img, remove);
+    box.append(thumb);
+  });
+  box.hidden = false;
+}
+
+function removeImage(index) {
+  const [gone] = pendingImages.splice(index, 1);
+  if (gone) URL.revokeObjectURL(gone.url);
+  showAttach();
+  grow();
+}
+
+function clearAttach() {
+  for (const item of pendingImages) URL.revokeObjectURL(item.url);
+  pendingImages = [];
+  $("#file").value = "";
+  showAttach();
+  grow();
+}
+
+async function addImages(files) {
+  const list = [...files].filter(Boolean);
+  if (!list.length) return;
+  if (pendingImages.length + list.length > MAX_IMAGES) {
+    showSys(`一次最多 ${MAX_IMAGES} 张。`);
+  }
+  const room = MAX_IMAGES - pendingImages.length;
+  for (const file of list.slice(0, room)) {
+    const shrunk = await shrinkImage(file);
+    pendingImages.push({ file: shrunk, url: URL.createObjectURL(shrunk) });
+  }
+  showAttach();
+  grow();
+}
+
 function grow() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
-  send.disabled = sending || !input.value.trim();
+  send.disabled = sending || (!input.value.trim() && !pendingImages.length);
 }
 
 async function sendText(text) {
   const trimmed = text.trim();
-  if (!trimmed || sending) return;
+  const images = pendingImages.slice();
+  if ((!trimmed && !images.length) || sending) return;
   sending = true;
   send.disabled = true;
   showSys("");
   const prior = messages.slice();
-  paint(prior.concat([{ id: "local", role: "visitor", body: trimmed, createdAt: Date.now() }]));
-  if (!current) titleEl.textContent = trimmed;
+  paint(prior.concat([{
+    id: "local",
+    role: "visitor",
+    body: trimmed,
+    createdAt: Date.now(),
+    imageUrls: images.map((item) => item.url),
+  }]));
+  if (!current) titleEl.textContent = trimmed || (images.length > 1 ? `${images.length} 张图片` : "一张图片");
   input.value = "";
+  pendingImages = [];
+  $("#file").value = "";
+  showAttach();
   grow();
+  const payload = images.length ? new FormData() : { body: trimmed };
+  if (images.length) {
+    payload.set("body", trimmed);
+    for (const item of images) payload.append("images", item.file, item.file.name);
+  }
   try {
     if (!current) {
-      const created = await api("/api/threads", { method: "POST", body: { body: trimmed } });
+      const created = await api("/api/threads", { method: "POST", body: payload });
       current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
     } else {
       const data = await api(`/api/threads/${current.id}/messages`, {
         method: "POST",
         token: current.token,
-        body: { body: trimmed },
+        body: payload,
       });
       if (data.status) applyStatus(data.status);
       current.updatedAt = Date.now();
@@ -394,11 +507,14 @@ async function sendText(text) {
     painted = "";
     paint(prior);
     input.value = trimmed;
+    pendingImages = images;
+    showAttach();
     sending = false;
     grow();
     showSys(err.message || "消息没送出去。糖包那边暂时没应。");
     return;
   }
+  for (const item of images) URL.revokeObjectURL(item.url);
   try {
     await refresh();
   } catch (err) {
@@ -466,6 +582,46 @@ input.addEventListener("keydown", (event) => {
 composer.addEventListener("submit", (event) => {
   event.preventDefault();
   void sendText(input.value);
+});
+function closePlus() {
+  $("#plus-menu").hidden = true;
+  $("#plus").setAttribute("aria-expanded", "false");
+}
+$("#plus").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const menu = $("#plus-menu");
+  const open = menu.hidden;
+  menu.hidden = !open;
+  $("#plus").setAttribute("aria-expanded", String(open));
+});
+$("#pick-image").addEventListener("click", () => {
+  closePlus();
+  $("#file").click();
+});
+$("#plus-menu").addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", closePlus);
+$("#file").addEventListener("change", async () => {
+  const files = $("#file").files;
+  $("#file").value = "";
+  if (!files || !files.length) return;
+  try {
+    await addImages(files);
+  } catch (err) {
+    showSys(err.message || "这张图糖包打不开。换 jpg、png、webp 或 gif。");
+  }
+});
+composer.addEventListener("paste", async (event) => {
+  const files = [...event.clipboardData.items]
+    .filter((item) => item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  try {
+    await addImages(files);
+  } catch (err) {
+    showSys(err.message || "这张图糖包打不开。换 jpg、png、webp 或 gif。");
+  }
 });
 
 document.addEventListener("visibilitychange", () => {

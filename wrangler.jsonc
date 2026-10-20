@@ -15,6 +15,12 @@
     "html_handling": "none",
     "run_worker_first": ["/api/*"]
   },
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "tangbao-images"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
