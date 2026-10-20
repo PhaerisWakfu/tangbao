@@ -123,7 +123,7 @@ async function createThread(request: Request, env: AppEnv): Promise<Response> {
   const now = Date.now();
   const shown = caption(incoming.body, incoming.images.length);
   const title = titleFrom(shown);
-  const preview = previewFrom(shown);
+  const preview = previewFrom(incoming.draw ? `要一张图 · ${shown}` : shown);
   const messageId = randomId(16);
   const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
@@ -131,8 +131,8 @@ async function createThread(request: Request, env: AppEnv): Promise<Response> {
       "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting) VALUES (?, ?, ?, ?, ?, ?, 1)",
     ).bind(id, await sha256(token), title, preview, now, now),
     env.DB.prepare(
-      "INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, 'visitor', ?, ?)",
-    ).bind(messageId, id, incoming.body, now),
+      "INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, 'visitor', ?, ?, ?)",
+    ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
     ...imageInserts(env, messageId, stored),
   ]);
   return json({ id, token, title });
@@ -255,10 +255,10 @@ async function serveImage(env: AppEnv, id: string): Promise<Response> {
 
 async function listMessages(env: AppEnv, threadId: string) {
   const messages = await env.DB.prepare(
-    "SELECT id, role, body, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
+    "SELECT id, role, body, draw, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
   )
     .bind(threadId)
-    .all<{ id: string; role: string; body: string; createdAt: number }>();
+    .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
   const ids = messages.results.map((message) => message.id);
   const grouped = new Map<string, { id: string; type: string }[]>();
   if (ids.length) {
@@ -287,17 +287,20 @@ async function writeMessage(
   const messageId = randomId(16);
   const now = Date.now();
   const stored = await storeImages(env, incoming.images);
+  const draw = role === "visitor" && incoming.draw ? 1 : 0;
+  const shown = caption(incoming.body, stored.length);
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+    env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
       messageId,
       threadId,
       role,
       incoming.body,
+      draw,
       now,
     ),
     ...imageInserts(env, messageId, stored),
     env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ? WHERE id = ?").bind(
-      previewFrom(caption(incoming.body, stored.length)),
+      previewFrom(draw ? `要一张图 · ${shown}` : shown),
       now,
       awaiting,
       threadId,
@@ -451,7 +454,7 @@ function bearer(request: Request): string {
   return match ? match[1] : "";
 }
 
-async function readJson(request: Request): Promise<{ body?: unknown; password?: unknown; awake?: unknown }> {
+async function readJson(request: Request): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();
@@ -460,7 +463,7 @@ async function readJson(request: Request): Promise<{ body?: unknown; password?: 
   try {
     const parsed: unknown = JSON.parse(text);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("shape");
-    return parsed as { body?: unknown; password?: unknown; awake?: unknown };
+    return parsed as { body?: unknown; password?: unknown; awake?: unknown; draw?: unknown };
   } catch {
     throw new HttpError(400, "这张纸条写乱了。");
   }
@@ -469,7 +472,12 @@ async function readJson(request: Request): Promise<{ body?: unknown; password?: 
 type Incoming = {
   body: string;
   images: { bytes: ArrayBuffer; type: string }[];
+  draw: boolean;
 };
+
+function wantsDraw(value: unknown): boolean {
+  return value === true || value === 1 || value === "1";
+}
 
 async function readIncoming(request: Request, empty: string): Promise<Incoming> {
   const contentType = request.headers.get("content-type") || "";
@@ -490,11 +498,14 @@ async function readIncoming(request: Request, empty: string): Promise<Incoming> 
       if (!IMAGE_TYPES.has(file.type)) throw new HttpError(400, "有一张图糖包打不开。换 jpg、png、webp 或 gif。");
       images.push({ bytes: await file.arrayBuffer(), type: file.type });
     }
+    const draw = wantsDraw(form.get("draw"));
+    if (draw && !text) throw new HttpError(400, "先写要画什么。");
     if (!text && !images.length) throw new HttpError(400, empty);
-    return { body: text, images };
+    return { body: text, images, draw };
   }
   const payload = await readJson(request);
-  return { body: cleanBody(payload.body, empty), images: [] };
+  const draw = wantsDraw(payload.draw);
+  return { body: cleanBody(payload.body, draw ? "先写要画什么。" : empty), images: [], draw };
 }
 
 function cleanBody(input: unknown, empty = "先写一句再发送。"): string {

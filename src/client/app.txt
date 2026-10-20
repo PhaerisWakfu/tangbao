@@ -29,6 +29,7 @@ let painted = "";
 let timer = 0;
 let sending = false;
 let pendingImages = [];
+let making = false;
 const MAX_IMAGES = 6;
 
 function loadStore() {
@@ -148,6 +149,16 @@ function botRow(message, askedAt) {
   if (message.body) text.textContent = message.body;
   else text.remove();
   appendShot(row.querySelector(".b-body"), message);
+  const files = shotFiles(message);
+  if (files.length) {
+    const save = document.createElement("button");
+    save.type = "button";
+    save.dataset.tip = "下载图片";
+    save.setAttribute("aria-label", "下载图片");
+    save.innerHTML = '<svg class="i"><use href="#i-down"/></svg>';
+    save.addEventListener("click", () => downloadShots(files));
+    row.querySelector('[aria-label="重新生成"]').after(save);
+  }
   const time = row.querySelector("time");
   time.textContent = clock(message.createdAt);
   time.dateTime = new Date(message.createdAt).toISOString();
@@ -188,6 +199,12 @@ function paint(list) {
       if (!askedAt) askedAt = message.createdAt;
       const bubble = document.createElement("div");
       bubble.className = "u";
+      if (message.draw) {
+        const tag = document.createElement("span");
+        tag.className = "u-make";
+        tag.textContent = "制作图片";
+        bubble.append(tag);
+      }
       if (message.body) bubble.append(document.createTextNode(message.body));
       appendShot(bubble, message);
       log.append(bubble);
@@ -366,21 +383,71 @@ function newChat() {
   input.focus();
 }
 
+function shotFiles(message) {
+  if (message.images?.length) {
+    return message.images.map((image, index) => ({
+      href: `/api/images/${image.id}`,
+      name: `${message.images.length > 1 ? `tangbao-${index + 1}` : "tangbao"}.${extOf(image.type)}`,
+    }));
+  }
+  return (message.imageUrls || []).map((href, index) => ({
+    href,
+    name: `tangbao-${index + 1}.jpg`,
+  }));
+}
+
+function extOf(type) {
+  if (type === "image/png") return "png";
+  if (type === "image/webp") return "webp";
+  if (type === "image/gif") return "gif";
+  return "jpg";
+}
+
+function downloadShots(files) {
+  for (const file of files) {
+    const link = document.createElement("a");
+    link.href = file.href;
+    link.download = file.name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
+}
+
+function openViewer(src) {
+  $("#viewer-img").src = src;
+  $("#viewer").hidden = false;
+}
+
+function closeViewer() {
+  $("#viewer").hidden = true;
+  $("#viewer-img").removeAttribute("src");
+}
+
 function appendShot(parent, message) {
-  const sources = message.imageUrls?.length
-    ? message.imageUrls
-    : (message.images || []).map((image) => `/api/images/${image.id}`);
+  const sources = shotFiles(message);
   if (!sources.length) return;
   const row = document.createElement("div");
   row.className = "shots";
-  for (const src of sources) {
+  for (const file of sources) {
     const img = document.createElement("img");
     img.className = "shot";
-    img.alt = "图片";
-    img.src = src;
+    img.alt = "图片，点击放大";
+    img.src = file.href;
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    const show = () => openViewer(file.href);
+    img.addEventListener("click", show);
+    img.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      show();
+    });
     row.append(img);
   }
-  parent.append(row);
+  const acts = parent.querySelector(".acts");
+  if (acts) parent.insertBefore(row, acts);
+  else parent.append(row);
 }
 
 async function shrinkImage(file) {
@@ -460,7 +527,7 @@ async function addImages(files) {
 function grow() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
-  send.disabled = sending || (!input.value.trim() && !pendingImages.length);
+  send.disabled = sending || (making ? !input.value.trim() : !input.value.trim() && !pendingImages.length);
 }
 
 async function sendText(text) {
@@ -475,6 +542,7 @@ async function sendText(text) {
     id: "local",
     role: "visitor",
     body: trimmed,
+    draw: making ? 1 : 0,
     createdAt: Date.now(),
     imageUrls: images.map((item) => item.url),
   }]));
@@ -484,9 +552,10 @@ async function sendText(text) {
   $("#file").value = "";
   showAttach();
   grow();
-  const payload = images.length ? new FormData() : { body: trimmed };
+  const payload = images.length ? new FormData() : { body: trimmed, draw: making };
   if (images.length) {
     payload.set("body", trimmed);
+    if (making) payload.set("draw", "1");
     for (const item of images) payload.append("images", item.file, item.file.name);
   }
   try {
@@ -538,8 +607,16 @@ modelBtn.addEventListener("click", (event) => {
 });
 card.addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", closeCard);
+$("#viewer").addEventListener("click", (event) => {
+  if (event.target.closest("img")) return;
+  closeViewer();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (!$("#viewer").hidden) {
+    closeViewer();
+    return;
+  }
   closeCard();
   closeSide();
 });
@@ -598,12 +675,31 @@ $("#pick-image").addEventListener("click", () => {
   closePlus();
   $("#file").click();
 });
+const ASK_CHIPS = ["今晚要不要早一点睡", "怎样把拒绝说软一点", "一件事值不值得做，看什么", "拖了很久的事，怎么开始"];
+const DRAW_CHIPS = ["画一只猫", "画一只兔子", "画一朵花", "画一轮月亮"];
+
+function setMaking(on) {
+  making = on;
+  $("#make").hidden = !on;
+  input.placeholder = on ? "描述要画的东西" : "给糖包发消息";
+  const labels = on ? DRAW_CHIPS : ASK_CHIPS;
+  [...$("#chips").querySelectorAll("button")].forEach((button, index) => {
+    button.textContent = labels[index] || "";
+  });
+  grow();
+  if (on) input.focus();
+}
+$("#make-image").addEventListener("click", () => {
+  closePlus();
+  setMaking(true);
+});
+$("#make-off").addEventListener("click", () => setMaking(false));
 $("#plus-menu").addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", closePlus);
 $("#file").addEventListener("change", async () => {
-  const files = $("#file").files;
+  const files = [...$("#file").files];
   $("#file").value = "";
-  if (!files || !files.length) return;
+  if (!files.length) return;
   try {
     await addImages(files);
   } catch (err) {

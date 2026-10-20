@@ -34,13 +34,15 @@ async function req(path, options = {}) {
 
 const home = await req("/");
 assert(home.response.status === 200, "home 200");
+assert(home.body.includes("制作图片"), "make image in the menu");
 assert(home.body.includes("需要我做什么？"), "greeting");
-assert(home.body.includes("这里的 AI 是人工"), "fine print");
+assert(home.body.includes("这里的 AI 是「能工智人」"), "fine print");
 assert(!home.body.includes("<h1>其实是人"), "headline stays in product voice");
 
 const about = await req("/about");
 assert(about.response.status === 200, "about 200");
 assert(about.body.includes("操作员是糖包本人"), "about reveal");
+assert(about.body.includes("图从笔尖出来"), "about text-to-image");
 
 const desk = await req("/desk");
 assert(desk.response.status === 200, "desk 200");
@@ -67,6 +69,21 @@ const read = await req(`/api/threads/${created.body.id}`, {
 });
 assert(read.response.status === 200 && read.body.messages.length === 1, "owner can read");
 assert(read.body.messages[0].body === "这封信要不要回？", "message stored");
+assert(read.body.messages[0].draw === 0, "plain message is not a picture");
+
+const drawn = await req(`/api/threads/${created.body.id}/messages`, {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${created.body.token}`,
+    "content-type": "application/json",
+  },
+  body: JSON.stringify({ body: "窗边一只猫", draw: true }),
+});
+assert(drawn.response.status === 200, "draw prompt accepted");
+const withDraw = await req(`/api/threads/${created.body.id}`, {
+  headers: { authorization: `Bearer ${created.body.token}` },
+});
+assert(withDraw.body.messages.at(-1).draw === 1, "draw flag stored");
 
 const empty = await req(`/api/threads/${created.body.id}/messages`, {
   method: "POST",

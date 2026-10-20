@@ -34,6 +34,8 @@
     <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9.3v4.4M10 6.6v.1"/></symbol>
     <symbol id="i-x" viewBox="0 0 20 20"><path d="m6 6 8 8M14 6l-8 8"/></symbol>
     <symbol id="i-image" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8" r="1.2"/><path d="m4 14 4-3.5 2.5 2 2-1.5L16 14"/></symbol>
+    <symbol id="i-make" viewBox="0 0 20 20"><rect x="3" y="5" width="10.5" height="10" rx="1.8"/><path d="M16.2 2.8v3.2M14.6 4.4h3.2"/></symbol>
+    <symbol id="i-down" viewBox="0 0 20 20"><path d="M10 3.5v8.2M6.4 8.6 10 12.2l3.6-3.6"/><path d="M4.5 16h11"/></symbol>
   </svg>
 
   <div class="app">
@@ -74,12 +76,19 @@
         <form class="composer" id="composer">
           <label class="sr" for="input">消息</label>
           <div class="attach" id="attach" hidden></div>
+          <div class="make" id="make" hidden>
+            <svg class="i"><use href="#i-make"/></svg>
+            <span>制作图片</span>
+            <button type="button" id="make-off" aria-label="退出制作图片">×</button>
+          </div>
           <textarea id="input" rows="1" placeholder="给糖包发消息"></textarea>
           <div class="bar">
             <div class="plus">
               <button class="plus-btn" type="button" id="plus" aria-expanded="false" aria-controls="plus-menu" aria-label="添加"><svg class="i"><use href="#i-plus"/></svg></button>
               <div class="plus-menu" id="plus-menu" hidden>
                 <button type="button" id="pick-image"><svg class="i"><use href="#i-image"/></svg><span>添加图片<small>从计算机上传，也可 Ctrl+V 粘贴</small></span></button>
+                <div class="plus-rule" role="separator"></div>
+                <button type="button" id="make-image"><svg class="i"><use href="#i-make"/></svg><span>制作图片<small>文生图创作图片</small></span></button>
               </div>
             </div>
             <input class="sr" id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
@@ -99,6 +108,7 @@
               <dt>温度</dt><dd>室温</dd>
               <dt>训练截止</dt><dd>他上次睡觉</dd>
               <dt>推理硬件</dt><dd>十根手指</dd>
+              <dt>文生图</dt><dd>他拿笔画</dd>
             </dl>
             <footer><span>目前只有这一个模型</span><a href="/about">完整说明</a></footer>
           </div>
@@ -110,8 +120,12 @@
           <button type="button">拖了很久的事，怎么开始</button>
         </div>
       </div>
-      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是人工，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「能工智人」，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
     </main>
+  </div>
+  <div class="viewer" id="viewer" hidden>
+    <button type="button" id="viewer-x" aria-label="关闭">×</button>
+    <img id="viewer-img" alt="">
   </div>
   <script src="/assets/app.js"></script>
 </body>

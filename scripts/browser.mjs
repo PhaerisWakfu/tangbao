@@ -29,7 +29,7 @@ note((await page.locator(".hello h1").innerText()) === "需要我做什么？", 
 note(!(await page.locator(".chips").innerText()).includes("我是不是想太多了"), "odd suggestion is gone");
 note((await page.locator("#model").innerText()).includes("tangbao-vme50-flash"), "model id looks like a lineup");
 note((await page.locator("body").getAttribute("data-state")) === "empty", "starts empty");
-note((await page.locator(".fine").innerText()).includes("这里的 AI 是人工"), "desktop fine print");
+note((await page.locator(".fine").innerText()).includes("这里的 AI 是「能工智人」"), "desktop fine print");
 note(await page.locator("#open-side").isHidden(), "desktop hides the drawer button");
 note(await page.evaluate(() => document.fonts.check('600 34px "TB Serif"', "需要我做什么")), "serif subset loaded");
 

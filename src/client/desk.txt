@@ -129,6 +129,10 @@ function renderQueue(data) {
 function renderThread(data) {
   $("#slip-title").textContent = data.thread.title;
   $("#slip-meta").textContent = data.thread.awaiting ? `等了 ${spent(Date.now() - data.thread.updatedAt)}` : "已回复";
+  const last = data.messages.at(-1);
+  $("#answer").placeholder = last && last.role === "visitor" && last.draw
+    ? "他要一张图。画完放进来，或写一句。"
+    : "写一句可能没用的话";
   const key = JSON.stringify(data.messages);
   if (key === shown) return;
   shown = key;
@@ -148,14 +152,18 @@ function renderThread(data) {
       for (const src of sources) {
         const img = document.createElement("img");
         img.className = "shot";
-        img.alt = "图片";
+        img.alt = "图片，点击放大";
         img.src = src;
+        img.tabIndex = 0;
+        img.setAttribute("role", "button");
+        img.addEventListener("click", () => openViewer(src));
         shots.append(img);
       }
       wrap.append(shots);
     }
     const meta = document.createElement("small");
-    meta.textContent = `${message.role === "tangbao" ? "你" : "对方"} · ${clock(message.createdAt)}`;
+    const who = message.role === "tangbao" ? "你" : "对方";
+    meta.textContent = message.draw ? `${who} · 要一张图 · ${clock(message.createdAt)}` : `${who} · ${clock(message.createdAt)}`;
     wrap.append(meta);
     thread.append(wrap);
   }
@@ -350,9 +358,9 @@ $("#pick-image").addEventListener("click", () => {
 $("#plus-menu").addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", closePlus);
 $("#file").addEventListener("change", async () => {
-  const files = $("#file").files;
+  const files = [...$("#file").files];
   $("#file").value = "";
-  if (!files || !files.length) return;
+  if (!files.length) return;
   try {
     await addImages(files);
   } catch (err) {
@@ -371,6 +379,182 @@ answer.addEventListener("paste", async (event) => {
   } catch (err) {
     replyErr.textContent = err.message || "这张图打不开。换 jpg、png、webp 或 gif。";
   }
+});
+
+const sketch = $("#sketch");
+const pad = $("#sketch-pad");
+const pen = pad.getContext("2d");
+const PAPER = "#fffaf3";
+let strokes = [];
+let currentStroke = null;
+let penSize = 6;
+let penColor = "#1f1d1a";
+let erasing = false;
+let padSize = { w: 1, h: 1, dpr: 1 };
+
+function preparePad() {
+  const width = Math.min(720, window.innerWidth - 64);
+  const height = Math.min(420, Math.round(window.innerHeight * 0.52));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  padSize = { w: width, h: height, dpr };
+  pad.width = Math.round(width * dpr);
+  pad.height = Math.round(height * dpr);
+  pen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  redrawPad();
+}
+
+function redrawPad() {
+  pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  pen.fillStyle = PAPER;
+  pen.fillRect(0, 0, padSize.w, padSize.h);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  for (const stroke of strokes) paintStroke(stroke);
+  if (currentStroke) paintStroke(currentStroke);
+}
+
+function paintStroke(stroke) {
+  if (!stroke.points.length) return;
+  pen.strokeStyle = stroke.color;
+  pen.fillStyle = stroke.color;
+  pen.lineWidth = stroke.size;
+  const first = stroke.points[0];
+  if (stroke.points.length === 1) {
+    pen.beginPath();
+    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    pen.fill();
+    return;
+  }
+  pen.beginPath();
+  pen.moveTo(first.x, first.y);
+  for (let i = 1; i < stroke.points.length; i += 1) pen.lineTo(stroke.points[i].x, stroke.points[i].y);
+  pen.stroke();
+}
+
+function padPoint(event) {
+  const rect = pad.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (padSize.w / rect.width),
+    y: (event.clientY - rect.top) * (padSize.h / rect.height),
+  };
+}
+
+function openSketch() {
+  closePlus();
+  strokes = [];
+  currentStroke = null;
+  erasing = false;
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-err").textContent = "";
+  sketch.hidden = false;
+  requestAnimationFrame(preparePad);
+}
+
+function closeSketch() {
+  sketch.hidden = true;
+}
+
+pad.addEventListener("pointerdown", (event) => {
+  if (sketch.hidden) return;
+  $("#sketch-err").textContent = "";
+  pad.setPointerCapture(event.pointerId);
+  currentStroke = {
+    color: erasing ? PAPER : penColor,
+    size: erasing ? Math.max(penSize * 4, 16) : penSize,
+    points: [padPoint(event)],
+  };
+  redrawPad();
+});
+pad.addEventListener("pointermove", (event) => {
+  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  currentStroke.points.push(padPoint(event));
+  redrawPad();
+});
+function endStroke(event) {
+  if (!currentStroke) return;
+  if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
+  if (currentStroke.points.length) strokes.push(currentStroke);
+  currentStroke = null;
+}
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+
+document.querySelector(".sketch-tools").addEventListener("click", (event) => {
+  const size = event.target.closest("[data-size]");
+  const swatch = event.target.closest("[data-color]");
+  if (size) {
+    penSize = Number(size.dataset.size);
+    erasing = false;
+    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
+    size.setAttribute("aria-pressed", "true");
+  }
+  if (swatch) {
+    penColor = swatch.dataset.color;
+    erasing = false;
+    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
+    swatch.setAttribute("aria-pressed", "true");
+  }
+});
+$("#sketch-erase").addEventListener("click", () => {
+  erasing = true;
+  $("#sketch-erase").setAttribute("aria-pressed", "true");
+});
+$("#sketch-undo").addEventListener("click", () => {
+  strokes.pop();
+  redrawPad();
+});
+$("#sketch-clear").addEventListener("click", () => {
+  strokes = [];
+  redrawPad();
+});
+$("#sketch-close").addEventListener("click", closeSketch);
+$("#sketch-cancel").addEventListener("click", closeSketch);
+$("#sketch-ok").addEventListener("click", () => {
+  if (!strokes.length) {
+    $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
+    return;
+  }
+  if (pendingImages.length >= MAX_IMAGES) {
+    $("#sketch-err").textContent = `一次最多 ${MAX_IMAGES} 张。`;
+    return;
+  }
+  pad.toBlob((blob) => {
+    if (!blob) {
+      $("#sketch-err").textContent = "这张画没能留下来。再试一次。";
+      return;
+    }
+    const file = new File([blob], "sketch.png", { type: "image/png" });
+    pendingImages.push({ file, url: URL.createObjectURL(file) });
+    showAttach();
+    closeSketch();
+  }, "image/png");
+});
+$("#draw-image").addEventListener("click", openSketch);
+
+function openViewer(src) {
+  $("#viewer-img").src = src;
+  $("#viewer").hidden = false;
+}
+function closeViewer() {
+  $("#viewer").hidden = true;
+  $("#viewer-img").removeAttribute("src");
+}
+$("#viewer").addEventListener("click", (event) => {
+  if (event.target.closest("img")) return;
+  closeViewer();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!$("#viewer").hidden) {
+    closeViewer();
+    return;
+  }
+  if (!sketch.hidden) closeSketch();
 });
 
 document.addEventListener("visibilitychange", () => {

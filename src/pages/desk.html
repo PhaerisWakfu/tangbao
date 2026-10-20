@@ -24,6 +24,7 @@
     <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
     <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9"/></symbol>
     <symbol id="i-image" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8" r="1.2"/><path d="m4 14 4-3.5 2.5 2 2-1.5L16 14"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 20 20"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M15.6 7.6A6.2 6.2 0 1 0 16.2 12"/><path d="M16.2 4v3.8h-3.8"/></symbol>
   </svg>
 
@@ -67,6 +68,7 @@
             <button class="plus-btn" type="button" id="plus" aria-expanded="false" aria-controls="plus-menu" aria-label="添加"><svg class="i"><use href="#i-plus"/></svg></button>
             <div class="plus-menu" id="plus-menu" hidden>
               <button type="button" id="pick-image"><svg class="i"><use href="#i-image"/></svg><span>添加图片<small>从计算机上传，也可 Ctrl+V 粘贴</small></span></button>
+              <button type="button" id="draw-image"><svg class="i"><use href="#i-pen"/></svg><span>画一张<small>在纸上画，放进这条回复</small></span></button>
             </div>
           </div>
           <input class="sr" id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
@@ -76,6 +78,35 @@
         <p class="err" id="reply-err" role="alert"></p>
       </form>
     </section>
+  </div>
+  <div class="sketch" id="sketch" hidden>
+    <div class="sketch-card" role="dialog" aria-modal="true" aria-labelledby="sketch-title">
+      <header>
+        <h2 id="sketch-title">画一张</h2>
+        <button type="button" id="sketch-close" aria-label="关闭">×</button>
+      </header>
+      <div class="sketch-tools">
+        <button type="button" data-size="2.5">细</button>
+        <button type="button" data-size="6" aria-pressed="true">中</button>
+        <button type="button" data-size="14">粗</button>
+        <button type="button" class="swatch" data-color="#1f1d1a" style="--c:#1f1d1a" aria-pressed="true" aria-label="墨色"></button>
+        <button type="button" class="swatch" data-color="#a8622a" style="--c:#a8622a" aria-label="红糖"></button>
+        <button type="button" class="swatch" data-color="#2f5d50" style="--c:#2f5d50" aria-label="松绿"></button>
+        <button type="button" id="sketch-erase">橡皮</button>
+        <button type="button" id="sketch-undo">撤销</button>
+        <button type="button" id="sketch-clear">清空</button>
+      </div>
+      <canvas id="sketch-pad"></canvas>
+      <p class="sketch-err" id="sketch-err"></p>
+      <footer>
+        <button type="button" id="sketch-cancel">取消</button>
+        <button type="button" class="primary" id="sketch-ok">放进回复</button>
+      </footer>
+    </div>
+  </div>
+  <div class="viewer" id="viewer" hidden>
+    <button type="button" aria-label="关闭">×</button>
+    <img id="viewer-img" alt="">
   </div>
   <script src="/assets/desk.js"></script>
 </body>
