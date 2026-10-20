@@ -16,7 +16,7 @@ class HttpError extends Error {
 type AppEnv = Env & {
   ADMIN_PASSWORD?: string;
   ADMIN_SECRET?: string;
-  IMAGES: R2Bucket;
+  IMAGES: KVNamespace;
 };
 
 type StatusPayload = {
@@ -243,9 +243,9 @@ async function serveImage(env: AppEnv, id: string): Promise<Response> {
     .bind(id)
     .first<{ image_key: string; image_type: string }>();
   if (!row) throw new HttpError(404, "这张图不在桌上。");
-  const object = await env.IMAGES.get(row.image_key);
-  if (!object) throw new HttpError(404, "这张图不在桌上。");
-  return new Response(object.body, {
+  const bytes = await env.IMAGES.get(row.image_key, "arrayBuffer");
+  if (!bytes) throw new HttpError(404, "这张图不在桌上。");
+  return new Response(bytes, {
     headers: {
       "content-type": row.image_type || "application/octet-stream",
       "cache-control": "private, max-age=86400",
@@ -313,7 +313,7 @@ async function storeImages(env: AppEnv, images: Incoming["images"]) {
   for (const image of images) {
     const id = randomId(16);
     const key = `img/${id}`;
-    await env.IMAGES.put(key, image.bytes, { httpMetadata: { contentType: image.type } });
+    await env.IMAGES.put(key, image.bytes);
     stored.push({ id, key, type: image.type });
   }
   return stored;

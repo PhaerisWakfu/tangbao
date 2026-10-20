@@ -55,15 +55,15 @@ npm run design
 
 ## 部署到 Cloudflare
 
-用 Workers 免费计划。页面由 Worker 返回，样式和字体走静态资源。数据在 D1。
+用 Workers 免费计划。页面由 Worker 返回，样式和字体走静态资源。对话在 D1，图片在 KV。R2 即使用不超量也要先绑支付方式，所以不走 R2。
 
 ```bash
 npx wrangler login
 npx wrangler d1 create tangbao
-npx wrangler r2 bucket create tangbao-images
+npx wrangler kv namespace create IMAGES
 ```
 
-把命令输出的 `database_id` 写进 `wrangler.jsonc`，然后：
+把 D1 的 `database_id` 和 KV 的 `id` 写进 `wrangler.jsonc`，然后：
 
 ```bash
 npm run migrate:remote

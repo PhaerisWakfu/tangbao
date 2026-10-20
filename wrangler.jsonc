@@ -15,17 +15,17 @@
     "html_handling": "none",
     "run_worker_first": ["/api/*"]
   },
-  "r2_buckets": [
+  "kv_namespaces": [
     {
       "binding": "IMAGES",
-      "bucket_name": "tangbao-images"
+      "id": "3b9ad11ebb4f4812b93c04b3e9e86e3a"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "tangbao",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "95a34db7-95ac-464c-a3b4-5d0acb58d900",
       "migrations_dir": "migrations"
     }
   ]
