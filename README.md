@@ -71,4 +71,4 @@ npx wrangler secret bulk .dev.vars
 npm run deploy
 ```
 
-`secret bulk` 会把 `.dev.vars` 里的口令和签名密钥写进 Worker，文件本身不会进仓库。
+`secret bulk` 会把 `.dev.vars` 里的口令、签名密钥和飞书机器人地址写进 Worker，文件本身不会进仓库。访客发来消息时，飞书群会收到一条纸条。本地调试不会发。

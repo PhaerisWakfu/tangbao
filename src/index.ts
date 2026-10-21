@@ -16,6 +16,7 @@ class HttpError extends Error {
 type AppEnv = Env & {
   ADMIN_PASSWORD?: string;
   ADMIN_SECRET?: string;
+  FEISHU_WEBHOOK?: string;
   IMAGES: KVNamespace;
 };
 
@@ -38,9 +39,9 @@ const MAX_IMAGES = 6;
 const encoder = new TextEncoder();
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     try {
-      return await route(request, env);
+      return await route(request, env, ctx);
     } catch (err) {
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.log(
@@ -54,14 +55,14 @@ export default {
   },
 } satisfies ExportedHandler<AppEnv>;
 
-async function route(request: Request, env: AppEnv): Promise<Response> {
+async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
 
   if (path === "/api/status" && method === "GET") return json(await publicStatus(env));
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
-  if (path === "/api/threads" && method === "POST") return createThread(request, env);
+  if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
   if (path === "/api/admin/login" && method === "POST") return login(request, env);
   if (path === "/api/admin/logout" && method === "POST") return logout(request);
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
@@ -81,7 +82,7 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
     const id = visitor[1];
     if (!visitor[2] && method === "GET") return readThread(request, env, id);
     if (!visitor[2] && method === "DELETE") return deleteThread(request, env, id);
-    if (visitor[2] && method === "POST") return visitorMessage(request, env, id);
+    if (visitor[2] && method === "POST") return visitorMessage(request, env, id, ctx);
   }
 
   if (path.startsWith("/api/")) return json({ error: "没有这一格。" }, 404);
@@ -110,7 +111,41 @@ async function route(request: Request, env: AppEnv): Promise<Response> {
   return env.ASSETS.fetch(request);
 }
 
-async function createThread(request: Request, env: AppEnv): Promise<Response> {
+const DESK_URL = "https://tangbao.phaeris.cn/desk";
+
+function noteVisitor(ctx: ExecutionContext, env: AppEnv, request: Request, title: string, preview: string) {
+  const host = new URL(request.url).hostname;
+  if (host === "localhost" || host === "127.0.0.1") return;
+  ctx.waitUntil(notifyFeishu(env, title, preview));
+}
+
+async function notifyFeishu(env: AppEnv, title: string, preview: string): Promise<void> {
+  const hook = env.FEISHU_WEBHOOK;
+  if (!hook) return;
+  const lines = ["桌上有新纸条", title];
+  if (preview && preview !== title) lines.push(preview);
+  lines.push(DESK_URL);
+  try {
+    const response = await fetch(hook, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ msg_type: "text", content: { text: lines.join("\n") } }),
+    });
+    const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string } | null;
+    if (!response.ok || (payload && payload.code !== 0)) {
+      console.log(JSON.stringify({ event: "feishu_notify", status: response.status, code: payload?.code, msg: payload?.msg }));
+    }
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        event: "feishu_notify",
+        message: err instanceof Error ? err.message : "unknown",
+      }),
+    );
+  }
+}
+
+async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const ip = await clientHash(request);
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) {
     throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
@@ -135,6 +170,7 @@ async function createThread(request: Request, env: AppEnv): Promise<Response> {
     ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
     ...imageInserts(env, messageId, stored),
   ]);
+  noteVisitor(ctx, env, request, title, preview);
   return json({ id, token, title });
 }
 
@@ -160,7 +196,7 @@ async function deleteThread(request: Request, env: AppEnv, id: string): Promise<
   return json({ ok: true });
 }
 
-async function visitorMessage(request: Request, env: AppEnv, id: string): Promise<Response> {
+async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const token = bearer(request);
   const thread = await loadOwned(env, id, token);
   if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
@@ -169,6 +205,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string): Promis
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   await assertQueue(env, thread.awaiting === 1);
   await writeMessage(env, id, "visitor", incoming, 1);
+  const shown = caption(incoming.body, incoming.images.length);
+  noteVisitor(ctx, env, request, thread.title, incoming.draw ? `要一张图 · ${shown}` : shown);
   return json({ ok: true, status: await publicStatus(env) });
 }
 
