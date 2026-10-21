@@ -5,6 +5,7 @@ import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
 import indexHtml from "./pages/index.html";
+import mdJs from "./client/md.txt";
 
 class HttpError extends Error {
   constructor(
@@ -114,7 +115,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   const script =
-    path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : null;
+    path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },

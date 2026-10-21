@@ -181,9 +181,16 @@ function renderThread(data) {
     const wrap = document.createElement("div");
     wrap.className = message.role === "tangbao" ? "me" : "them";
     if (message.body) {
-      const text = document.createElement("p");
-      text.textContent = message.body;
-      wrap.append(text);
+      if (message.role === "tangbao" && typeof renderMarkdown === "function") {
+        const text = document.createElement("div");
+        text.className = "md";
+        text.innerHTML = renderMarkdown(message.body);
+        wrap.append(text);
+      } else {
+        const text = document.createElement("p");
+        text.textContent = message.body;
+        wrap.append(text);
+      }
     }
     const sources = (message.images || []).map((image) => `/api/images/${image.id}`);
     if (sources.length) {
