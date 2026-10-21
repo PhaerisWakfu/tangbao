@@ -76,10 +76,10 @@ function applyAwake(next) {
   lamp.querySelector("small").textContent = next ? "前台显示：可用 · 他醒着" : "前台显示：繁忙 · 他睡了";
 }
 
-function slip(item, waiting) {
+function slip(item, kind) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = waiting ? "slip waiting" : "slip";
+  button.className = kind === "wait" ? "slip waiting" : "slip";
   if (item.id === selected) button.setAttribute("aria-current", "true");
   const title = document.createElement("b");
   title.textContent = item.title;
@@ -92,7 +92,13 @@ function slip(item, waiting) {
     button.append(preview);
   }
   const meta = document.createElement("small");
-  meta.textContent = waiting ? `等了 ${spent(Date.now() - item.updatedAt)}` : `回于 ${clock(item.updatedAt)}`;
+  meta.textContent = kind === "wait"
+    ? `等了 ${spent(Date.now() - item.updatedAt)}`
+    : kind === "shelved"
+      ? `放下于 ${clock(item.updatedAt)}`
+      : kind === "blocked"
+        ? `拉黑于 ${clock(item.updatedAt)}`
+        : `回于 ${clock(item.updatedAt)}`;
   button.append(meta);
   button.addEventListener("click", () => {
     void openSlip(item.id);
@@ -117,19 +123,53 @@ function renderQueue(data) {
     none.textContent = "没有新消息。";
     pile.append(none);
   }
-  for (const item of waiting) pile.append(slip(item, true));
+  for (const item of waiting) pile.append(slip(item, "wait"));
   if (recent.length) {
     const recentTitle = document.createElement("h3");
     recentTitle.textContent = "刚回过";
     pile.append(recentTitle);
-    for (const item of recent) pile.append(slip(item, false));
+    for (const item of recent) pile.append(slip(item, "done"));
   }
+  foldPile("先放下", data.shelved || [], "shelved");
+  foldPile("已拉黑", data.blocked || [], "blocked");
+}
+
+function foldPile(title, items, kind) {
+  if (!items.length) return;
+  const details = document.createElement("details");
+  details.className = "fold";
+  const summary = document.createElement("summary");
+  summary.textContent = title;
+  details.append(summary);
+  for (const item of items) details.append(slip(item, kind));
+  pile.append(details);
 }
 
 function renderThread(data) {
   $("#slip-title").textContent = data.thread.title;
-  $("#slip-meta").textContent = data.thread.awaiting ? `等了 ${spent(Date.now() - data.thread.updatedAt)}` : "已回复";
   const last = data.messages.at(-1);
+  const shelve = $("#shelve");
+  const block = $("#block");
+  shelve.hidden = Boolean(data.thread.blocked) || !data.thread.awaiting;
+  block.hidden = false;
+  if (!data.thread.awaiting) {
+    shelve.dataset.confirm = "";
+    shelve.textContent = "先放下";
+  }
+  if (data.thread.blocked) {
+    if (block.dataset.confirm !== "1") block.textContent = "解开";
+    block.dataset.mode = "undo";
+  } else if (block.dataset.confirm !== "1") {
+    block.textContent = "拉黑";
+    block.dataset.mode = "";
+  }
+  $("#slip-meta").textContent = data.thread.blocked
+    ? "已拉黑"
+    : data.thread.awaiting
+      ? `等了 ${spent(Date.now() - data.thread.updatedAt)}`
+      : last && last.role === "visitor"
+        ? "先放下了"
+        : "已回复";
   $("#answer").placeholder = last && last.role === "visitor" && last.draw
     ? "他要一张图。画完放进来，或写一句。"
     : "写一句可能没用的话";
@@ -211,6 +251,54 @@ async function tick() {
   }
   arm();
 }
+
+$("#block").addEventListener("click", async () => {
+  if (!selected || $("#block").hidden) return;
+  const button = $("#block");
+  const undo = button.dataset.mode === "undo";
+  if (button.dataset.confirm !== "1") {
+    button.dataset.confirm = "1";
+    button.textContent = undo ? "确定解开" : "确定拉黑";
+    window.setTimeout(() => {
+      if (button.dataset.confirm !== "1") return;
+      button.dataset.confirm = "";
+      button.textContent = undo ? "解开" : "拉黑";
+    }, 2200);
+    return;
+  }
+  button.dataset.confirm = "";
+  try {
+    await api(`/api/admin/threads/${selected}/${undo ? "unblock" : "block"}`, { method: "POST" });
+    shown = "";
+    await openSlip(selected);
+  } catch (err) {
+    replyErr.textContent = err.message || "这句还在桌上。";
+  }
+});
+
+$("#shelve").addEventListener("click", async () => {
+  if (!selected || $("#shelve").hidden) return;
+  const button = $("#shelve");
+  if (button.dataset.confirm !== "1") {
+    button.dataset.confirm = "1";
+    button.textContent = "放下";
+    window.setTimeout(() => {
+      if (button.dataset.confirm !== "1") return;
+      button.dataset.confirm = "";
+      button.textContent = "先放下";
+    }, 2200);
+    return;
+  }
+  button.dataset.confirm = "";
+  button.textContent = "先放下";
+  try {
+    await api(`/api/admin/threads/${selected}/shelve`, { method: "POST" });
+    shown = "";
+    await openSlip(selected);
+  } catch (err) {
+    replyErr.textContent = err.message || "这句还在桌上。";
+  }
+});
 
 $("#login").addEventListener("submit", async (event) => {
   event.preventDefault();

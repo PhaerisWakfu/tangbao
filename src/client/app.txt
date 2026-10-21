@@ -1,4 +1,6 @@
 const STORE_KEY = "tangbao.v1";
+const VISITOR_KEY = "tangbao.visitor";
+const BLOCKED = "这边不再收新的话了。";
 const POLL_MS = 30000;
 const WAIT = {
   awake: "他在看这句，不是在生成。",
@@ -25,12 +27,28 @@ let store = loadStore();
 let current = store.threads.find((item) => item.id === store.activeId) || null;
 let status = { state: "available", label: "可用", note: "他醒着", awake: true };
 let messages = [];
+let openAwaiting = true;
 let painted = "";
 let timer = 0;
 let sending = false;
 let pendingImages = [];
 let making = false;
+let blocked = false;
 const MAX_IMAGES = 6;
+
+function visitorId() {
+  try {
+    const existing = localStorage.getItem(VISITOR_KEY) || "";
+    if (/^[A-Za-z0-9_-]{16,80}$/.test(existing)) return existing;
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const id = btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    localStorage.setItem(VISITOR_KEY, id);
+    return id;
+  } catch {
+    return "";
+  }
+}
 
 function loadStore() {
   try {
@@ -54,7 +72,7 @@ class ApiError extends Error {
 }
 
 async function api(path, options = {}) {
-  const headers = {};
+  const headers = { "x-visitor": visitorId() };
   const form = options.body instanceof FormData;
   if (options.body && !form) headers["content-type"] = "application/json";
   if (options.token) headers.authorization = `Bearer ${options.token}`;
@@ -94,6 +112,15 @@ function throughput(chars, ms) {
 function clock(ts) {
   const date = new Date(ts);
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function applyBlocked(on) {
+  blocked = on;
+  input.disabled = on;
+  $("#plus").disabled = on;
+  if (on) showSys(BLOCKED);
+  else if (sys.textContent === BLOCKED) showSys("");
+  grow();
 }
 
 function showSys(text) {
@@ -183,7 +210,7 @@ function tickPending() {
 }
 
 function paint(list) {
-  const key = JSON.stringify(list);
+  const key = JSON.stringify({ list, openAwaiting, blocked });
   if (key === painted) {
     tickPending();
     return;
@@ -213,7 +240,13 @@ function paint(list) {
       askedAt = 0;
     }
   }
-  if (askedAt) log.append(pendingRow(askedAt));
+  if (askedAt && !blocked && openAwaiting) log.append(pendingRow(askedAt));
+  else if (askedAt && !blocked) {
+    const note = document.createElement("p");
+    note.className = "letgo";
+    note.textContent = "他先把这句放下了。";
+    log.append(note);
+  }
   tickPending();
   stage.scrollTop = stage.scrollHeight;
 }
@@ -302,6 +335,7 @@ function forget(id) {
   saveStore();
   current = null;
   painted = "";
+  openAwaiting = true;
   paint([]);
   renderHistory();
 }
@@ -314,6 +348,8 @@ async function refresh() {
   try {
     const data = await api(`/api/threads/${current.id}`, { token: current.token });
     applyStatus(data.status);
+    openAwaiting = data.awaiting !== false && data.awaiting !== 0;
+    applyBlocked(Boolean(data.blocked));
     if (data.title && data.title !== current.title) {
       current.title = data.title;
       saveStore();
@@ -376,11 +412,12 @@ function newChat() {
   store.activeId = null;
   saveStore();
   painted = "";
+  openAwaiting = true;
   paint([]);
   renderHistory();
   closeSide();
-  showSys("");
-  input.focus();
+  showSys(blocked ? BLOCKED : "");
+  if (!blocked) input.focus();
 }
 
 function shotFiles(message) {
@@ -527,10 +564,11 @@ async function addImages(files) {
 function grow() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
-  send.disabled = sending || (making ? !input.value.trim() : !input.value.trim() && !pendingImages.length);
+  send.disabled = blocked || sending || (making ? !input.value.trim() : !input.value.trim() && !pendingImages.length);
 }
 
 async function sendText(text) {
+  if (blocked) return;
   const trimmed = text.trim();
   const images = pendingImages.slice();
   if ((!trimmed && !images.length) || sending) return;
@@ -538,6 +576,7 @@ async function sendText(text) {
   send.disabled = true;
   showSys("");
   const prior = messages.slice();
+  openAwaiting = true;
   paint(prior.concat([{
     id: "local",
     role: "visitor",

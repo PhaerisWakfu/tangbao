@@ -24,6 +24,7 @@ function assert(cond, message) {
 async function req(path, options = {}) {
   const headers = new Headers(options.headers);
   if (cookie) headers.set("cookie", cookie);
+  if (!headers.has("x-visitor")) headers.set("x-visitor", "smoke-visitor-0001");
   const response = await fetch(base + path, { ...options, headers });
   const setCookie = response.headers.get("set-cookie");
   if (setCookie) cookie = setCookie.split(";")[0];
@@ -154,6 +155,26 @@ const awake = await req("/api/admin/status", {
   body: JSON.stringify({ awake: true }),
 });
 assert(awake.body.awake === true, "lamp back on");
+
+const blocked = await req(`/api/admin/threads/${created.body.id}/block`, { method: "POST" });
+assert(blocked.response.status === 200, "block visitor");
+const silenced = await req(`/api/threads/${created.body.id}/messages`, {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${created.body.token}`,
+    "content-type": "application/json",
+  },
+  body: JSON.stringify({ body: "再写一句" }),
+});
+assert(silenced.response.status === 403, "blocked thread cannot send");
+const fresh = await req("/api/threads", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ body: "换一段对话" }),
+});
+assert(fresh.response.status === 403, "blocked visitor cannot start again");
+const opened = await req(`/api/admin/threads/${created.body.id}/unblock`, { method: "POST" });
+assert(opened.response.status === 200, "unblock visitor");
 
 const removed = await req(`/api/threads/${created.body.id}`, {
   method: "DELETE",

@@ -78,6 +78,13 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     if (method === "POST") return adminReply(request, env, adminThread[1]);
   }
 
+  const shelve = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/shelve$/);
+  if (shelve && method === "POST") return shelveThread(request, env, shelve[1]);
+  const block = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/block$/);
+  if (block && method === "POST") return blockThread(request, env, block[1]);
+  const unblock = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/unblock$/);
+  if (unblock && method === "POST") return unblockThread(request, env, unblock[1]);
+
   const visitor = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})(\/messages)?$/);
   if (visitor) {
     const id = visitor[1];
@@ -146,8 +153,12 @@ async function notifyFeishu(env: AppEnv, title: string, preview: string): Promis
   }
 }
 
+const BLOCKED = "这边不再收新的话了。";
+
 async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
+  const visitor = await visitorHash(request);
   const ip = await clientHash(request);
+  if (await isBlocked(env, [visitor, ip])) throw new HttpError(403, BLOCKED);
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) {
     throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   }
@@ -164,8 +175,8 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting) VALUES (?, ?, ?, ?, ?, ?, 1)",
-    ).bind(id, await sha256(token), title, preview, now, now),
+      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+    ).bind(id, await sha256(token), title, preview, now, now, visitor || null, ip),
     env.DB.prepare(
       "INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, 'visitor', ?, ?, ?)",
     ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
@@ -177,9 +188,10 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
 
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request));
+  const seen = await attachIdentity(env, thread, request);
   const messages = await listMessages(env, id);
   const status = await publicStatus(env);
-  return json({ title: thread.title, messages, status });
+  return json({ title: thread.title, awaiting: thread.awaiting === 1, blocked: seen.blocked, messages, status });
 }
 
 async function deleteThread(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -200,6 +212,8 @@ async function deleteThread(request: Request, env: AppEnv, id: string): Promise<
 async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const token = bearer(request);
   const thread = await loadOwned(env, id, token);
+  const seen = await attachIdentity(env, thread, request);
+  if (seen.blocked) throw new HttpError(403, BLOCKED);
   if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
     throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
   }
@@ -233,16 +247,66 @@ function logout(request: Request): Response {
 
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   await requireAdmin(request, env);
-  const [waiting, recent, status] = await Promise.all([
+  const [waiting, closed, status] = await Promise.all([
     env.DB.prepare(
       "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 ORDER BY updated_at ASC LIMIT 100",
     ).all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
-      "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 0 ORDER BY updated_at DESC LIMIT 20",
-    ).all<{ id: string; title: string; preview: string; updatedAt: number }>(),
+      `SELECT id, title, preview, updated_at AS updatedAt,
+        (SELECT role FROM messages WHERE thread_id = threads.id ORDER BY created_at DESC LIMIT 1) AS lastRole
+       FROM threads WHERE awaiting = 0 ORDER BY updated_at DESC LIMIT 40`,
+    ).all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
     publicStatus(env),
   ]);
-  return json({ awake: status.awake, waiting: waiting.results, recent: recent.results });
+  const blocked = await env.DB.prepare(
+    `SELECT id, title, preview, updated_at AS updatedAt FROM threads
+     WHERE token_hash IN (SELECT id FROM blocks)
+        OR visitor_hash IN (SELECT id FROM blocks)
+        OR ip_hash IN (SELECT id FROM blocks)
+     ORDER BY updated_at DESC LIMIT 20`,
+  ).all<{ id: string; title: string; preview: string; updatedAt: number }>();
+  const blockedIds = new Set(blocked.results.map((row) => row.id));
+  const rows = closed.results;
+  return json({
+    awake: status.awake,
+    waiting: waiting.results.filter((row) => !blockedIds.has(row.id)),
+    recent: rows.filter((row) => row.lastRole !== "visitor" && !blockedIds.has(row.id)).slice(0, 20),
+    shelved: rows.filter((row) => row.lastRole === "visitor" && !blockedIds.has(row.id)).slice(0, 20),
+    blocked: blocked.results,
+  });
+}
+
+async function blockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  await requireAdmin(request, env);
+  const thread = await env.DB.prepare(
+    "SELECT id, token_hash, visitor_hash, ip_hash FROM threads WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
+  if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
+  await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  return json({ ok: true });
+}
+
+async function unblockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  await requireAdmin(request, env);
+  const thread = await env.DB.prepare(
+    "SELECT id, token_hash, visitor_hash, ip_hash FROM threads WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
+  if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
+  await forgetBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  return json({ ok: true });
+}
+
+async function shelveThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  await requireAdmin(request, env);
+  const exists = await env.DB.prepare("SELECT id FROM threads WHERE id = ?").bind(id).first();
+  if (!exists) throw new HttpError(404, "这张纸条不在桌上。");
+  await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  return json({ ok: true });
 }
 
 async function setStatus(request: Request, env: AppEnv): Promise<Response> {
@@ -259,13 +323,25 @@ async function setStatus(request: Request, env: AppEnv): Promise<Response> {
 async function adminRead(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireAdmin(request, env);
   const thread = await env.DB.prepare(
-    "SELECT id, title, awaiting, updated_at AS updatedAt FROM threads WHERE id = ?",
+    "SELECT id, title, awaiting, token_hash, visitor_hash, ip_hash, updated_at AS updatedAt FROM threads WHERE id = ?",
   )
     .bind(id)
-    .first<{ id: string; title: string; awaiting: number; updatedAt: number }>();
+    .first<{
+      id: string;
+      title: string;
+      awaiting: number;
+      token_hash: string;
+      visitor_hash: string | null;
+      ip_hash: string | null;
+      updatedAt: number;
+    }>();
   if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
   const messages = await listMessages(env, id);
-  return json({ thread, messages });
+  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  return json({
+    thread: { id: thread.id, title: thread.title, awaiting: thread.awaiting, updatedAt: thread.updatedAt, blocked },
+    messages,
+  });
 }
 
 async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -420,15 +496,79 @@ async function presenceHistory(env: AppEnv) {
 async function loadOwned(env: AppEnv, id: string, token: string) {
   if (!token) throw new HttpError(401, "这把钥匙对不上这段对话。");
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash FROM threads WHERE id = ?",
   )
     .bind(id)
-    .first<{ id: string; token_hash: string; title: string; awaiting: number }>();
+    .first<{
+      id: string;
+      token_hash: string;
+      title: string;
+      awaiting: number;
+      visitor_hash: string | null;
+      ip_hash: string | null;
+    }>();
   const hash = await sha256(token);
   if (!thread || !safeEqual(hash, thread.token_hash)) {
     throw new HttpError(401, "这把钥匙对不上这段对话。");
   }
   return thread;
+}
+
+function presentIds(...ids: Array<string | null | undefined>): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+async function isBlocked(env: AppEnv, ids: Array<string | null | undefined>): Promise<boolean> {
+  const fresh = presentIds(...ids);
+  if (!fresh.length) return false;
+  const marks = fresh.map(() => "?").join(", ");
+  const row = await env.DB.prepare(`SELECT id FROM blocks WHERE id IN (${marks}) LIMIT 1`)
+    .bind(...fresh)
+    .first();
+  return Boolean(row);
+}
+
+async function rememberBlock(env: AppEnv, ids: Array<string | null | undefined>): Promise<void> {
+  const fresh = presentIds(...ids);
+  if (!fresh.length) return;
+  const now = Date.now();
+  await env.DB.batch(
+    fresh.map((id) =>
+      env.DB.prepare("INSERT INTO blocks (id, created_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING").bind(id, now),
+    ),
+  );
+}
+
+async function forgetBlock(env: AppEnv, ids: Array<string | null | undefined>): Promise<void> {
+  const fresh = presentIds(...ids);
+  if (!fresh.length) return;
+  const marks = fresh.map(() => "?").join(", ");
+  await env.DB.prepare(`DELETE FROM blocks WHERE id IN (${marks})`).bind(...fresh).run();
+}
+
+async function visitorHash(request: Request): Promise<string> {
+  const raw = request.headers.get("x-visitor") || "";
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(raw)) return "";
+  return sha256(raw);
+}
+
+async function attachIdentity(
+  env: AppEnv,
+  thread: { id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null },
+  request: Request,
+): Promise<{ blocked: boolean }> {
+  const visitor = await visitorHash(request);
+  const ip = await clientHash(request);
+  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]);
+  if (blocked) await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]);
+  if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
+    await env.DB.prepare(
+      "UPDATE threads SET visitor_hash = COALESCE(visitor_hash, ?), ip_hash = COALESCE(ip_hash, ?) WHERE id = ?",
+    )
+      .bind(visitor || null, ip || null, thread.id)
+      .run();
+  }
+  return { blocked };
 }
 
 async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> {
