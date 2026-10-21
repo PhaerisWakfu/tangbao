@@ -300,6 +300,9 @@ $("#shelve").addEventListener("click", async () => {
   }
 });
 
+let replying = false;
+let replyGuard = { key: "", at: 0 };
+
 $("#login").addEventListener("submit", async (event) => {
   event.preventDefault();
   loginErr.textContent = "";
@@ -335,13 +338,20 @@ answer.addEventListener("keydown", (event) => {
 
 reply.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!selected) return;
+  if (!selected || replying) return;
   const text = answer.value.trim();
   const images = pendingImages.slice();
   if (!text && !images.length) {
     replyErr.textContent = "写一句可能没用的话，或放图片。";
     return;
   }
+  const key = `${text}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
+  const now = Date.now();
+  if (replyGuard.key === key && now - replyGuard.at < 1500) return;
+  replying = true;
+  replyGuard = { key, at: now };
+  const button = reply.querySelector(".send");
+  button.disabled = true;
   replyErr.textContent = "";
   const payload = images.length ? new FormData() : { body: text };
   if (images.length) {
@@ -356,7 +366,11 @@ reply.addEventListener("submit", async (event) => {
     renderThread(await api(`/api/admin/threads/${selected}`));
     await loadQueue();
   } catch (err) {
+    replyGuard.key = "";
     replyErr.textContent = err.message;
+  } finally {
+    replying = false;
+    button.disabled = false;
   }
 });
 

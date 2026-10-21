@@ -31,6 +31,7 @@ let openAwaiting = true;
 let painted = "";
 let timer = 0;
 let sending = false;
+let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
 let making = false;
 let blocked = false;
@@ -568,11 +569,15 @@ function grow() {
 }
 
 async function sendText(text) {
-  if (blocked) return;
+  if (blocked || sending) return;
   const trimmed = text.trim();
   const images = pendingImages.slice();
-  if ((!trimmed && !images.length) || sending) return;
+  if (!trimmed && !images.length) return;
+  const key = `${trimmed}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
+  const now = Date.now();
+  if (sentGuard.key === key && now - sentGuard.at < 1500) return;
   sending = true;
+  sentGuard = { key, at: now };
   send.disabled = true;
   showSys("");
   const prior = messages.slice();
@@ -617,6 +622,7 @@ async function sendText(text) {
     input.value = trimmed;
     pendingImages = images;
     showAttach();
+    sentGuard.key = "";
     sending = false;
     grow();
     showSys(err.message || "消息没送出去。糖包那边暂时没应。");

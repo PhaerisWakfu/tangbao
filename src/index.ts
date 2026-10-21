@@ -1,5 +1,6 @@
 import aboutHtml from "./pages/about.html";
 import { maskAbuse } from "./abuse";
+import { inOffHours, nextOffAt } from "./hours";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
@@ -53,6 +54,9 @@ export default {
       );
       return json({ error: "桌子这边晃了一下。过一会儿再试。" }, 500);
     }
+  },
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(applySchedule(env));
   },
 } satisfies ExportedHandler<AppEnv>;
 
@@ -130,6 +134,9 @@ function noteVisitor(ctx: ExecutionContext, env: AppEnv, request: Request, title
 async function notifyFeishu(env: AppEnv, title: string, preview: string): Promise<void> {
   const hook = env.FEISHU_WEBHOOK;
   if (!hook) return;
+  await applySchedule(env);
+  const awake = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
+  if (awake?.value === "0") return;
   const lines = ["桌上有新纸条", title];
   if (preview && preview !== title) lines.push(preview);
   lines.push(DESK_URL);
@@ -313,11 +320,42 @@ async function setStatus(request: Request, env: AppEnv): Promise<Response> {
   await requireAdmin(request, env);
   const payload = await readJson(request);
   if (typeof payload.awake !== "boolean") throw new HttpError(400, "灯的状态没写清。");
+  const now = Date.now();
   await env.DB.batch([
     env.DB.prepare("UPDATE settings SET value = ? WHERE key = 'awake'").bind(payload.awake ? "1" : "0"),
-    env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, ?)").bind(Date.now(), payload.awake ? 1 : 0),
+    env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES ('awake_hold', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).bind(payload.awake ? String(nextOffAt(now)) : "0"),
+    env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, ?)").bind(now, payload.awake ? 1 : 0),
   ]);
   return json(await publicStatus(env));
+}
+
+async function applySchedule(env: AppEnv): Promise<void> {
+  const now = Date.now();
+  const holdRow = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake_hold'").first<{ value: string }>();
+  const hold = Number(holdRow?.value || "0");
+  if (hold && now < hold) return;
+  if (hold) {
+    await env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES ('awake_hold', '0') ON CONFLICT(key) DO UPDATE SET value = '0'",
+    ).run();
+  }
+  if (!inOffHours(now)) return;
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
+  if (row?.value === "0") return;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE settings SET value = '0' WHERE key = 'awake'"),
+    env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, 0)").bind(now),
+  ]);
+}
+
+async function publicStatus(env: AppEnv): Promise<StatusPayload> {
+  await applySchedule(env);
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
+  const awake = row?.value !== "0";
+  if (awake) return { state: "available", label: "可用", note: "他醒着", awake: true };
+  return { state: "busy", label: "繁忙", note: "他睡了", awake: false };
 }
 
 async function adminRead(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -446,13 +484,6 @@ function caption(body: string, count: number): string {
   if (body) return body;
   if (count <= 1) return "一张图片";
   return `${count} 张图片`;
-}
-
-async function publicStatus(env: AppEnv): Promise<StatusPayload> {
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
-  const awake = row?.value !== "0";
-  if (awake) return { state: "available", label: "可用", note: "他醒着", awake: true };
-  return { state: "busy", label: "繁忙", note: "他睡了", awake: false };
 }
 
 async function presenceHistory(env: AppEnv) {
