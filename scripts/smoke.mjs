@@ -71,6 +71,20 @@ assert(read.response.status === 200 && read.body.messages.length === 1, "owner c
 assert(read.body.messages[0].body === "这封信要不要回？", "message stored");
 assert(read.body.messages[0].draw === 0, "plain message is not a picture");
 
+const rude = await req(`/api/threads/${created.body.id}/messages`, {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${created.body.token}`,
+    "content-type": "application/json",
+  },
+  body: JSON.stringify({ body: "你这个傻逼，信还是要回。兼职招聘。" }),
+});
+assert(rude.response.status === 200, "rude message accepted");
+const masked = await req(`/api/threads/${created.body.id}`, {
+  headers: { authorization: `Bearer ${created.body.token}` },
+});
+assert(masked.body.messages.at(-1).body === "你这个**，信还是要回。****。", "blocked words become stars");
+
 const drawn = await req(`/api/threads/${created.body.id}/messages`, {
   method: "POST",
   headers: {

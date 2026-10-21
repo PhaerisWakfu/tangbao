@@ -1,4 +1,5 @@
 import aboutHtml from "./pages/about.html";
+import { maskAbuse } from "./abuse";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
@@ -524,7 +525,7 @@ async function readIncoming(request: Request, empty: string): Promise<Incoming> 
     if (declared > MAX_IMAGES * IMAGE_LIMIT + 100_000) throw new HttpError(413, "这些图太大了。先收一收再发。");
     const form = await request.formData();
     const raw = form.get("body");
-    const text = typeof raw === "string" ? sanitize(raw) : "";
+    const text = maskAbuse(typeof raw === "string" ? sanitize(raw) : "");
     if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");
     const files = [...form.getAll("images"), ...form.getAll("image")].filter(
       (file): file is File => file instanceof File && file.size > 0,
@@ -548,7 +549,7 @@ async function readIncoming(request: Request, empty: string): Promise<Incoming> 
 
 function cleanBody(input: unknown, empty = "先写一句再发送。"): string {
   if (typeof input !== "string") throw new HttpError(400, empty);
-  const text = sanitize(input);
+  const text = maskAbuse(sanitize(input));
   if (!text) throw new HttpError(400, empty);
   if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");
   return text;
