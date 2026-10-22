@@ -723,7 +723,7 @@ $("#pick-image").addEventListener("click", () => {
   closePlus();
   $("#file").click();
 });
-const ASK_CHIPS = ["今晚要不要早一点睡", "怎样把拒绝说软一点", "一件事值不值得做，看什么", "拖了很久的事，怎么开始"];
+const ASK_CHIPS = ["How are you", "哈基米", "咕咕", "锟斤拷"];
 const DRAW_CHIPS = ["画一只猫", "画一只兔子", "画一朵花", "画一轮月亮"];
 
 function setMaking(on) {
