@@ -33,6 +33,12 @@ let timer = 0;
 let sending = false;
 let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
+const HOME = "tangbao-vme50-flash";
+const MODEL_KEY = "tangbao.model";
+const APPLY_KEY = "tangbao.apply";
+let models = [];
+let chosen = HOME;
+let threadModel = "";
 let making = false;
 let blocked = false;
 const MAX_IMAGES = 6;
@@ -346,12 +352,15 @@ function forget(id) {
 
 async function refresh() {
   if (!current) {
-    applyStatus(await api("/api/status"));
+    if (activeModel() === HOME) applyStatus(await api("/api/status"));
+    else applyModelLamp();
     return;
   }
   try {
     const data = await api(`/api/threads/${current.id}`, { token: current.token });
-    applyStatus(data.status);
+    if (data.operator) threadModel = data.operator;
+    if (!threadModel || threadModel === HOME) applyStatus(data.status);
+    else applyModelLamp();
     openAwaiting = data.awaiting !== false && data.awaiting !== 0;
     applyBlocked(Boolean(data.blocked));
     if (data.title && data.title !== current.title) {
@@ -360,6 +369,7 @@ async function refresh() {
       renderHistory();
     }
     paint(data.messages || []);
+    paintModels();
   } catch (err) {
     if (err instanceof ApiError && err.statusCode === 401) {
       forget(current.id);
@@ -380,6 +390,7 @@ function arm() {
 
 async function tick() {
   try {
+    await loadModels(false);
     await refresh();
   } catch {
     // 下一轮再看。失败不改掉已经写在页面上的话。
@@ -395,6 +406,7 @@ async function openThread(id) {
   const found = store.threads.find((item) => item.id === id);
   if (!found) return;
   current = found;
+  threadModel = "";
   store.activeId = id;
   saveStore();
   renderHistory();
@@ -413,6 +425,7 @@ async function openThread(id) {
 
 function newChat() {
   current = null;
+  threadModel = "";
   store.activeId = null;
   saveStore();
   painted = "";
@@ -421,6 +434,7 @@ function newChat() {
   renderHistory();
   closeSide();
   showSys(blocked ? BLOCKED : "");
+  void loadModels(true);
   if (!blocked) input.focus();
 }
 
@@ -606,16 +620,17 @@ async function sendText(text) {
     for (const item of images) payload.append("images", item.file, item.file.name);
   }
   try {
-    if (!current) {
-      const created = await api("/api/threads", { method: "POST", body: payload });
+  if (!current) {
+    const created = await api("/api/threads", { method: "POST", body: withOperator(payload) });
       current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
+      if (created.operator) threadModel = created.operator;
     } else {
       const data = await api(`/api/threads/${current.id}/messages`, {
         method: "POST",
         token: current.token,
         body: payload,
       });
-      if (data.status) applyStatus(data.status);
+      if (data.status && activeModel() === HOME) applyStatus(data.status);
       current.updatedAt = Date.now();
     }
     remember(current);
@@ -663,6 +678,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!$("#viewer").hidden) {
     closeViewer();
+    return;
+  }
+  if (!$("#apply").hidden) {
+    $("#apply").hidden = true;
     return;
   }
   closeCard();
@@ -768,6 +787,155 @@ composer.addEventListener("paste", async (event) => {
   }
 });
 
+function withOperator(payload) {
+  if (payload instanceof FormData) {
+    payload.set("operator", activeModel());
+    return payload;
+  }
+  return { ...payload, operator: activeModel() };
+}
+
+function activeModel() {
+  return threadModel || chosen;
+}
+
+function applyModelLamp() {
+  if (activeModel() === HOME) return;
+  const model = models.find((item) => item.id === activeModel());
+  const on = Boolean(model?.awake);
+  applyStatus({
+    state: on ? "available" : "busy",
+    label: on ? "可用" : "繁忙",
+    note: on ? "他醒着" : "他睡了",
+    awake: on,
+  });
+}
+
+function paintModels() {
+  const id = activeModel();
+  $("#model-name").textContent = id;
+  $("#card h2").textContent = id;
+  const list = $("#model-list");
+  list.replaceChildren();
+  for (const model of models) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "model-row";
+    button.setAttribute("aria-pressed", String(model.id === id));
+    button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><b></b>`;
+    button.querySelector("b").textContent = model.id;
+    if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
+    button.addEventListener("click", () => {
+      if (current) return;
+      chosen = model.id;
+      paintModels();
+    });
+    list.append(button);
+  }
+  syncLamp();
+}
+
+function syncLamp() {
+  if (activeModel() === HOME) {
+    if (!current) void api("/api/status").then(applyStatus).catch(() => {});
+    return;
+  }
+  applyModelLamp();
+}
+
+async function loadModels(pick) {
+  try {
+    const data = await api("/api/models");
+    models = data.models || [];
+  } catch {
+    return;
+  }
+  if (pick && !current) {
+    let picked = "";
+    try {
+      picked = localStorage.getItem(MODEL_KEY) || "";
+      if (picked) localStorage.removeItem(MODEL_KEY);
+    } catch {}
+    const fromAbout = models.find((item) => item.id === picked);
+    const awake = models.find((item) => item.awake);
+    const home = models.find((item) => item.home) || models[0];
+    const next = fromAbout || awake || home;
+    if (next) chosen = next.id;
+  }
+  paintModels();
+}
+
+function showOath() {
+  $("#apply-oath").hidden = false;
+  $("#apply-form").hidden = true;
+  $("#apply-state").hidden = true;
+}
+
+async function showApplication(id) {
+  let data;
+  try {
+    data = await api(`/api/applications/${id}`);
+  } catch (err) {
+    $("#apply-err").textContent = err.message;
+    return;
+  }
+  $("#apply-oath").hidden = true;
+  $("#apply-form").hidden = true;
+  $("#apply-state").hidden = false;
+  const text = {
+    pending: "申请在等。通过后，口令由糖包交给你。",
+    approved: "申请过了。用糖包交给你的口令去桌子背面。",
+    rejected: "这次没过。",
+  };
+  $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+  $("#apply-again").hidden = data.status === "pending" || data.status === "approved";
+}
+
+function openApply() {
+  $("#apply").hidden = false;
+  $("#apply-err").textContent = "";
+  let saved = "";
+  try {
+    saved = localStorage.getItem(APPLY_KEY) || "";
+  } catch {}
+  if (saved) void showApplication(saved);
+  else showOath();
+}
+
+$("#join").addEventListener("click", openApply);
+$("#apply-close").addEventListener("click", () => {
+  $("#apply").hidden = true;
+});
+$("#apply").addEventListener("click", (event) => {
+  if (event.target === $("#apply")) $("#apply").hidden = true;
+});
+$("#apply-next").addEventListener("click", () => {
+  $("#apply-oath").hidden = true;
+  $("#apply-form").hidden = false;
+});
+$("#apply-again").addEventListener("click", () => {
+  try {
+    localStorage.removeItem(APPLY_KEY);
+  } catch {}
+  showOath();
+});
+$("#apply-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("#apply-err").textContent = "";
+  try {
+    const data = await api("/api/applications", {
+      method: "POST",
+      body: { suffix: $("#apply-suffix").value, email: $("#apply-email").value },
+    });
+    try {
+      localStorage.setItem(APPLY_KEY, data.id);
+    } catch {}
+    await showApplication(data.id);
+  } catch (err) {
+    $("#apply-err").textContent = err.message;
+  }
+});
+
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearTimeout(timer);
   else void tick();
@@ -775,8 +943,11 @@ document.addEventListener("visibilitychange", () => {
 
 setInterval(tickPending, 15000);
 renderHistory();
-if (current) {
-  body.dataset.state = "chat";
-  titleEl.textContent = current.title || "";
-}
-void tick();
+void (async () => {
+  await loadModels(true);
+  if (current) {
+    body.dataset.state = "chat";
+    titleEl.textContent = current.title || "";
+  }
+  void tick();
+})();

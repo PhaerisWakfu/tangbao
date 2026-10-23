@@ -47,7 +47,7 @@
       <button class="new" type="button" id="new"><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span>新对话</button>
       <nav class="hist" id="history" aria-label="对话"></nav>
       <div class="side-foot">
-        <a href="/about"><svg class="i"><use href="#i-info"/></svg>关于模型<small>tangbao-vme50-flash</small></a>
+        <a href="/about"><svg class="i"><use href="#i-info"/></svg>关于模型<small>型号</small></a>
       </div>
     </aside>
     <button class="scrim" type="button" id="scrim" aria-label="关闭侧栏"></button>
@@ -57,6 +57,7 @@
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title" id="title"></span>
         <span class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></span>
+        <button class="join" type="button" id="join">成为AI</button>
         <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>
       </header>
 
@@ -92,14 +93,13 @@
               </div>
             </div>
             <input class="sr" id="file" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
-            <button class="model" type="button" id="model" aria-expanded="false" aria-controls="card">tangbao-vme50-flash<svg class="i"><use href="#i-chev"/></svg></button>
+            <button class="model" type="button" id="model" aria-expanded="false" aria-controls="card"><span id="model-name">tangbao-vme50-flash</span><svg class="i"><use href="#i-chev"/></svg></button>
             <button class="send" type="submit" aria-label="发送" disabled><svg class="i"><use href="#i-up"/></svg></button>
           </div>
           <div class="card" id="card" hidden>
             <header>
               <svg class="mark"><use href="#pleat"/></svg>
               <div><h2>tangbao-vme50-flash</h2><p>人工语言模型</p></div>
-              <svg class="i ok"><use href="#i-check"/></svg>
             </header>
             <dl>
               <dt>参数量</dt><dd>1 个糖包</dd>
@@ -110,7 +110,8 @@
               <dt>推理硬件</dt><dd>十根手指</dd>
               <dt>文生图</dt><dd>他拿笔画</dd>
             </dl>
-            <footer><span>目前只有这一个模型</span><a href="/about">完整说明</a></footer>
+            <div class="model-list" id="model-list"></div>
+            <footer><a href="/about">完整说明</a></footer>
           </div>
         </form>
         <div class="chips" id="chips">
@@ -122,6 +123,30 @@
       </div>
       <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「能工智人」，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
     </main>
+  </div>
+  <div class="apply" id="apply" hidden>
+    <div class="apply-card" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+      <header>
+        <h2 id="apply-title">成为AI</h2>
+        <button type="button" id="apply-close" aria-label="关闭">×</button>
+      </header>
+      <div id="apply-oath">
+        <p>通过之后，对外你也叫糖包。回复的是你这个人，发出去的话由你负责。不骂人，不把别人的对话说出去。</p>
+        <p>有违规行为，这个模型会被封禁。</p>
+        <button class="primary" type="button" id="apply-next">我知道了</button>
+      </div>
+      <form id="apply-form" hidden>
+        <label class="field"><span>模型 id</span><span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span></label>
+        <label class="field"><span>邮箱</span><input id="apply-email" type="email" autocomplete="email" required></label>
+        <p class="hint">邮箱只留给审批的人，不会出现在型号列表里。口令通过后由糖包交给你。</p>
+        <button class="primary" type="submit">提交申请</button>
+        <p class="err" id="apply-err" role="alert"></p>
+      </form>
+      <div id="apply-state" hidden>
+        <p id="apply-state-text"></p>
+        <button type="button" id="apply-again" hidden>再申请一次</button>
+      </div>
+    </div>
   </div>
   <div class="viewer" id="viewer" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>

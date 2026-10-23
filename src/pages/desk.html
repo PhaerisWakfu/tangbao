@@ -32,7 +32,7 @@
     <form class="gate-card" id="login">
       <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
       <h1>桌子背面</h1>
-      <p>前台穿着模型的衣服。这里是糖包坐的那一侧。</p>
+      <p>前台穿着模型的衣服。口令决定你坐哪一张。</p>
       <label class="field"><span>口令</span><input id="password" type="password" autocomplete="current-password" required></label>
       <button class="primary" type="submit">坐下</button>
       <p class="err" id="login-err" role="alert"></p>
@@ -45,6 +45,11 @@
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>桌子背面</a>
         <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
       </header>
+      <nav class="desk-nav" id="desk-nav" hidden>
+        <button type="button" data-view="thread" aria-pressed="true">我的桌子</button>
+        <button type="button" data-view="apply">申请</button>
+        <button type="button" data-view="audit">审计</button>
+      </nav>
       <button class="lamp" type="button" id="lamp" role="switch" aria-checked="true">
         <span class="track" aria-hidden="true"></span>
         <b>灯亮着</b>
@@ -55,7 +60,9 @@
     </aside>
 
     <section class="reader" id="reader">
+      <div id="pane-thread">
       <header class="reader-top">
+        <button class="back" type="button" id="back-audit" hidden>回到审计</button>
         <h2 id="slip-title">还没选消息</h2>
         <small id="slip-meta"></small>
         <button class="shelve" type="button" id="shelve" hidden>先放下</button>
@@ -82,6 +89,15 @@
         </div>
         <p class="err" id="reply-err" role="alert"></p>
       </form>
+      </div>
+      <div class="pane" id="pane-apply" hidden>
+        <header class="reader-top"><h2>申请</h2></header>
+        <div class="papers" id="applications"></div>
+      </div>
+      <div class="pane" id="pane-audit" hidden>
+        <header class="reader-top"><h2>审计</h2></header>
+        <div class="papers" id="audit"></div>
+      </div>
     </section>
   </div>
   <div class="sketch" id="sketch" hidden>

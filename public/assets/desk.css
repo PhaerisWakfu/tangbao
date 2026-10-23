@@ -44,6 +44,45 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
 .desk[hidden] { display: none; }
 .pile-col { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; background: var(--side); }
 .desk-top { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 2px 0 8px; }
+.desk-nav { display: flex; gap: 6px; padding: 0 8px 8px; }
+.desk-nav[hidden] { display: none; }
+.desk-nav button {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.desk-nav button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+#pane-thread { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#pane-thread[hidden] { display: none; }
+.pane { flex: 1; min-height: 0; overflow: auto; }
+.pane[hidden] { display: none; }
+.papers { padding: 0 24px 28px; }
+.papers h3 { margin: 18px 0 8px; font-size: 12px; font-weight: 500; color: var(--faint); }
+.papers .quiet { margin: 8px 0 0; text-align: left; }
+.paper { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.paper b { display: block; font-family: var(--mono); font-size: 13px; font-weight: 600; }
+.paper p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.paper .acts { display: flex; gap: 8px; margin-top: 10px; }
+.paper button, .audit-line {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.audit-line { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; margin-top: 8px; padding: 10px 12px; border-radius: 12px; text-align: left; }
+.audit-line b { font-size: 13px; }
+.audit-line small { margin-left: auto; color: var(--faint); }
+.pass { font-family: var(--mono); font-size: 15px; color: var(--ink); }
+.back { margin-right: 8px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.back[hidden] { display: none; }
 .desk-top [data-tip]:hover::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 6px); }
 
 .lamp {

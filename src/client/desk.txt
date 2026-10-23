@@ -17,6 +17,9 @@ let selected = null;
 let shown = "";
 let timer = 0;
 let pendingImages = [];
+let readonly = false;
+let seat = { super: false, operatorId: "" };
+const issued = new Map();
 const MAX_IMAGES = 6;
 
 class ApiError extends Error {
@@ -67,9 +70,11 @@ function showDesk(on) {
 function applyAwake(next) {
   awake = next;
   body.dataset.presence = next ? "awake" : "asleep";
-  try {
-    localStorage.setItem("tangbao.presence", body.dataset.presence);
-  } catch {}
+  if (seat.super) {
+    try {
+      localStorage.setItem("tangbao.presence", body.dataset.presence);
+    } catch {}
+  }
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
   lamp.setAttribute("aria-checked", String(next));
   lamp.querySelector("b").textContent = next ? "灯亮着" : "灯灭了";
@@ -148,10 +153,14 @@ function foldPile(title, items, kind) {
 function renderThread(data) {
   $("#slip-title").textContent = data.thread.title;
   const last = data.messages.at(-1);
+  const own = data.thread.operatorId === seat.operatorId;
+  const locked = readonly || !own;
   const shelve = $("#shelve");
   const block = $("#block");
-  shelve.hidden = Boolean(data.thread.blocked) || !data.thread.awaiting;
-  block.hidden = false;
+  shelve.hidden = locked || Boolean(data.thread.blocked) || !data.thread.awaiting;
+  block.hidden = !seat.super;
+  $("#back-audit").hidden = !readonly;
+  reply.hidden = locked;
   if (!data.thread.awaiting) {
     shelve.dataset.confirm = "";
     shelve.textContent = "先放下";
@@ -209,7 +218,7 @@ function renderThread(data) {
       wrap.append(shots);
     }
     const meta = document.createElement("small");
-    const who = message.role === "tangbao" ? "你" : "对方";
+    const who = message.role === "tangbao" ? (locked ? "糖包" : "你") : "对方";
     meta.textContent = message.draw ? `${who} · 要一张图 · ${clock(message.createdAt)}` : `${who} · ${clock(message.createdAt)}`;
     wrap.append(meta);
     thread.append(wrap);
@@ -219,14 +228,27 @@ function renderThread(data) {
 
 async function loadQueue() {
   const data = await api("/api/admin/queue");
+  seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
+  $("#desk-nav").hidden = !seat.super;
   renderQueue(data);
 }
 
-async function openSlip(id) {
+function showPane(name, nav) {
+  $("#pane-thread").hidden = name !== "thread";
+  $("#pane-apply").hidden = name !== "apply";
+  $("#pane-audit").hidden = name !== "audit";
+  const current = nav || name;
+  for (const button of $("#desk-nav").querySelectorAll("button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.view === current));
+  }
+}
+
+async function openSlip(id, fromAudit) {
+  readonly = Boolean(fromAudit);
+  showPane("thread", readonly ? "audit" : "thread");
   if (id !== selected) shown = "";
   selected = id;
-  reply.hidden = false;
   replyErr.textContent = "";
   try {
     renderThread(await api(`/api/admin/threads/${id}`));
@@ -235,7 +257,7 @@ async function openSlip(id) {
     replyErr.textContent = err.message;
   }
   if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
-  answer.focus();
+  if (!reply.hidden) answer.focus();
 }
 
 function arm() {
@@ -249,7 +271,9 @@ function arm() {
 async function tick() {
   try {
     await loadQueue();
-    if (selected) renderThread(await api(`/api/admin/threads/${selected}`));
+    if (selected && !$("#pane-thread").hidden) renderThread(await api(`/api/admin/threads/${selected}`));
+    if (!$("#pane-apply").hidden) await loadApplications();
+    if (!$("#pane-audit").hidden) await loadAudit();
   } catch (err) {
     if (err instanceof ApiError && err.statusCode === 401) {
       showDesk(false);
@@ -277,7 +301,7 @@ $("#block").addEventListener("click", async () => {
   try {
     await api(`/api/admin/threads/${selected}/${undo ? "unblock" : "block"}`, { method: "POST" });
     shown = "";
-    await openSlip(selected);
+    await openSlip(selected, readonly);
   } catch (err) {
     replyErr.textContent = err.message || "这句还在桌上。";
   }
@@ -334,6 +358,178 @@ lamp.addEventListener("click", async () => {
   } catch (err) {
     count.textContent = err.message;
   }
+});
+
+function statusWord(status) {
+  if (status === "approved") return "过了";
+  if (status === "rejected") return "没过";
+  return "在等";
+}
+
+function confirmClick(button, idle, armed) {
+  if (button.dataset.confirm !== "1") {
+    button.dataset.confirm = "1";
+    button.textContent = armed;
+    window.setTimeout(() => {
+      if (button.dataset.confirm !== "1") return;
+      button.dataset.confirm = "";
+      button.textContent = idle;
+    }, 2200);
+    return false;
+  }
+  button.dataset.confirm = "";
+  button.textContent = idle;
+  return true;
+}
+
+async function loadApplications() {
+  const data = await api("/api/admin/applications");
+  const box = $("#applications");
+  box.replaceChildren();
+  const rows = data.applications || [];
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "quiet";
+    empty.textContent = "没有申请。";
+    box.append(empty);
+    return;
+  }
+  for (const item of rows) {
+    const paper = document.createElement("article");
+    paper.className = "paper";
+    const title = document.createElement("b");
+    title.textContent = `tangbao-${item.suffix}`;
+    paper.append(title);
+    const meta = document.createElement("p");
+    meta.textContent = `${item.email} · ${statusWord(item.status)}`;
+    paper.append(meta);
+    const password = issued.get(item.id);
+    if (password) {
+      const once = document.createElement("p");
+      once.innerHTML = `口令 <span class="pass"></span>。只出现这一次，交给对方。对方到 /desk 用它坐下。`;
+      once.querySelector(".pass").textContent = password;
+      paper.append(once);
+    }
+    if (item.status === "pending") {
+      const acts = document.createElement("div");
+      acts.className = "acts";
+      const approve = document.createElement("button");
+      approve.type = "button";
+      approve.textContent = "通过";
+      approve.addEventListener("click", async () => {
+        if (!confirmClick(approve, "通过", "确定通过")) return;
+        try {
+          const result = await api(`/api/admin/applications/${item.id}/approve`, { method: "POST" });
+          issued.set(item.id, result.password);
+          await loadApplications();
+        } catch (err) {
+          meta.textContent = err.message;
+        }
+      });
+      const reject = document.createElement("button");
+      reject.type = "button";
+      reject.textContent = "没过";
+      reject.addEventListener("click", async () => {
+        if (!confirmClick(reject, "没过", "确定没过")) return;
+        try {
+          await api(`/api/admin/applications/${item.id}/reject`, { method: "POST" });
+          await loadApplications();
+        } catch (err) {
+          meta.textContent = err.message;
+        }
+      });
+      acts.append(approve, reject);
+      paper.append(acts);
+    }
+    box.append(paper);
+  }
+}
+
+async function loadAudit() {
+  const data = await api("/api/admin/audit");
+  const box = $("#audit");
+  box.replaceChildren();
+  const models = document.createElement("h3");
+  models.textContent = "型号";
+  box.append(models);
+  const operators = data.operators || [];
+  if (!operators.length) {
+    const empty = document.createElement("p");
+    empty.className = "quiet";
+    empty.textContent = "还没有别的型号。";
+    box.append(empty);
+  }
+  for (const operator of operators) {
+    const paper = document.createElement("article");
+    paper.className = "paper";
+    const title = document.createElement("b");
+    title.textContent = operator.id;
+    paper.append(title);
+    const meta = document.createElement("p");
+    meta.textContent = operator.active ? (operator.awake ? "在用 · 灯亮着" : "在用 · 灯灭了") : "停了";
+    paper.append(meta);
+    if (operator.active) {
+      const acts = document.createElement("div");
+      acts.className = "acts";
+      const stop = document.createElement("button");
+      stop.type = "button";
+      stop.textContent = "停用";
+      stop.addEventListener("click", async () => {
+        if (!confirmClick(stop, "停用", "确定停用")) return;
+        try {
+          await api(`/api/admin/operators/${operator.id}/disable`, { method: "POST" });
+          await loadAudit();
+        } catch (err) {
+          meta.textContent = err.message;
+        }
+      });
+      acts.append(stop);
+      paper.append(acts);
+    }
+    box.append(paper);
+  }
+  const talks = document.createElement("h3");
+  talks.textContent = "对话";
+  box.append(talks);
+  const threads = data.threads || [];
+  if (!threads.length) {
+    const empty = document.createElement("p");
+    empty.className = "quiet";
+    empty.textContent = "还没有对话。";
+    box.append(empty);
+  }
+  for (const item of threads) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "audit-line";
+    const title = document.createElement("b");
+    title.textContent = item.title || "没有标题";
+    const who = document.createElement("span");
+    who.textContent = item.operatorId;
+    const meta = document.createElement("small");
+    meta.textContent = item.awaiting ? "在等" : clock(item.updatedAt);
+    button.append(title, who, meta);
+    button.addEventListener("click", () => {
+      void openSlip(item.id, true);
+    });
+    box.append(button);
+  }
+}
+
+$("#desk-nav").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  readonly = false;
+  const next = button.dataset.view;
+  showPane(next);
+  if (next === "apply") void loadApplications();
+  if (next === "audit") void loadAudit();
+});
+
+$("#back-audit").addEventListener("click", () => {
+  readonly = false;
+  showPane("audit");
+  void loadAudit();
 });
 
 answer.addEventListener("keydown", (event) => {
