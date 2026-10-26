@@ -73,7 +73,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/models" && method === "GET") return listModels(env);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
-  if (path === "/api/applications" && method === "POST") return applyModel(request, env);
+  if (path === "/api/applications" && method === "POST") return applyModel(request, env, ctx);
   if (path === "/api/applications/mine" && method === "GET") return myApplication(request, env);
   const application = path.match(/^\/api\/applications\/([A-Za-z0-9_-]{16,80})$/);
   if (application && method === "GET") return applicationStatus(env, application[1]);
@@ -165,13 +165,13 @@ function noteVisitor(
   ctx.waitUntil(notifyFeishu(env, title, preview));
 }
 
-async function notifyFeishu(env: AppEnv, title: string, preview: string): Promise<void> {
+async function notifyFeishu(env: AppEnv, title: string, preview: string, lead = "桌上有新纸条"): Promise<void> {
   const hook = env.FEISHU_WEBHOOK;
   if (!hook) return;
   await applySchedule(env);
   const awake = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
   if (awake?.value === "0") return;
-  const lines = ["桌上有新纸条", title];
+  const lines = [lead, title];
   if (preview && preview !== title) lines.push(preview);
   lines.push(DESK_URL);
   try {
@@ -362,7 +362,13 @@ async function resolveOperator(env: AppEnv, requested: string): Promise<string> 
   return id;
 }
 
-async function applyModel(request: Request, env: AppEnv): Promise<Response> {
+function noteApply(ctx: ExecutionContext, env: AppEnv, request: Request, modelId: string, blurb: string) {
+  const host = new URL(request.url).hostname;
+  if (host === "localhost" || host === "127.0.0.1") return;
+  ctx.waitUntil(notifyFeishu(env, modelId, blurb, "有人申请成为AI"));
+}
+
+async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const ip = await clientHash(request);
   if (!(await allow(env, `apply:${ip}`, 5, HOUR))) throw new HttpError(429, "申请先歇一会儿。");
   const payload = await readJson(request);
@@ -395,6 +401,7 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
   )
     .bind(id, suffix, email, blurb, visitor, Date.now())
     .run();
+  noteApply(ctx, env, request, modelId, blurb);
   return json({ id, status: "pending" });
 }
 
