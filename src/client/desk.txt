@@ -420,6 +420,7 @@ async function loadApplications() {
       acts.className = "decide";
       const approve = document.createElement("button");
       approve.type = "button";
+      approve.className = "yes";
       approve.textContent = "通过";
       approve.addEventListener("click", async () => {
         if (!confirmClick(approve, "通过", "确定通过")) return;
@@ -433,6 +434,7 @@ async function loadApplications() {
       });
       const reject = document.createElement("button");
       reject.type = "button";
+      reject.className = "no";
       reject.textContent = "没过";
       reject.addEventListener("click", () => {
         if (paper.querySelector(".reason")) return;
@@ -446,9 +448,11 @@ async function loadApplications() {
         row.className = "decide";
         const send = document.createElement("button");
         send.type = "button";
+        send.className = "no";
         send.textContent = "确定没过";
         const cancel = document.createElement("button");
         cancel.type = "button";
+        cancel.className = "quiet";
         cancel.textContent = "取消";
         cancel.addEventListener("click", () => box.remove());
         send.addEventListener("click", async () => {
@@ -499,24 +503,35 @@ async function loadAudit() {
     const meta = document.createElement("p");
     meta.textContent = operator.active ? (operator.awake ? "在用 · 灯亮着" : "在用 · 灯灭了") : "停了";
     paper.append(meta);
-    if (operator.active) {
-      const acts = document.createElement("div");
-      acts.className = "decide";
-      const stop = document.createElement("button");
-      stop.type = "button";
-      stop.textContent = "停用";
-      stop.addEventListener("click", async () => {
-        if (!confirmClick(stop, "停用", "确定停用")) return;
-        try {
-          await api(`/api/admin/operators/${operator.id}/disable`, { method: "POST" });
-          await loadAudit();
-        } catch (err) {
-          meta.textContent = err.message;
-        }
-      });
-      acts.append(stop);
-      paper.append(acts);
-    }
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "gate-switch";
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-checked", operator.active ? "true" : "false");
+    toggle.innerHTML = '<span class="track" aria-hidden="true"></span><b></b>';
+    const label = toggle.querySelector("b");
+    label.textContent = operator.active ? "在用" : "停了";
+    toggle.addEventListener("click", async () => {
+      const on = toggle.getAttribute("aria-checked") === "true";
+      if (on && toggle.dataset.confirm !== "1") {
+        toggle.dataset.confirm = "1";
+        label.textContent = "确定停用";
+        window.setTimeout(() => {
+          if (toggle.dataset.confirm !== "1") return;
+          toggle.dataset.confirm = "";
+          label.textContent = "在用";
+        }, 2200);
+        return;
+      }
+      toggle.dataset.confirm = "";
+      try {
+        await api(`/api/admin/operators/${operator.id}/${on ? "disable" : "enable"}`, { method: "POST" });
+        await loadAudit();
+      } catch (err) {
+        meta.textContent = err.message;
+      }
+    });
+    paper.append(toggle);
     box.append(paper);
   }
   const talks = document.createElement("h3");

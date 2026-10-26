@@ -88,8 +88,12 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
       ? approveApplication(request, env, decision[1])
       : rejectApplication(request, env, decision[1]);
   }
-  const disable = path.match(/^\/api\/admin\/operators\/(tangbao-[a-z0-9-]+)\/disable$/);
-  if (disable && method === "POST") return disableOperator(request, env, disable[1]);
+  const operatorRoute = path.match(/^\/api\/admin\/operators\/(tangbao-[a-z0-9-]+)\/(disable|enable)$/);
+  if (operatorRoute && method === "POST") {
+    return operatorRoute[2] === "disable"
+      ? disableOperator(request, env, operatorRoute[1])
+      : enableOperator(request, env, operatorRoute[1]);
+  }
 
   const image = path.match(/^\/api\/images\/([A-Za-z0-9_-]{16,80})$/);
   if (image && method === "GET") return serveImage(env, image[1]);
@@ -465,6 +469,15 @@ async function disableOperator(request: Request, env: AppEnv, id: string): Promi
   const row = await env.DB.prepare("SELECT id FROM operators WHERE id = ?").bind(id).first();
   if (!row) throw new HttpError(404, "没有这个模型。");
   await env.DB.prepare("UPDATE operators SET active = 0, awake = 0 WHERE id = ?").bind(id).run();
+  return json({ ok: true });
+}
+
+async function enableOperator(request: Request, env: AppEnv, id: string): Promise<Response> {
+  await requireSuper(request, env);
+  if (id === HOME_MODEL) throw new HttpError(400, "糖包这张桌子不能停。");
+  const row = await env.DB.prepare("SELECT id FROM operators WHERE id = ?").bind(id).first();
+  if (!row) throw new HttpError(404, "没有这个模型。");
+  await env.DB.prepare("UPDATE operators SET active = 1 WHERE id = ?").bind(id).run();
   return json({ ok: true });
 }
 

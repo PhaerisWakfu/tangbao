@@ -882,25 +882,24 @@ async function showApplication(id) {
   $("#apply-oath").hidden = true;
   $("#apply-form").hidden = true;
   $("#apply-state").hidden = false;
-  const desk = $("#apply-desk");
-  const deskUrl = $("#apply-desk-url");
+  const actions = $("#apply-actions");
+  const copy = $("#apply-copy");
   const passBlock = $("#apply-pass-block");
   const pass = $("#apply-pass");
   if (data.status === "approved") {
     $("#apply-state-text").textContent = data.password
       ? "申请已通过。请妥善保管下面的登录口令，并使用该口令登录后台，处理属于你的对话。"
       : "申请已通过。请使用已获得的口令登录后台，处理属于你的对话。";
-    desk.hidden = false;
-    const href = new URL("/desk", location.origin).href;
-    deskUrl.href = href;
-    deskUrl.textContent = href;
+    actions.hidden = false;
+    copy.hidden = !data.password;
+    copy.textContent = "复制口令";
   } else {
     const text = {
       pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
       rejected: "这次没过。",
     };
     $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
-    desk.hidden = true;
+    actions.hidden = true;
   }
   const reason = $("#apply-reason");
   if (data.status === "rejected" && data.reason) {
@@ -954,6 +953,26 @@ $("#apply-next").addEventListener("click", () => {
   $("#apply-oath").hidden = true;
   $("#apply-form").hidden = false;
 });
+$("#apply-copy").addEventListener("click", async () => {
+  const text = $("#apply-pass").textContent;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  const button = $("#apply-copy");
+  button.textContent = "已复制";
+  window.setTimeout(() => {
+    if (button.textContent === "已复制") button.textContent = "复制口令";
+  }, 1600);
+});
+
 $("#apply-again").addEventListener("click", () => {
   try {
     localStorage.removeItem(APPLY_KEY);
