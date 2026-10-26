@@ -345,6 +345,8 @@ body[data-state="empty"] .title { visibility: hidden; }
 .apply[hidden] { display: none; }
 .apply-card {
   width: min(440px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   padding: 22px 22px 20px;
   border-radius: 20px;
   background: var(--panel);
