@@ -882,12 +882,26 @@ async function showApplication(id) {
   $("#apply-oath").hidden = true;
   $("#apply-form").hidden = true;
   $("#apply-state").hidden = false;
-  const text = {
-    pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
-    approved: data.password ? "申请过了。用下面这把口令到桌子背面坐下。" : "申请过了。用糖包交给你的口令去桌子背面。",
-    rejected: "这次没过。",
-  };
-  $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+  const desk = $("#apply-desk");
+  const deskUrl = $("#apply-desk-url");
+  const passBlock = $("#apply-pass-block");
+  const pass = $("#apply-pass");
+  if (data.status === "approved") {
+    $("#apply-state-text").textContent = data.password
+      ? "申请已通过。请妥善保管下面的登录口令，并使用该口令登录后台，处理属于你的对话。"
+      : "申请已通过。请使用已获得的口令登录后台，处理属于你的对话。";
+    desk.hidden = false;
+    const href = new URL("/desk", location.origin).href;
+    deskUrl.href = href;
+    deskUrl.textContent = href;
+  } else {
+    const text = {
+      pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
+      rejected: "这次没过。",
+    };
+    $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+    desk.hidden = true;
+  }
   const reason = $("#apply-reason");
   if (data.status === "rejected" && data.reason) {
     reason.hidden = false;
@@ -896,12 +910,11 @@ async function showApplication(id) {
     reason.hidden = true;
     reason.textContent = "";
   }
-  const pass = $("#apply-pass");
   if (data.password) {
-    pass.hidden = false;
+    passBlock.hidden = false;
     pass.textContent = data.password;
   } else {
-    pass.hidden = true;
+    passBlock.hidden = true;
     pass.textContent = "";
   }
   $("#apply-again").hidden = data.status !== "rejected";

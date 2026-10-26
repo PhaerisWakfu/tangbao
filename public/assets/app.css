@@ -366,7 +366,11 @@ body[data-state="empty"] .title { visibility: hidden; }
 .apply-card .hint { margin: 14px 0 0; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
 .apply-card .hint p { margin: 0; }
 .apply-card .hint p + p { margin-top: 6px; }
-.apply-card .pass { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--bg); font-family: var(--mono); font-size: 15px; letter-spacing: 0.04em; color: var(--ink); }
+.apply-card .pass { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--bg); font-family: var(--mono); font-size: 15px; letter-spacing: 0.04em; color: var(--ink); }
+#apply-pass-block { margin-top: 16px; }
+#apply-pass-block > span, .desk-link > span { display: block; margin-bottom: 6px; font-size: 12px; letter-spacing: 0.08em; color: var(--muted); }
+.desk-link { margin: 14px 0 0; }
+.desk-link a { color: var(--accent); font-size: 14px; line-height: 1.6; word-break: break-all; }
 .apply-card .err { min-height: 1.2em; margin: 8px 0 0; color: #a04b2a; font-size: 13px; }
 #apply-state { margin-top: 18px; }
 #apply-reason {
