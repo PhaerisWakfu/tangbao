@@ -39,6 +39,7 @@ const IMAGE_LIMIT = 2_000_000;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_IMAGES = 6;
 const HOME_MODEL = "tangbao-vme50-flash";
+const HOME_BLURB = "糖包本人。什么都聊一点。";
 
 const encoder = new TextEncoder();
 
@@ -304,15 +305,16 @@ function logout(request: Request): Response {
 async function listModels(env: AppEnv): Promise<Response> {
   const [status, operators] = await Promise.all([
     publicStatus(env),
-    env.DB.prepare("SELECT id, awake FROM operators WHERE active = 1 ORDER BY created_at ASC").all<{
+    env.DB.prepare("SELECT id, awake, blurb FROM operators WHERE active = 1 ORDER BY created_at ASC").all<{
       id: string;
       awake: number;
+      blurb: string | null;
     }>(),
   ]);
   return json({
     models: [
-      { id: HOME_MODEL, awake: status.awake, home: true },
-      ...operators.results.map((row) => ({ id: row.id, awake: row.awake === 1, home: false })),
+      { id: HOME_MODEL, awake: status.awake, home: true, blurb: HOME_BLURB },
+      ...operators.results.map((row) => ({ id: row.id, awake: row.awake === 1, home: false, blurb: row.blurb || "" })),
     ],
   });
 }
@@ -328,6 +330,14 @@ function emailOf(value: unknown): string {
   if (email.length > 120 || email.length < 6) return "";
   const ok = /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/;
   return ok.test(email) ? email : "";
+}
+
+function blurbOf(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = maskAbuse(sanitize(value)).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if ([...text].length > 12) throw new HttpError(400, "模型说明太长了。十二个字以内。");
+  return text;
 }
 
 function reasonOf(value: unknown): string {
@@ -355,8 +365,10 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
   const payload = await readJson(request);
   const suffix = modelSuffix(payload.suffix);
   const email = emailOf(payload.email);
+  const blurb = blurbOf(payload.blurb);
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
   if (!email) throw new HttpError(400, "邮箱要写成能写信的地址。");
+  if (!blurb) throw new HttpError(400, "写一句你擅长什么。");
   const visitor = await visitorHash(request);
   if (!visitor) throw new HttpError(400, "这个浏览器还认不出你。刷新后再申请。");
   const existing = await env.DB.prepare(
@@ -376,9 +388,9 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
   if (modelTaken) throw new HttpError(400, "这个型号已经有人申请或在用。");
   const id = randomId(16);
   await env.DB.prepare(
-    "INSERT INTO applications (id, suffix, email, status, visitor_hash, created_at) VALUES (?, ?, ?, 'pending', ?, ?)",
+    "INSERT INTO applications (id, suffix, email, blurb, status, visitor_hash, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
   )
-    .bind(id, suffix, email, visitor, Date.now())
+    .bind(id, suffix, email, blurb, visitor, Date.now())
     .run();
   return json({ id, status: "pending" });
 }
@@ -421,27 +433,25 @@ async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
 async function listApplications(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const rows = await env.DB.prepare(
-    "SELECT id, suffix, email, status, reason, created_at AS createdAt FROM applications ORDER BY created_at DESC LIMIT 50",
-  ).all<{ id: string; suffix: string; email: string; status: string; reason: string | null; createdAt: number }>();
+    "SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt FROM applications ORDER BY created_at DESC LIMIT 50",
+  ).all<{ id: string; suffix: string; email: string; blurb: string | null; status: string; reason: string | null; createdAt: number }>();
   return json({ applications: rows.results });
 }
 
 async function approveApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireSuper(request, env);
-  const row = await env.DB.prepare("SELECT suffix, status FROM applications WHERE id = ?")
+  const row = await env.DB.prepare("SELECT suffix, blurb, status FROM applications WHERE id = ?")
     .bind(id)
-    .first<{ suffix: string; status: string }>();
+    .first<{ suffix: string; blurb: string | null; status: string }>();
   if (!row) throw new HttpError(404, "没有这份申请。");
   if (row.status !== "pending") throw new HttpError(400, "这份申请已经处理过。");
   const modelId = `tangbao-${row.suffix}`;
   const password = randomId(9);
   const now = Date.now();
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO operators (id, password_hash, active, awake, created_at) VALUES (?, ?, 1, 0, ?)").bind(
-      modelId,
-      await sha256(password),
-      now,
-    ),
+    env.DB.prepare(
+      "INSERT INTO operators (id, password_hash, active, awake, blurb, created_at) VALUES (?, ?, 1, 0, ?, ?)",
+    ).bind(modelId, await sha256(password), row.blurb || "", now),
     env.DB.prepare("UPDATE applications SET status = 'approved', operator_id = ?, pass_note = ? WHERE id = ?").bind(
       modelId,
       password,
@@ -487,8 +497,8 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     "SELECT id, title, preview, operator_id AS operatorId, awaiting, updated_at AS updatedAt FROM threads ORDER BY updated_at DESC LIMIT 50",
   ).all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
   const operators = await env.DB.prepare(
-    "SELECT id, active, awake FROM operators ORDER BY created_at DESC LIMIT 50",
-  ).all<{ id: string; active: number; awake: number }>();
+    "SELECT id, active, awake, blurb FROM operators ORDER BY created_at DESC LIMIT 50",
+  ).all<{ id: string; active: number; awake: number; blurb: string | null }>();
   return json({ threads: rows.results, operators: operators.results });
 }
 
@@ -980,7 +990,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();
@@ -998,6 +1008,7 @@ async function readJson(
       suffix?: unknown;
       email?: unknown;
       reason?: unknown;
+      blurb?: unknown;
     };
   } catch {
     throw new HttpError(400, "这张纸条写乱了。");

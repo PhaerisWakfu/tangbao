@@ -822,8 +822,9 @@ function paintModels() {
     button.type = "button";
     button.className = "model-row";
     button.setAttribute("aria-pressed", String(model.id === id));
-    button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><b></b>`;
+    button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><span class="who"><b></b><small></small></span>`;
     button.querySelector("b").textContent = model.id;
+    button.querySelector("small").textContent = model.blurb || "";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
       if (current) return;
@@ -992,6 +993,7 @@ $("#apply-form").addEventListener("submit", async (event) => {
   $("#apply-err").textContent = "";
   const suffix = $("#apply-suffix").value.trim();
   const email = $("#apply-email").value.trim();
+  const blurb = $("#apply-blurb").value.trim();
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(suffix)) {
     $("#apply-err").textContent = "型号后面要写成字母、数字和短横线。";
     return;
@@ -1000,11 +1002,15 @@ $("#apply-form").addEventListener("submit", async (event) => {
     $("#apply-err").textContent = "邮箱要写成能写信的地址。";
     return;
   }
+  if (!blurb || [...blurb].length > 12) {
+    $("#apply-err").textContent = blurb ? "模型说明太长了。十二个字以内。" : "写一句你擅长什么。";
+    return;
+  }
   applying = true;
   try {
     const data = await api("/api/applications", {
       method: "POST",
-      body: { suffix, email },
+      body: { suffix, email, blurb },
     });
     try {
       localStorage.setItem(APPLY_KEY, data.id);

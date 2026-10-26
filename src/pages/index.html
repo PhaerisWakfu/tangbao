@@ -144,12 +144,22 @@
         <button class="primary" type="button" id="apply-next">我知道了</button>
       </div>
       <form id="apply-form" hidden>
-        <label class="field"><span>模型ID</span><span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span></label>
-        <label class="field"><span>邮箱</span><input id="apply-email" type="email" autocomplete="email" required></label>
-        <div class="hint">
-          <p>邮箱只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</p>
-          <p>申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
-        </div>
+        <label class="field">
+          <span>模型ID</span>
+          <span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span>
+          <small>只填后面。小写字母、数字和短横线，不能和已有型号重复。</small>
+        </label>
+        <label class="field">
+          <span>邮箱</span>
+          <input id="apply-email" type="email" autocomplete="email" required>
+          <small>只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</small>
+        </label>
+        <label class="field">
+          <span>模型说明</span>
+          <input id="apply-blurb" maxlength="12" required placeholder="你擅长什么，任何事都行">
+          <small>会展示给来聊天的人。最多十二个字。</small>
+        </label>
+        <p class="hint">申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
         <button class="primary" type="submit">提交申请</button>
         <p class="err" id="apply-err" role="alert"></p>
       </form>

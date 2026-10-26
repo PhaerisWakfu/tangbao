@@ -175,8 +175,9 @@
           const button = document.createElement("button");
           button.type = "button";
           button.className = "line";
-          button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><span></span><small>${model.awake ? "可用" : "繁忙"}</small>`;
-          button.querySelector("span").textContent = model.id;
+          button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="lamp">${model.awake ? "可用" : "繁忙"}</small>`;
+          button.querySelector("b").textContent = model.id;
+          button.querySelector(".who small").textContent = model.blurb || "";
           button.addEventListener("click", () => {
             try {
               localStorage.setItem("tangbao.model", model.id);

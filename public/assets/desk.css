@@ -94,7 +94,12 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
   background: color-mix(in srgb, var(--accent) 9%, var(--panel));
   color: var(--accent);
 }
-.paper .decide button.quiet { background: transparent; color: var(--muted); }
+.paper .decide button.quiet {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--muted);
+}
+.paper .decide button.quiet:hover { color: var(--ink); }
 .seat {
   display: flex;
   align-items: center;
@@ -103,9 +108,9 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
 }
-.seat > b {
-  flex: 1;
-  min-width: 0;
+.seat .name { flex: 1; min-width: 0; }
+.seat .name b {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -113,6 +118,7 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
   font-size: 13px;
   font-weight: 600;
 }
+.seat .blurb { display: block; margin-top: 2px; font-size: 12px; line-height: 1.5; color: var(--muted); white-space: normal; }
 .seat-err { flex: 1 0 100%; margin: 0 0 8px; font-size: 12px; color: #a04b2a; }
 .seats { margin-bottom: 8px; }
 .seats .seat:last-child { border-bottom: 0; }
@@ -172,18 +178,55 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
 }
 .gate-switch[data-confirm="1"]::after { left: 81px; }
 .gate-switch[data-confirm="1"] b { left: 12px; right: auto; color: var(--accent); }
-.paper .reason { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.paper .reason textarea {
-  width: 100%;
-  min-height: 72px;
-  padding: 10px 12px;
+#applications {
+  width: min(36rem, calc(100% - 48px));
+  margin: 0 auto;
+  padding-top: 6px;
+}
+#applications .paper { padding: 18px 0 16px; }
+#applications .head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+#applications .head b { font-size: 14px; }
+#applications .state { flex: none; font-size: 12px; letter-spacing: 0.08em; color: var(--faint); }
+#applications .mail { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+#applications .blurb { margin: 6px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+#applications .why { margin: 8px 0 0; font-size: 13.5px; line-height: 1.65; color: var(--muted); }
+#applications .reject-box {
+  margin-top: 12px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+#applications .reject-box textarea {
+  display: block;
+  width: 100%;
+  height: 68px;
+  min-height: 68px;
+  max-height: 120px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: var(--bg);
   color: var(--ink);
-  resize: vertical;
+  resize: none;
+  box-sizing: border-box;
 }
-.paper .reason .decide { margin-top: 0; }
+#applications .reject-box .decide {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+#applications .reject-box .decide button {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 32px;
+  margin: 0;
+  line-height: 1;
+}
 .audit-line {
   height: 32px;
   padding: 0 12px;

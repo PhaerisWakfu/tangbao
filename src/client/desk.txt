@@ -397,14 +397,28 @@ async function loadApplications() {
   for (const item of rows) {
     const paper = document.createElement("article");
     paper.className = "paper";
+    const head = document.createElement("div");
+    head.className = "head";
     const title = document.createElement("b");
     title.textContent = `tangbao-${item.suffix}`;
-    paper.append(title);
+    const state = document.createElement("span");
+    state.className = "state";
+    state.textContent = statusWord(item.status);
+    head.append(title, state);
+    paper.append(head);
     const meta = document.createElement("p");
-    meta.textContent = `${item.email} · ${statusWord(item.status)}`;
+    meta.className = "mail";
+    meta.textContent = item.email;
     paper.append(meta);
+    if (item.blurb) {
+      const blurb = document.createElement("p");
+      blurb.className = "blurb";
+      blurb.textContent = item.blurb;
+      paper.append(blurb);
+    }
     if (item.status === "rejected" && item.reason) {
       const why = document.createElement("p");
+      why.className = "why";
       why.textContent = item.reason;
       paper.append(why);
     }
@@ -437,9 +451,9 @@ async function loadApplications() {
       reject.className = "no";
       reject.textContent = "没过";
       reject.addEventListener("click", () => {
-        if (paper.querySelector(".reason")) return;
+        if (paper.querySelector(".reject-box")) return;
         const box = document.createElement("div");
-        box.className = "reason";
+        box.className = "reject-box";
         const note = document.createElement("textarea");
         note.rows = 2;
         note.maxLength = 200;
@@ -448,11 +462,11 @@ async function loadApplications() {
         row.className = "decide";
         const send = document.createElement("button");
         send.type = "button";
-        send.className = "no";
+        send.className = "yes";
         send.textContent = "确定没过";
         const cancel = document.createElement("button");
         cancel.type = "button";
-        cancel.className = "quiet";
+        cancel.className = "no";
         cancel.textContent = "取消";
         cancel.addEventListener("click", () => box.remove());
         send.addEventListener("click", async () => {
@@ -499,8 +513,17 @@ async function loadAudit() {
   for (const operator of operators) {
     const seat = document.createElement("div");
     seat.className = "seat";
+    const name = document.createElement("div");
+    name.className = "name";
     const title = document.createElement("b");
     title.textContent = operator.id;
+    name.append(title);
+    if (operator.blurb) {
+      const blurb = document.createElement("span");
+      blurb.className = "blurb";
+      blurb.textContent = operator.blurb;
+      name.append(blurb);
+    }
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "gate-switch";
@@ -536,7 +559,7 @@ async function loadAudit() {
         note.textContent = err.message;
       }
     });
-    seat.append(title, toggle);
+    seat.append(name, toggle);
     seats.append(seat);
   }
   box.append(seats);
