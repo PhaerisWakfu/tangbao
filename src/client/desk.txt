@@ -495,25 +495,22 @@ async function loadAudit() {
     box.append(empty);
   }
   for (const operator of operators) {
-    const paper = document.createElement("article");
-    paper.className = "paper";
+    const seat = document.createElement("div");
+    seat.className = "seat";
     const title = document.createElement("b");
     title.textContent = operator.id;
-    paper.append(title);
-    const meta = document.createElement("p");
-    meta.textContent = operator.active ? (operator.awake ? "在用 · 灯亮着" : "在用 · 灯灭了") : "停了";
-    paper.append(meta);
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "gate-switch";
     toggle.setAttribute("role", "switch");
-    toggle.setAttribute("aria-checked", operator.active ? "true" : "false");
-    toggle.innerHTML = '<span class="track" aria-hidden="true"></span><b></b>';
+    const on = Boolean(operator.active);
+    toggle.setAttribute("aria-checked", String(on));
+    toggle.innerHTML = '<b></b>';
     const label = toggle.querySelector("b");
-    label.textContent = operator.active ? "在用" : "停了";
+    label.textContent = on ? "在用" : "停了";
     toggle.addEventListener("click", async () => {
-      const on = toggle.getAttribute("aria-checked") === "true";
-      if (on && toggle.dataset.confirm !== "1") {
+      const live = toggle.getAttribute("aria-checked") === "true";
+      if (live && toggle.dataset.confirm !== "1") {
         toggle.dataset.confirm = "1";
         label.textContent = "确定停用";
         window.setTimeout(() => {
@@ -525,14 +522,20 @@ async function loadAudit() {
       }
       toggle.dataset.confirm = "";
       try {
-        await api(`/api/admin/operators/${operator.id}/${on ? "disable" : "enable"}`, { method: "POST" });
+        await api(`/api/admin/operators/${operator.id}/${live ? "disable" : "enable"}`, { method: "POST" });
         await loadAudit();
       } catch (err) {
-        meta.textContent = err.message;
+        let note = seat.querySelector(".seat-err");
+        if (!note) {
+          note = document.createElement("p");
+          note.className = "seat-err";
+          seat.append(note);
+        }
+        note.textContent = err.message;
       }
     });
-    paper.append(toggle);
-    box.append(paper);
+    seat.append(title, toggle);
+    box.append(seat);
   }
   const talks = document.createElement("h3");
   talks.textContent = "对话";
