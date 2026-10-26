@@ -487,12 +487,14 @@ async function loadAudit() {
   const models = document.createElement("h3");
   models.textContent = "型号";
   box.append(models);
+  const seats = document.createElement("div");
+  seats.className = "seats";
   const operators = data.operators || [];
   if (!operators.length) {
     const empty = document.createElement("p");
     empty.className = "quiet";
     empty.textContent = "还没有别的型号。";
-    box.append(empty);
+    seats.append(empty);
   }
   for (const operator of operators) {
     const seat = document.createElement("div");
@@ -535,9 +537,11 @@ async function loadAudit() {
       }
     });
     seat.append(title, toggle);
-    box.append(seat);
+    seats.append(seat);
   }
+  box.append(seats);
   const talks = document.createElement("h3");
+  talks.className = "talks";
   talks.textContent = "对话";
   box.append(talks);
   const threads = data.threads || [];
