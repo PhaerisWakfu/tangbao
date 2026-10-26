@@ -888,6 +888,14 @@ async function showApplication(id) {
     rejected: "这次没过。",
   };
   $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+  const reason = $("#apply-reason");
+  if (data.status === "rejected" && data.reason) {
+    reason.hidden = false;
+    reason.textContent = data.reason;
+  } else {
+    reason.hidden = true;
+    reason.textContent = "";
+  }
   const pass = $("#apply-pass");
   if (data.password) {
     pass.hidden = false;
@@ -896,12 +904,24 @@ async function showApplication(id) {
     pass.hidden = true;
     pass.textContent = "";
   }
-  $("#apply-again").hidden = data.status === "pending" || data.status === "approved";
+  $("#apply-again").hidden = data.status !== "rejected";
 }
 
-function openApply() {
+async function openApply() {
   $("#apply").hidden = false;
   $("#apply-err").textContent = "";
+  try {
+    const mine = await api("/api/applications/mine");
+    try {
+      localStorage.setItem(APPLY_KEY, mine.id);
+    } catch {}
+    await showApplication(mine.id);
+    return;
+  } catch (err) {
+    if (!(err instanceof ApiError && err.statusCode === 404)) {
+      $("#apply-err").textContent = err.message;
+    }
+  }
   let saved = "";
   try {
     saved = localStorage.getItem(APPLY_KEY) || "";

@@ -72,6 +72,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
   if (path === "/api/applications" && method === "POST") return applyModel(request, env);
+  if (path === "/api/applications/mine" && method === "GET") return myApplication(request, env);
   const application = path.match(/^\/api\/applications\/([A-Za-z0-9_-]{16,80})$/);
   if (application && method === "GET") return applicationStatus(env, application[1]);
   if (path === "/api/admin/login" && method === "POST") return login(request, env);
@@ -325,6 +326,14 @@ function emailOf(value: unknown): string {
   return ok.test(email) ? email : "";
 }
 
+function reasonOf(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = sanitize(value);
+  if (!text) return "";
+  if ([...text].length > 200) throw new HttpError(400, "理由太长了。");
+  return text;
+}
+
 async function resolveOperator(env: AppEnv, requested: string): Promise<string> {
   const id = requested || HOME_MODEL;
   if (id === HOME_MODEL) return HOME_MODEL;
@@ -344,6 +353,14 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
   const email = emailOf(payload.email);
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
   if (!email) throw new HttpError(400, "邮箱要写成能写信的地址。");
+  const visitor = await visitorHash(request);
+  if (!visitor) throw new HttpError(400, "这个浏览器还认不出你。刷新后再申请。");
+  const existing = await env.DB.prepare(
+    "SELECT id, status, pass_note, reason FROM applications WHERE visitor_hash = ? AND status IN ('pending', 'approved') ORDER BY created_at DESC LIMIT 1",
+  )
+    .bind(visitor)
+    .first<{ id: string; status: string; pass_note: string | null; reason: string | null }>();
+  if (existing) return json(applicationView(existing));
   const modelId = `tangbao-${suffix}`;
   if (modelId === HOME_MODEL) throw new HttpError(400, "这个型号已经有人坐着。");
   const modelTaken = await env.DB.prepare(
@@ -353,34 +370,55 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
     .bind(modelId, suffix)
     .first();
   if (modelTaken) throw new HttpError(400, "这个型号已经有人申请或在用。");
-  const emailTaken = await env.DB.prepare(
-    "SELECT id FROM applications WHERE lower(email) = ? AND status IN ('pending', 'approved')",
-  )
-    .bind(email)
-    .first();
-  if (emailTaken) throw new HttpError(400, "这个邮箱已经交过申请。");
   const id = randomId(16);
   await env.DB.prepare(
-    "INSERT INTO applications (id, suffix, email, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+    "INSERT INTO applications (id, suffix, email, status, visitor_hash, created_at) VALUES (?, ?, ?, 'pending', ?, ?)",
   )
-    .bind(id, suffix, email, Date.now())
+    .bind(id, suffix, email, visitor, Date.now())
     .run();
   return json({ id, status: "pending" });
 }
 
-async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
-  const row = await env.DB.prepare("SELECT status, pass_note FROM applications WHERE id = ?")
-    .bind(id)
-    .first<{ status: string; pass_note: string | null }>();
+function applicationView(row: { id?: string; status: string; pass_note: string | null; reason?: string | null }): {
+  id?: string;
+  status: string;
+  password?: string;
+  reason?: string;
+} {
+  return {
+    id: row.id,
+    status: row.status,
+    password: row.status === "approved" ? row.pass_note || undefined : undefined,
+    reason: row.status === "rejected" ? row.reason || undefined : undefined,
+  };
+}
+
+async function myApplication(request: Request, env: AppEnv): Promise<Response> {
+  const visitor = await visitorHash(request);
+  const row = visitor
+    ? await env.DB.prepare(
+        "SELECT id, status, pass_note, reason FROM applications WHERE visitor_hash = ? ORDER BY created_at DESC LIMIT 1",
+      )
+        .bind(visitor)
+        .first<{ id: string; status: string; pass_note: string | null; reason: string | null }>()
+    : null;
   if (!row) throw new HttpError(404, "没有这份申请。");
-  return json({ status: row.status, password: row.status === "approved" ? row.pass_note || undefined : undefined });
+  return json(applicationView(row));
+}
+
+async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
+  const row = await env.DB.prepare("SELECT status, pass_note, reason FROM applications WHERE id = ?")
+    .bind(id)
+    .first<{ status: string; pass_note: string | null; reason: string | null }>();
+  if (!row) throw new HttpError(404, "没有这份申请。");
+  return json(applicationView(row));
 }
 
 async function listApplications(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const rows = await env.DB.prepare(
-    "SELECT id, suffix, email, status, created_at AS createdAt FROM applications ORDER BY created_at DESC LIMIT 50",
-  ).all<{ id: string; suffix: string; email: string; status: string; createdAt: number }>();
+    "SELECT id, suffix, email, status, reason, created_at AS createdAt FROM applications ORDER BY created_at DESC LIMIT 50",
+  ).all<{ id: string; suffix: string; email: string; status: string; reason: string | null; createdAt: number }>();
   return json({ applications: rows.results });
 }
 
@@ -414,7 +452,10 @@ async function rejectApplication(request: Request, env: AppEnv, id: string): Pro
   const row = await env.DB.prepare("SELECT status FROM applications WHERE id = ?").bind(id).first<{ status: string }>();
   if (!row) throw new HttpError(404, "没有这份申请。");
   if (row.status !== "pending") throw new HttpError(400, "这份申请已经处理过。");
-  await env.DB.prepare("UPDATE applications SET status = 'rejected' WHERE id = ?").bind(id).run();
+  const payload = await readJson(request);
+  const reason = reasonOf(payload.reason);
+  if (!reason) throw new HttpError(400, "先写一句没过的理由。");
+  await env.DB.prepare("UPDATE applications SET status = 'rejected', reason = ? WHERE id = ?").bind(reason, id).run();
   return json({ ok: true });
 }
 
@@ -926,7 +967,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();
@@ -943,6 +984,7 @@ async function readJson(
       operator?: unknown;
       suffix?: unknown;
       email?: unknown;
+      reason?: unknown;
     };
   } catch {
     throw new HttpError(400, "这张纸条写乱了。");

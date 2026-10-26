@@ -84,6 +84,18 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
   cursor: pointer;
 }
 .paper .decide button:hover { background: var(--hover); color: var(--ink); }
+.paper .reason { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.paper .reason textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  resize: vertical;
+}
+.paper .reason .decide { margin-top: 0; }
 .audit-line {
   height: 32px;
   padding: 0 12px;

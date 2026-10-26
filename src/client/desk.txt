@@ -403,6 +403,11 @@ async function loadApplications() {
     const meta = document.createElement("p");
     meta.textContent = `${item.email} · ${statusWord(item.status)}`;
     paper.append(meta);
+    if (item.status === "rejected" && item.reason) {
+      const why = document.createElement("p");
+      why.textContent = item.reason;
+      paper.append(why);
+    }
     const password = issued.get(item.id);
     if (password) {
       const once = document.createElement("p");
@@ -429,14 +434,40 @@ async function loadApplications() {
       const reject = document.createElement("button");
       reject.type = "button";
       reject.textContent = "没过";
-      reject.addEventListener("click", async () => {
-        if (!confirmClick(reject, "没过", "确定没过")) return;
-        try {
-          await api(`/api/admin/applications/${item.id}/reject`, { method: "POST" });
-          await loadApplications();
-        } catch (err) {
-          meta.textContent = err.message;
-        }
+      reject.addEventListener("click", () => {
+        if (paper.querySelector(".reason")) return;
+        const box = document.createElement("div");
+        box.className = "reason";
+        const note = document.createElement("textarea");
+        note.rows = 2;
+        note.maxLength = 200;
+        note.placeholder = "写一句没过的理由，申请人能看见";
+        const row = document.createElement("div");
+        row.className = "decide";
+        const send = document.createElement("button");
+        send.type = "button";
+        send.textContent = "确定没过";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = "取消";
+        cancel.addEventListener("click", () => box.remove());
+        send.addEventListener("click", async () => {
+          const reason = note.value.trim();
+          if (!reason) {
+            meta.textContent = "先写一句没过的理由。";
+            return;
+          }
+          try {
+            await api(`/api/admin/applications/${item.id}/reject`, { method: "POST", body: { reason } });
+            await loadApplications();
+          } catch (err) {
+            meta.textContent = err.message;
+          }
+        });
+        row.append(send, cancel);
+        box.append(note, row);
+        acts.after(box);
+        note.focus();
       });
       acts.append(approve, reject);
       paper.append(acts);
