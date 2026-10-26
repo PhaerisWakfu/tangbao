@@ -319,9 +319,10 @@ function modelSuffix(value: unknown): string {
 }
 
 function emailOf(value: unknown): string {
-  const email = typeof value === "string" ? value.trim() : "";
-  if (email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "";
-  return email;
+  const email = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (email.length > 120 || email.length < 6) return "";
+  const ok = /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/;
+  return ok.test(email) ? email : "";
 }
 
 async function resolveOperator(env: AppEnv, requested: string): Promise<string> {
@@ -342,16 +343,22 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
   const suffix = modelSuffix(payload.suffix);
   const email = emailOf(payload.email);
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
-  if (!email) throw new HttpError(400, "邮箱要能写信过去。");
+  if (!email) throw new HttpError(400, "邮箱要写成能写信的地址。");
   const modelId = `tangbao-${suffix}`;
   if (modelId === HOME_MODEL) throw new HttpError(400, "这个型号已经有人坐着。");
-  const taken = await env.DB.prepare(
+  const modelTaken = await env.DB.prepare(
     `SELECT id FROM operators WHERE id = ?
-     UNION SELECT id FROM applications WHERE status = 'pending' AND suffix = ?`,
+     UNION SELECT id FROM applications WHERE suffix = ? AND status IN ('pending', 'approved')`,
   )
     .bind(modelId, suffix)
     .first();
-  if (taken) throw new HttpError(400, "这个型号已经有人坐着。");
+  if (modelTaken) throw new HttpError(400, "这个型号已经有人申请或在用。");
+  const emailTaken = await env.DB.prepare(
+    "SELECT id FROM applications WHERE lower(email) = ? AND status IN ('pending', 'approved')",
+  )
+    .bind(email)
+    .first();
+  if (emailTaken) throw new HttpError(400, "这个邮箱已经交过申请。");
   const id = randomId(16);
   await env.DB.prepare(
     "INSERT INTO applications (id, suffix, email, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
@@ -362,11 +369,11 @@ async function applyModel(request: Request, env: AppEnv): Promise<Response> {
 }
 
 async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
-  const row = await env.DB.prepare("SELECT status FROM applications WHERE id = ?")
+  const row = await env.DB.prepare("SELECT status, pass_note FROM applications WHERE id = ?")
     .bind(id)
-    .first<{ status: string }>();
+    .first<{ status: string; pass_note: string | null }>();
   if (!row) throw new HttpError(404, "没有这份申请。");
-  return json({ status: row.status });
+  return json({ status: row.status, password: row.status === "approved" ? row.pass_note || undefined : undefined });
 }
 
 async function listApplications(request: Request, env: AppEnv): Promise<Response> {
@@ -393,7 +400,11 @@ async function approveApplication(request: Request, env: AppEnv, id: string): Pr
       await sha256(password),
       now,
     ),
-    env.DB.prepare("UPDATE applications SET status = 'approved', operator_id = ? WHERE id = ?").bind(modelId, id),
+    env.DB.prepare("UPDATE applications SET status = 'approved', operator_id = ?, pass_note = ? WHERE id = ?").bind(
+      modelId,
+      password,
+      id,
+    ),
   ]);
   return json({ ok: true, modelId, password });
 }

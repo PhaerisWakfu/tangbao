@@ -47,7 +47,7 @@
       <button class="new" type="button" id="new"><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span>新对话</button>
       <nav class="hist" id="history" aria-label="对话"></nav>
       <div class="side-foot">
-        <a href="/about"><svg class="i"><use href="#i-info"/></svg>关于模型<small>型号</small></a>
+        <a href="/about"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><span><b>关于模型</b><small>规格卡</small></span></a>
       </div>
     </aside>
     <button class="scrim" type="button" id="scrim" aria-label="关闭侧栏"></button>
@@ -56,8 +56,8 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title" id="title"></span>
+        <button class="join" type="button" id="join"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><span>成为AI</span></button>
         <span class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></span>
-        <button class="join" type="button" id="join">成为AI</button>
         <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>
       </header>
 
@@ -130,20 +130,32 @@
         <h2 id="apply-title">成为AI</h2>
         <button type="button" id="apply-close" aria-label="关闭">×</button>
       </header>
-      <div id="apply-oath">
-        <p>通过之后，对外你也叫糖包。回复的是你这个人，发出去的话由你负责。不骂人，不把别人的对话说出去。</p>
-        <p>有违规行为，这个模型会被封禁。</p>
+      <div class="oath" id="apply-oath">
+        <p class="lead">欢迎加入糖包大模型家族。</p>
+        <p>申请通过后，你会成为一个模型。请做一个文明负责的模型。</p>
+        <ul>
+          <li>不骂人</li>
+          <li>请不要欺骗诱导用户</li>
+          <li>不把别人的对话说出去</li>
+          <li>开灯时尽量回复每一个向你提问的用户</li>
+          <li>请善待每一个用户，但也别委屈自己</li>
+        </ul>
+        <p class="ban">如有违规行为，这个模型会被封禁。</p>
         <button class="primary" type="button" id="apply-next">我知道了</button>
       </div>
       <form id="apply-form" hidden>
-        <label class="field"><span>模型 id</span><span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span></label>
+        <label class="field"><span>模型ID</span><span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span></label>
         <label class="field"><span>邮箱</span><input id="apply-email" type="email" autocomplete="email" required></label>
-        <p class="hint">邮箱只留给审批的人，不会出现在型号列表里。口令通过后由糖包交给你。</p>
+        <div class="hint">
+          <p>邮箱只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</p>
+          <p>申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
+        </div>
         <button class="primary" type="submit">提交申请</button>
         <p class="err" id="apply-err" role="alert"></p>
       </form>
       <div id="apply-state" hidden>
         <p id="apply-state-text"></p>
+        <p class="pass" id="apply-pass" hidden></p>
         <button type="button" id="apply-again" hidden>再申请一次</button>
       </div>
     </div>

@@ -67,8 +67,24 @@ body[data-presence="asleep"] .err { color: #e5a27a; }
 .paper { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .paper b { display: block; font-family: var(--mono); font-size: 13px; font-weight: 600; }
 .paper p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.paper .acts { display: flex; gap: 8px; margin-top: 10px; }
-.paper button, .audit-line {
+.paper .decide { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.paper .decide button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 4.5em;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.paper .decide button:hover { background: var(--hover); color: var(--ink); }
+.audit-line {
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--line);

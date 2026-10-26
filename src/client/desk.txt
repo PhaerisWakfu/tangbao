@@ -412,7 +412,7 @@ async function loadApplications() {
     }
     if (item.status === "pending") {
       const acts = document.createElement("div");
-      acts.className = "acts";
+      acts.className = "decide";
       const approve = document.createElement("button");
       approve.type = "button";
       approve.textContent = "通过";
@@ -470,7 +470,7 @@ async function loadAudit() {
     paper.append(meta);
     if (operator.active) {
       const acts = document.createElement("div");
-      acts.className = "acts";
+      acts.className = "decide";
       const stop = document.createElement("button");
       stop.type = "button";
       stop.textContent = "停用";

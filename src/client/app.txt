@@ -883,11 +883,19 @@ async function showApplication(id) {
   $("#apply-form").hidden = true;
   $("#apply-state").hidden = false;
   const text = {
-    pending: "申请在等。通过后，口令由糖包交给你。",
-    approved: "申请过了。用糖包交给你的口令去桌子背面。",
+    pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
+    approved: data.password ? "申请过了。用下面这把口令到桌子背面坐下。" : "申请过了。用糖包交给你的口令去桌子背面。",
     rejected: "这次没过。",
   };
   $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+  const pass = $("#apply-pass");
+  if (data.password) {
+    pass.hidden = false;
+    pass.textContent = data.password;
+  } else {
+    pass.hidden = true;
+    pass.textContent = "";
+  }
   $("#apply-again").hidden = data.status === "pending" || data.status === "approved";
 }
 
@@ -919,13 +927,32 @@ $("#apply-again").addEventListener("click", () => {
   } catch {}
   showOath();
 });
+let applying = false;
+
+function emailOk(value) {
+  const email = value.trim().toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/.test(email);
+}
+
 $("#apply-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (applying) return;
   $("#apply-err").textContent = "";
+  const suffix = $("#apply-suffix").value.trim();
+  const email = $("#apply-email").value.trim();
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(suffix)) {
+    $("#apply-err").textContent = "型号后面要写成字母、数字和短横线。";
+    return;
+  }
+  if (!emailOk(email)) {
+    $("#apply-err").textContent = "邮箱要写成能写信的地址。";
+    return;
+  }
+  applying = true;
   try {
     const data = await api("/api/applications", {
       method: "POST",
-      body: { suffix: $("#apply-suffix").value, email: $("#apply-email").value },
+      body: { suffix, email },
     });
     try {
       localStorage.setItem(APPLY_KEY, data.id);
@@ -933,6 +960,8 @@ $("#apply-form").addEventListener("submit", async (event) => {
     await showApplication(data.id);
   } catch (err) {
     $("#apply-err").textContent = err.message;
+  } finally {
+    applying = false;
   }
 });
 
