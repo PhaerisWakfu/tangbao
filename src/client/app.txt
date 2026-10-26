@@ -809,7 +809,6 @@ function applyModelLamp() {
 function paintModels() {
   const id = activeModel();
   $("#model-name").textContent = id;
-  $("#card h2").textContent = id;
   const list = $("#model-list");
   list.replaceChildren();
   for (const model of models) {

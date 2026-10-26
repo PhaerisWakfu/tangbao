@@ -416,8 +416,6 @@ body[data-state="empty"] .title { visibility: hidden; }
 #apply-reason[hidden] { display: none; }
 #apply-state-text { margin: 0; font-size: 15px; line-height: 1.7; color: var(--ink-2); }
 #apply-again { width: 100%; height: 42px; margin-top: 16px; border: 1px solid var(--line); border-radius: 999px; background: transparent; cursor: pointer; }
-.lineup-block h2 { font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
-.lineup-block p { font-family: var(--serif); color: var(--muted); }
 .lineup { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .line {
   display: flex;
@@ -656,23 +654,10 @@ body[data-state="chat"] .stage {
 .card[hidden] { display: none; }
 .card header { display: flex; align-items: center; gap: 12px; }
 .card header svg.mark { width: 34px; height: 34px; }
-.card h2 { margin: 0; font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: -0.03em; }
+.card h2 { margin: 0; font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: 0.04em; }
 .card header p { margin: 1px 0 0; font-size: 12px; color: var(--faint); }
 .card header svg.ok { margin-left: auto; color: var(--accent); }
-.card dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 16px;
-  margin: 14px 0 0;
-  padding: 14px 0 0;
-  border-top: 1px solid var(--line);
-  font-size: 13px;
-}
-.card dt { color: var(--muted); }
-.card dd { margin: 0; text-align: right; }
-.card footer { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 12px; color: var(--faint); }
-.card footer a { color: var(--muted); text-decoration: none; }
-.card footer a:hover { color: var(--ink); }
+.card .model-list { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .chips { display: none; }
 .fine {
   flex: none;
