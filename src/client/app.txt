@@ -35,7 +35,6 @@ let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
 const HOME = "tangbao-vme50-flash";
 const MODEL_KEY = "tangbao.model";
-const APPLY_KEY = "tangbao.apply";
 let models = [];
 let chosen = HOME;
 let threadModel = "";
@@ -680,10 +679,6 @@ document.addEventListener("keydown", (event) => {
     closeViewer();
     return;
   }
-  if (!$("#apply").hidden) {
-    $("#apply").hidden = true;
-    return;
-  }
   closeCard();
   closeSide();
 });
@@ -865,163 +860,6 @@ async function loadModels(pick) {
   }
   paintModels();
 }
-
-function showOath() {
-  $("#apply-oath").hidden = false;
-  $("#apply-form").hidden = true;
-  $("#apply-state").hidden = true;
-}
-
-async function showApplication(id) {
-  let data;
-  try {
-    data = await api(`/api/applications/${id}`);
-  } catch (err) {
-    $("#apply-err").textContent = err.message;
-    return;
-  }
-  $("#apply-oath").hidden = true;
-  $("#apply-form").hidden = true;
-  $("#apply-state").hidden = false;
-  const actions = $("#apply-actions");
-  const copy = $("#apply-copy");
-  const passBlock = $("#apply-pass-block");
-  const pass = $("#apply-pass");
-  if (data.status === "approved") {
-    $("#apply-state-text").textContent = data.password
-      ? "申请已通过。请妥善保管下面的登录口令，并使用该口令登录后台，处理属于你的对话。"
-      : "申请已通过。请使用已获得的口令登录后台，处理属于你的对话。";
-    actions.hidden = false;
-    copy.hidden = !data.password;
-    copy.textContent = "复制口令";
-  } else {
-    const text = {
-      pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
-      rejected: "这次没过。",
-    };
-    $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
-    actions.hidden = true;
-  }
-  const reason = $("#apply-reason");
-  if (data.status === "rejected" && data.reason) {
-    reason.hidden = false;
-    reason.textContent = data.reason;
-  } else {
-    reason.hidden = true;
-    reason.textContent = "";
-  }
-  if (data.password) {
-    passBlock.hidden = false;
-    pass.textContent = data.password;
-  } else {
-    passBlock.hidden = true;
-    pass.textContent = "";
-  }
-  $("#apply-again").hidden = data.status !== "rejected";
-}
-
-async function openApply() {
-  $("#apply").hidden = false;
-  $("#apply-err").textContent = "";
-  try {
-    const mine = await api("/api/applications/mine");
-    try {
-      localStorage.setItem(APPLY_KEY, mine.id);
-    } catch {}
-    await showApplication(mine.id);
-    return;
-  } catch (err) {
-    if (!(err instanceof ApiError && err.statusCode === 404)) {
-      $("#apply-err").textContent = err.message;
-    }
-  }
-  let saved = "";
-  try {
-    saved = localStorage.getItem(APPLY_KEY) || "";
-  } catch {}
-  if (saved) void showApplication(saved);
-  else showOath();
-}
-
-$("#join").addEventListener("click", openApply);
-$("#apply-close").addEventListener("click", () => {
-  $("#apply").hidden = true;
-});
-$("#apply").addEventListener("click", (event) => {
-  if (event.target === $("#apply")) $("#apply").hidden = true;
-});
-$("#apply-next").addEventListener("click", () => {
-  $("#apply-oath").hidden = true;
-  $("#apply-form").hidden = false;
-});
-$("#apply-copy").addEventListener("click", async () => {
-  const text = $("#apply-pass").textContent;
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const area = document.createElement("textarea");
-    area.value = text;
-    document.body.append(area);
-    area.select();
-    document.execCommand("copy");
-    area.remove();
-  }
-  const button = $("#apply-copy");
-  button.textContent = "已复制";
-  window.setTimeout(() => {
-    if (button.textContent === "已复制") button.textContent = "复制口令";
-  }, 1600);
-});
-
-$("#apply-again").addEventListener("click", () => {
-  try {
-    localStorage.removeItem(APPLY_KEY);
-  } catch {}
-  showOath();
-});
-let applying = false;
-
-function emailOk(value) {
-  const email = value.trim().toLowerCase();
-  return /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/.test(email);
-}
-
-$("#apply-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (applying) return;
-  $("#apply-err").textContent = "";
-  const suffix = $("#apply-suffix").value.trim();
-  const email = $("#apply-email").value.trim();
-  const blurb = $("#apply-blurb").value.trim();
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(suffix)) {
-    $("#apply-err").textContent = "型号后面要写成字母、数字和短横线。";
-    return;
-  }
-  if (!emailOk(email)) {
-    $("#apply-err").textContent = "邮箱要写成能写信的地址。";
-    return;
-  }
-  if (!blurb || [...blurb].length > 12) {
-    $("#apply-err").textContent = blurb ? "模型说明太长了。十二个字以内。" : "写一句你擅长什么。";
-    return;
-  }
-  applying = true;
-  try {
-    const data = await api("/api/applications", {
-      method: "POST",
-      body: { suffix, email, blurb },
-    });
-    try {
-      localStorage.setItem(APPLY_KEY, data.id);
-    } catch {}
-    await showApplication(data.id);
-  } catch (err) {
-    $("#apply-err").textContent = err.message;
-  } finally {
-    applying = false;
-  }
-});
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearTimeout(timer);

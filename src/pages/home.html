@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="settled" data-presence="awake">
+  <script>
+    try {
+      if (localStorage.getItem("tangbao.presence") === "asleep") document.body.dataset.presence = "asleep";
+    } catch {}
+  </script>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-chev" viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"/></symbol>
+  </svg>
+  <main class="front">
+    <header class="front-hero">
+      <div class="front-hero-in">
+        <div class="bun" aria-hidden="true">
+          <svg class="steam" viewBox="0 0 46 32"><path d="M14 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M23 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M32 30c-4-5 4-8 0-13s4-8 0-13"/></svg>
+          <svg class="mark"><use href="#pleat"/></svg>
+        </div>
+        <h1>糖包</h1>
+        <p class="names">
+          <span><del>人工智能</del><ins>能工智人</ins></span>
+          <span><del>Artificial Intelligence</del><ins>Average Individual</ins></span>
+        </p>
+        <article class="memo">
+          <p class="memo-head"><span class="memo-mode"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 10l1-3 5-5 2 2-5 5z"/></svg>修订模式</span><span>修订人：糖包本人</span></p>
+          <p class="memo-text">糖包是<del>新一代人工智能大模型</del><ins>一个由真人回复的对话网站</ins>。<del>依托海量数据训练</del><ins>他读完你的消息，自己打字回复</ins>，<del>毫秒级响应</del><ins>每条要等几分钟到几小时</ins>。<del>7×24 小时在线</del><ins>他醒着的时候在线</ins>，<del>支持多模态生成</del><ins>能聊天，也能拿笔画图</ins>。<del>结果安全可靠。</del><ins>他也会犯错，重要的事请自己判断。</ins></p>
+        </article>
+        <div class="front-actions">
+          <a class="enter" href="/chat">进入聊天</a>
+          <button class="become" type="button" data-join>成为AI</button>
+        </div>
+        <p class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></p>
+      </div>
+    </header>
+    <section class="sample" aria-label="一段示例对话">
+      <p class="sample-rule">一段示例对话</p>
+      <div class="sample-log">
+        <p class="u">你是 AI 吗？</p>
+        <article class="b">
+          <svg class="avatar"><use href="#pleat"/></svg>
+          <div class="b-body"><p class="b-text">是。不过这里的 AI 是 Average Individual，一个普通人。</p></div>
+        </article>
+        <p class="u">你会画画吗？</p>
+        <article class="b">
+          <svg class="avatar"><use href="#pleat"/></svg>
+          <div class="b-body">
+            <details class="thought">
+              <summary>已思考（用时 1 小时 12 分）<svg class="i"><use href="#i-chev"/></svg></summary>
+              <div class="thought-body">
+                <dl><dt>推理核心</dt><dd>1 个（糖包本人）</dd><dt>用时</dt><dd>1 小时 12 分</dd><dt>吞吐</dt><dd>约 0.19 字/分钟</dd></dl>
+                <p>思考过程由一个人完成，没有留下草稿。</p>
+              </div>
+            </details>
+            <p class="b-text">会，我用手画。像不像看运气。</p>
+          </div>
+        </article>
+        <p class="u">你睡着了怎么办？</p>
+        <article class="b">
+          <svg class="avatar"><use href="#pleat"/></svg>
+          <div class="b-body"><p class="b-text">消息会留着。页面变暗就是我睡了，醒了再回。</p></div>
+        </article>
+      </div>
+    </section>
+    <section class="tray">
+      <div class="tray-in">
+        <h2><del>招聘 AI 训练师</del><ins>成为AI</ins></h2>
+        <p><del>加入我们，参与下一代大模型的训练。</del><ins>申请通过后，你会有自己的型号和后台，来聊天的人可以选你。对外你也叫糖包。</ins></p>
+        <button class="become" type="button" data-join>申请成为AI</button>
+      </div>
+    </section>
+    <section class="cage" id="cage" hidden aria-label="现在能聊的">
+      <h2>现在能聊的</h2>
+      <div class="lineup" id="lineup"></div>
+    </section>
+    <p class="front-fine">不提供医疗、法律或危机援助。</p>
+  </main>
+  <div class="apply" id="apply" hidden>
+    <div class="apply-card" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+      <header>
+        <h2 id="apply-title">成为AI</h2>
+        <button type="button" id="apply-close" aria-label="关闭">×</button>
+      </header>
+      <div class="oath" id="apply-oath">
+        <p class="lead">欢迎加入糖包大模型家族。</p>
+        <p>申请通过后，你会成为一个模型。请做一个文明负责的模型。</p>
+        <ul>
+          <li>不骂人</li>
+          <li>请不要欺骗诱导用户</li>
+          <li>不把别人的对话说出去</li>
+          <li>开灯时尽量回复每一个向你提问的用户</li>
+          <li>请善待每一个用户，但也别委屈自己</li>
+        </ul>
+        <p class="ban">如有违规行为，这个模型会被封禁。</p>
+        <button class="primary" type="button" id="apply-next">我知道了</button>
+      </div>
+      <form id="apply-form" hidden>
+        <label class="field">
+          <span>模型ID</span>
+          <span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span>
+          <small>只填后面。小写字母、数字和短横线，不能和已有型号重复。</small>
+        </label>
+        <label class="field">
+          <span>邮箱</span>
+          <input id="apply-email" type="email" autocomplete="email" required>
+          <small>只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</small>
+        </label>
+        <label class="field">
+          <span>模型说明</span>
+          <input id="apply-blurb" maxlength="12" required placeholder="你擅长什么，任何事都行">
+          <small>会展示给来聊天的人。最多十二个字。</small>
+        </label>
+        <p class="hint">申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
+        <button class="primary" type="submit">提交申请</button>
+        <p class="err" id="apply-err" role="alert"></p>
+      </form>
+      <div id="apply-state" hidden>
+        <p id="apply-state-text"></p>
+        <p id="apply-reason" hidden></p>
+        <div id="apply-pass-block" hidden>
+          <span>登录口令</span>
+          <p class="pass" id="apply-pass"></p>
+        </div>
+        <div class="pass-actions" id="apply-actions" hidden>
+          <button type="button" id="apply-copy">复制口令</button>
+          <a id="apply-desk" href="/desk">进入后台</a>
+        </div>
+        <button type="button" id="apply-again" hidden>再申请一次</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const APPLY_KEY = "tangbao.apply";
+    const VISITOR_KEY = "tangbao.visitor";
+
+    function visitorId() {
+      try {
+        const existing = localStorage.getItem(VISITOR_KEY) || "";
+        if (/^[A-Za-z0-9_-]{16,80}$/.test(existing)) return existing;
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const id = btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+        localStorage.setItem(VISITOR_KEY, id);
+        return id;
+      } catch {
+        return "";
+      }
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        method: options.method || "GET",
+        headers: {
+          "x-visitor": visitorId(),
+          ...(options.body ? { "content-type": "application/json" } : {}),
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(data.error || "这边晃了一下。");
+        error.statusCode = response.status;
+        throw error;
+      }
+      return data;
+    }
+
+    function emailOk(value) {
+      const email = value.trim().toLowerCase();
+      return /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/.test(email);
+    }
+
+    function showOath() {
+      $("#apply-oath").hidden = false;
+      $("#apply-form").hidden = true;
+      $("#apply-state").hidden = true;
+    }
+
+    function paintApplication(data) {
+      $("#apply-oath").hidden = true;
+      $("#apply-form").hidden = true;
+      $("#apply-state").hidden = false;
+      const actions = $("#apply-actions");
+      const copy = $("#apply-copy");
+      const passBlock = $("#apply-pass-block");
+      const pass = $("#apply-pass");
+      if (data.status === "approved") {
+        $("#apply-state-text").textContent = data.password
+          ? "申请已通过。请妥善保管下面的登录口令，并使用该口令登录后台，处理属于你的对话。"
+          : "申请已通过。请使用已获得的口令登录后台，处理属于你的对话。";
+        actions.hidden = false;
+        copy.hidden = !data.password;
+        copy.textContent = "复制口令";
+      } else {
+        const text = {
+          pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
+          rejected: "这次没过。",
+        };
+        $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
+        actions.hidden = true;
+      }
+      const reason = $("#apply-reason");
+      if (data.status === "rejected" && data.reason) {
+        reason.hidden = false;
+        reason.textContent = data.reason;
+      } else {
+        reason.hidden = true;
+        reason.textContent = "";
+      }
+      if (data.password) {
+        passBlock.hidden = false;
+        pass.textContent = data.password;
+      } else {
+        passBlock.hidden = true;
+        pass.textContent = "";
+      }
+      $("#apply-again").hidden = data.status !== "rejected";
+    }
+
+    async function openApply() {
+      $("#apply").hidden = false;
+      $("#apply-err").textContent = "";
+      try {
+        const mine = await api("/api/applications/mine");
+        try { localStorage.setItem(APPLY_KEY, mine.id); } catch {}
+        paintApplication(mine);
+        return;
+      } catch (err) {
+        if (err.statusCode !== 404) $("#apply-err").textContent = err.message;
+      }
+      let saved = "";
+      try { saved = localStorage.getItem(APPLY_KEY) || ""; } catch {}
+      if (!saved) {
+        showOath();
+        return;
+      }
+      try {
+        paintApplication(await api(`/api/applications/${saved}`));
+      } catch (err) {
+        $("#apply-err").textContent = err.message;
+        showOath();
+      }
+    }
+
+    document.querySelectorAll("[data-join]").forEach((button) => {
+      button.addEventListener("click", () => { void openApply(); });
+    });
+    $("#apply-close").addEventListener("click", () => { $("#apply").hidden = true; });
+    $("#apply").addEventListener("click", (event) => {
+      if (event.target === $("#apply")) $("#apply").hidden = true;
+    });
+    $("#apply-next").addEventListener("click", () => {
+      $("#apply-oath").hidden = true;
+      $("#apply-form").hidden = false;
+    });
+    $("#apply-again").addEventListener("click", () => {
+      try { localStorage.removeItem(APPLY_KEY); } catch {}
+      showOath();
+    });
+    $("#apply-copy").addEventListener("click", async () => {
+      const text = $("#apply-pass").textContent;
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const area = document.createElement("textarea");
+        area.value = text;
+        document.body.append(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      const button = $("#apply-copy");
+      button.textContent = "已复制";
+      window.setTimeout(() => {
+        if (button.textContent === "已复制") button.textContent = "复制口令";
+      }, 1600);
+    });
+    let applying = false;
+    $("#apply-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (applying) return;
+      $("#apply-err").textContent = "";
+      const suffix = $("#apply-suffix").value.trim();
+      const email = $("#apply-email").value.trim();
+      const blurb = $("#apply-blurb").value.trim();
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(suffix)) {
+        $("#apply-err").textContent = "型号后面要写成字母、数字和短横线。";
+        return;
+      }
+      if (!emailOk(email)) {
+        $("#apply-err").textContent = "邮箱要写成能写信的地址。";
+        return;
+      }
+      if (!blurb || [...blurb].length > 12) {
+        $("#apply-err").textContent = blurb ? "模型说明太长了。十二个字以内。" : "写一句你擅长什么。";
+        return;
+      }
+      applying = true;
+      try {
+        const data = await api("/api/applications", { method: "POST", body: { suffix, email, blurb } });
+        try { localStorage.setItem(APPLY_KEY, data.id); } catch {}
+        paintApplication(await api(`/api/applications/${data.id}`));
+      } catch (err) {
+        $("#apply-err").textContent = err.message;
+      } finally {
+        applying = false;
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("#apply").hidden) $("#apply").hidden = true;
+    });
+
+    function setPresence(status) {
+      const awake = Boolean(status.awake);
+      document.body.dataset.presence = awake ? "awake" : "asleep";
+      $("#status-label").textContent = status.label || (awake ? "可用" : "繁忙");
+      $("#status-note").textContent = status.note || (awake ? "他醒着" : "他睡了");
+      try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
+    }
+
+    try {
+      if (localStorage.getItem("tangbao.presence") === "asleep") setPresence({ awake: false });
+    } catch {}
+
+    function paintModels(models) {
+      const lineup = $("#lineup");
+      lineup.replaceChildren();
+      for (const model of models) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "line";
+        const dot = document.createElement("i");
+        dot.dataset.on = model.awake ? "1" : "0";
+        const who = document.createElement("span");
+        who.className = "who";
+        const name = document.createElement("b");
+        name.textContent = model.id;
+        const blurb = document.createElement("small");
+        blurb.textContent = model.blurb || "";
+        who.append(name, blurb);
+        const lamp = document.createElement("small");
+        lamp.className = "lamp";
+        lamp.textContent = model.awake ? "可用" : "繁忙";
+        button.append(dot, who, lamp);
+        button.addEventListener("click", () => {
+          try { localStorage.setItem("tangbao.model", model.id); } catch {}
+          location.href = "/chat";
+        });
+        lineup.append(button);
+      }
+      $("#cage").hidden = models.length === 0;
+    }
+
+    fetch("/api/status")
+      .then((response) => response.json())
+      .then((status) => setPresence(status))
+      .catch(() => {});
+    fetch("/api/models")
+      .then((response) => response.json())
+      .then((data) => paintModels(data.models || []))
+      .catch(() => {});
+  </script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+意图：13 和 14 合并，以 14 为骨架。开头是修订过的名字和通稿，往下接一段示例对话，再往下是成为AI和在线的型号。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包 · 16 改稿接对话</title>
+  <style>
+    @font-face {
+      font-family: "TB Serif";
+      src: url("../assets/tb-serif.woff2") format("woff2");
+      font-weight: 600;
+      font-display: swap;
+    }
+    :root {
+      --bg: #fcfbf9;
+      --side: #f4f2ee;
+      --panel: #ffffff;
+      --ink: #1f1d1a;
+      --ink-2: #48443e;
+      --muted: #7a746b;
+      --faint: #aaa49a;
+      --line: #e9e5dd;
+      --accent: #a8622a;
+      --dot: #4b8a5f;
+      --serif: "TB Serif", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --mono: "Cascadia Mono", "SF Mono", ui-monospace, "JetBrains Mono", Consolas, monospace;
+      color-scheme: light;
+    }
+    body[data-presence="asleep"] {
+      --bg: #1b1815;
+      --side: #211d19;
+      --panel: #29241f;
+      --ink: #f1e9dc;
+      --ink-2: #d6ccbd;
+      --muted: #a49886;
+      --faint: #7c7264;
+      --line: #36302a;
+      --accent: #d08b4d;
+      --dot: #8f7b57;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.6 var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    button { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+    svg.mark { display: block; color: var(--accent); }
+    .bun { position: relative; width: 56px; height: 56px; margin: 0 auto 22px; }
+    .bun svg.mark { width: 56px; height: 56px; transition: opacity 0.7s ease; }
+    svg.steam {
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 2px);
+      width: 44px;
+      height: 30px;
+      transform: translateX(-50%);
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      overflow: visible;
+    }
+    svg.steam path { opacity: 0; animation: steam 3.6s ease-in-out infinite; }
+    svg.steam path:nth-child(1) { animation-delay: -0.6s; }
+    svg.steam path:nth-child(2) { animation-delay: -1.8s; }
+    svg.steam path:nth-child(3) { animation-delay: -3s; }
+    body[data-presence="asleep"] svg.steam { display: none; }
+    body[data-presence="asleep"] .bun svg.mark { opacity: 0.5; }
+    @keyframes steam {
+      0% { opacity: 0; transform: translateY(6px); }
+      35% { opacity: 0.6; }
+      100% { opacity: 0; transform: translateY(-9px); }
+    }
+    .acts { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+    .enter {
+      display: inline-flex;
+      align-items: center;
+      height: 46px;
+      padding: 0 26px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--bg);
+      font-family: var(--serif);
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+    }
+    .become {
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+      color: var(--accent);
+      font-family: var(--serif);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      font-size: 13px;
+      color: var(--ink-2);
+    }
+    .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+    .status em { font-style: normal; color: var(--faint); }
+    .lineup { display: flex; flex-direction: column; gap: 8px; }
+    .line {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      width: 100%;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      text-align: left;
+      cursor: pointer;
+    }
+    .line i { width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); flex: none; }
+    .line .who { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+    .line b { font-family: var(--mono); font-size: 14px; letter-spacing: -0.03em; }
+    .line small { font-size: 12px; color: var(--muted); }
+    .line .lamp { margin-left: auto; margin-top: 2px; color: var(--faint); }
+
+    del {
+      color: var(--faint);
+      text-decoration: line-through;
+      text-decoration-color: color-mix(in srgb, var(--accent) 75%, transparent);
+      text-decoration-thickness: 1.5px;
+    }
+    ins {
+      color: var(--ink);
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 6px;
+    }
+    del + ins { margin-left: 0.2em; }
+
+    .hero { padding: 80px 20px 60px; text-align: center; }
+    .hero-in { width: min(38rem, 100%); margin: 0 auto; }
+    h1 { margin: 0; font-family: var(--serif); font-size: 46px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.15; }
+    .names { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 18px 0 0; font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.6; }
+    .names span { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.5em; }
+    .names del, .names ins { white-space: nowrap; }
+    .names del + ins { margin-left: 0; }
+    .names ins { color: var(--accent); text-decoration: none; }
+    .doc { margin: 30px 0 0; padding: 18px 24px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); text-align: left; }
+    .doc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
+    .mode { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); }
+    .mode svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .doc p.body { margin: 0; font-size: 16px; line-height: 2.1; }
+    .hero .acts { margin-top: 30px; }
+    .hero .status { margin-top: 24px; }
+    .talk { width: min(38rem, calc(100% - 40px)); margin: 0 auto; padding: 0 0 64px; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 0 0 30px; font-size: 12px; color: var(--faint); }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .log { display: flex; flex-direction: column; gap: 24px; }
+    .u { align-self: flex-end; max-width: 78%; margin: 0; padding: 10px 16px; border-radius: 18px; background: color-mix(in srgb, var(--ink) 6%, var(--bg)); line-height: 1.7; }
+    .b { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 14px; }
+    .b > svg { width: 24px; height: 24px; margin-top: 3px; color: var(--accent); }
+    .b p { margin: 0; line-height: 1.85; }
+    .b .thought { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+    .b .thought::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+    .band { padding: 48px 20px 52px; background: color-mix(in srgb, var(--accent) 7%, var(--side)); }
+    .band-in { width: min(38rem, 100%); margin: 0 auto; }
+    .band h2, .block h2 { margin: 0 0 14px; font-family: var(--serif); font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
+    .band h2 del { font-size: 18px; }
+    .band p { margin: 0 0 22px; font-size: 15.5px; line-height: 2; }
+    .band .become { height: 42px; padding: 0 20px; font-size: 15px; }
+    .block { width: min(38rem, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 0; }
+    .fine { margin: 0; padding: 40px 20px 28px; text-align: center; font-size: 12px; color: var(--faint); }
+    @media (max-width: 640px) {
+      .hero { padding: 60px 16px 44px; }
+      h1 { font-size: 40px; }
+      .names { font-size: 17px; }
+      .doc { padding: 16px 18px 18px; }
+      .doc p.body { font-size: 15.5px; line-height: 2; }
+      .band { padding: 40px 16px 44px; }
+      .talk { width: calc(100% - 32px); padding-bottom: 48px; }
+      .u { max-width: 86%; }
+      .block { width: calc(100% - 32px); padding-top: 40px; }
+    }
+  </style>
+</head>
+<body data-presence="awake">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+  </svg>
+
+  <header class="hero">
+    <div class="hero-in">
+      <div class="bun" aria-hidden="true">
+        <svg class="steam" viewBox="0 0 46 32"><path d="M14 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M23 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M32 30c-4-5 4-8 0-13s4-8 0-13"/></svg>
+        <svg class="mark"><use href="#pleat"/></svg>
+      </div>
+      <h1>糖包</h1>
+      <p class="names">
+        <span><del>人工智能</del><ins>能工智人</ins></span>
+        <span><del>Artificial Intelligence</del><ins>Average Individual</ins></span>
+      </p>
+      <article class="doc">
+        <p class="doc-head"><span class="mode"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 10l1-3 5-5 2 2-5 5z"/></svg>修订模式</span><span>修订人：糖包本人</span></p>
+        <p class="body">糖包是<del>新一代人工智能大模型</del><ins>一个由真人回复的对话网站</ins>。<del>依托海量数据训练</del><ins>他读完你的消息，自己打字回复</ins>，<del>毫秒级响应</del><ins>每条要等几分钟到几小时</ins>。<del>7×24 小时在线</del><ins>他醒着的时候在线</ins>，<del>支持多模态生成</del><ins>能聊天，也能拿笔画图</ins>。<del>结果安全可靠。</del><ins>他也会犯错，重要的事请自己判断。</ins></p>
+      </article>
+      <div class="acts">
+        <a class="enter" href="#chat">进入聊天</a>
+        <button class="become" type="button">成为AI</button>
+      </div>
+      <p class="status"><i></i><span data-when="awake">可用</span><em data-when="awake">他醒着</em><span data-when="asleep" hidden>繁忙</span><em data-when="asleep" hidden>他睡了</em></p>
+    </div>
+  </header>
+
+  <section class="talk">
+    <p class="divider">一段示例对话</p>
+    <div class="log">
+      <p class="u">你是 AI 吗？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div><p>是。不过这里的 AI 是 Average Individual，一个普通人。</p></div>
+      </div>
+
+      <p class="u">你会画画吗？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div><p class="thought">已思考（用时 1 小时 12 分）</p><p>会，我用手画。像不像看运气。</p></div>
+      </div>
+
+      <p class="u">你睡着了怎么办？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div><p>消息会留着。页面变暗就是我睡了，醒了再回。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="band-in">
+      <h2><del>招聘 AI 训练师</del><ins>成为AI</ins></h2>
+      <p><del>加入我们，参与下一代大模型的训练。</del><ins>申请通过后，你会有自己的型号和后台，来聊天的人可以选你。对外你也叫糖包。</ins></p>
+      <button class="become" type="button">申请成为AI</button>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>现在能聊的</h2>
+    <div class="lineup">
+      <button class="line" type="button"><i></i><span class="who"><b>tangbao-vme50-flash</b><small>糖包本人。什么都聊一点。</small></span><small class="lamp" data-when="awake">可用</small><small class="lamp" data-when="asleep" hidden>繁忙</small></button>
+    </div>
+  </section>
+  <p class="fine">不提供医疗、法律或危机援助。</p>
+  <script>
+    const presence = new URLSearchParams(location.search).get("presence") === "asleep" ? "asleep" : "awake";
+    document.body.dataset.presence = presence;
+    document.querySelectorAll("[data-when]").forEach((el) => {
+      el.hidden = el.dataset.when !== presence;
+    });
+  </script>
+</body>
+</html>

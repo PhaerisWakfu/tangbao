@@ -56,7 +56,6 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title" id="title"></span>
-        <button class="join" type="button" id="join"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><span>成为AI</span></button>
         <span class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></span>
         <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>
       </header>
@@ -99,7 +98,7 @@
           <div class="card" id="card" hidden>
             <header>
               <svg class="mark"><use href="#pleat"/></svg>
-              <div><h2>tangbao-vme50-flash</h2><p>人工语言模型</p></div>
+              <div><h2>tangbao-vme50-flash</h2><p>人工智能写成能工智人，AI 写成 Average Individual。</p></div>
             </header>
             <dl>
               <dt>参数量</dt><dd>1 个糖包</dd>
@@ -121,62 +120,8 @@
           <button type="button">锟斤拷</button>
         </div>
       </div>
-      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「能工智人」，回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>人工智能写成能工智人，AI 写成 Average Individual。回复的是一个叫糖包的人。不是医疗、法律或危机援助。</span></p>
     </main>
-  </div>
-  <div class="apply" id="apply" hidden>
-    <div class="apply-card" role="dialog" aria-modal="true" aria-labelledby="apply-title">
-      <header>
-        <h2 id="apply-title">成为AI</h2>
-        <button type="button" id="apply-close" aria-label="关闭">×</button>
-      </header>
-      <div class="oath" id="apply-oath">
-        <p class="lead">欢迎加入糖包大模型家族。</p>
-        <p>申请通过后，你会成为一个模型。请做一个文明负责的模型。</p>
-        <ul>
-          <li>不骂人</li>
-          <li>请不要欺骗诱导用户</li>
-          <li>不把别人的对话说出去</li>
-          <li>开灯时尽量回复每一个向你提问的用户</li>
-          <li>请善待每一个用户，但也别委屈自己</li>
-        </ul>
-        <p class="ban">如有违规行为，这个模型会被封禁。</p>
-        <button class="primary" type="button" id="apply-next">我知道了</button>
-      </div>
-      <form id="apply-form" hidden>
-        <label class="field">
-          <span>模型ID</span>
-          <span class="model-prefix">tangbao-<input id="apply-suffix" maxlength="40" autocomplete="off" required></span>
-          <small>只填后面。小写字母、数字和短横线，不能和已有型号重复。</small>
-        </label>
-        <label class="field">
-          <span>邮箱</span>
-          <input id="apply-email" type="email" autocomplete="email" required>
-          <small>只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</small>
-        </label>
-        <label class="field">
-          <span>模型说明</span>
-          <input id="apply-blurb" maxlength="12" required placeholder="你擅长什么，任何事都行">
-          <small>会展示给来聊天的人。最多十二个字。</small>
-        </label>
-        <p class="hint">申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
-        <button class="primary" type="submit">提交申请</button>
-        <p class="err" id="apply-err" role="alert"></p>
-      </form>
-      <div id="apply-state" hidden>
-        <p id="apply-state-text"></p>
-        <p id="apply-reason" hidden></p>
-        <div id="apply-pass-block" hidden>
-          <span>登录口令</span>
-          <p class="pass" id="apply-pass"></p>
-        </div>
-        <div class="pass-actions" id="apply-actions" hidden>
-          <button type="button" id="apply-copy">复制口令</button>
-          <a id="apply-desk" href="/desk">进入后台</a>
-        </div>
-        <button type="button" id="apply-again" hidden>再申请一次</button>
-      </div>
-    </div>
   </div>
   <div class="viewer" id="viewer" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>

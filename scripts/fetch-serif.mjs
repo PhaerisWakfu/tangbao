@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 
 // 衬线字只用在下面这些字上。页面里新增衬线文字时，把字加进来再跑一次。
-const TEXT = "糖包需要我做什么？人工语言模型说明推理延迟准确度并发可用性关于桌子背面的0123456789 ·";
+const TEXT =
+  "糖包需要我做什么？人工语言模型说明推理延迟准确度并发可用性关于桌子背面的0123456789 ·" +
+  "回复你是一个真。，（）进入聊天成为这里能智怎使前请知道现在申指普通和般比较招聘训练师AIacdefgilnrtuv";
 const TARGETS = (process.argv.slice(2).length
   ? process.argv.slice(2)
   : ["public/assets/tb-serif.woff2", "design/assets/tb-serif.woff2"]

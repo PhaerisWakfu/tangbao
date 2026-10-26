@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<!--
+意图：13 和 14 合并，以 13 为骨架。首页是一段示例对话；名字用 14 的修订线改；「介绍一下你自己」的回复是一段被他自己改成实话的标准答案。底下的输入框就是进入聊天的入口。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包 · 15 对话里改稿</title>
+  <style>
+    @font-face {
+      font-family: "TB Serif";
+      src: url("../assets/tb-serif.woff2") format("woff2");
+      font-weight: 600;
+      font-display: swap;
+    }
+    :root {
+      --bg: #fcfbf9;
+      --side: #f4f2ee;
+      --panel: #ffffff;
+      --ink: #1f1d1a;
+      --ink-2: #48443e;
+      --muted: #7a746b;
+      --faint: #aaa49a;
+      --line: #e9e5dd;
+      --line-2: #dcd6cb;
+      --bubble: #efebe4;
+      --accent: #a8622a;
+      --dot: #4b8a5f;
+      --serif: "TB Serif", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --mono: "Cascadia Mono", "SF Mono", ui-monospace, "JetBrains Mono", Consolas, monospace;
+      color-scheme: light;
+    }
+    body[data-presence="asleep"] {
+      --bg: #1b1815;
+      --side: #211d19;
+      --panel: #29241f;
+      --ink: #f1e9dc;
+      --ink-2: #d6ccbd;
+      --muted: #a49886;
+      --faint: #7c7264;
+      --line: #36302a;
+      --line-2: #463e36;
+      --bubble: #322b25;
+      --accent: #d08b4d;
+      --dot: #8f7b57;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.6 var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    button { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+    svg.mark { display: block; color: var(--accent); }
+    .bun { position: relative; width: 52px; height: 52px; margin: 0 auto 20px; }
+    .bun svg.mark { width: 52px; height: 52px; transition: opacity 0.7s ease; }
+    svg.steam {
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 2px);
+      width: 40px;
+      height: 28px;
+      transform: translateX(-50%);
+      fill: none;
+      stroke: var(--muted);
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      overflow: visible;
+    }
+    svg.steam path { opacity: 0; animation: steam 3.6s ease-in-out infinite; }
+    svg.steam path:nth-child(1) { animation-delay: -0.6s; }
+    svg.steam path:nth-child(2) { animation-delay: -1.8s; }
+    svg.steam path:nth-child(3) { animation-delay: -3s; }
+    body[data-presence="asleep"] svg.steam { display: none; }
+    body[data-presence="asleep"] .bun svg.mark { opacity: 0.5; }
+    @keyframes steam {
+      0% { opacity: 0; transform: translateY(6px); }
+      35% { opacity: 0.6; }
+      100% { opacity: 0; transform: translateY(-9px); }
+    }
+    .become {
+      height: 34px;
+      padding: 0 14px;
+      border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+      color: var(--accent);
+      font-family: var(--serif);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      font-size: 13px;
+      color: var(--ink-2);
+    }
+    .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+    .status em { font-style: normal; color: var(--faint); }
+
+    del {
+      color: var(--faint);
+      text-decoration: line-through;
+      text-decoration-color: color-mix(in srgb, var(--accent) 75%, transparent);
+      text-decoration-thickness: 1.5px;
+    }
+    ins {
+      color: var(--ink);
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 6px;
+    }
+    del + ins { margin-left: 0.2em; }
+
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 58px; padding: 0 20px; }
+    .brand { display: inline-flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 17px; font-weight: 600; letter-spacing: 0.04em; }
+    .brand svg { width: 20px; height: 20px; }
+    .bar-r { display: flex; align-items: center; gap: 10px; }
+    .bar .become { height: 30px; padding: 0 12px; font-size: 13px; }
+    .talk { width: min(42rem, calc(100% - 40px)); margin: 0 auto; padding: 36px 0 200px; }
+    .intro { text-align: center; }
+    .intro h1 { margin: 0; font-family: var(--serif); font-size: 40px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.15; }
+    .names { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 14px 0 0; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.6; }
+    .names span { display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.5em; }
+    .names del, .names ins { white-space: nowrap; }
+    .names del + ins { margin-left: 0; }
+    .names ins { color: var(--accent); text-decoration: none; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 40px 0 30px; font-size: 12px; color: var(--faint); }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .log { display: flex; flex-direction: column; gap: 24px; }
+    .u { align-self: flex-end; max-width: 78%; margin: 0; padding: 10px 16px; border-radius: 18px; background: var(--bubble); line-height: 1.7; }
+    .b { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 14px; }
+    .b > svg { width: 24px; height: 24px; margin-top: 3px; color: var(--accent); }
+    .b p { margin: 0; line-height: 1.85; }
+    .b p.edited { line-height: 2.05; }
+    .b .thought { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+    .b .thought::after { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+    .b .become { margin-top: 12px; }
+    .dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 28px 20px 14px; background: linear-gradient(to top, var(--bg) 72%, transparent); }
+    .composer {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: min(42rem, 100%);
+      margin: 0 auto;
+      padding: 10px 10px 10px 20px;
+      border: 1px solid var(--line-2);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 14px 34px -20px rgba(31, 29, 26, 0.35);
+      color: inherit;
+      text-decoration: none;
+    }
+    .composer .ph { flex: 1; color: var(--faint); }
+    .composer .model { font-family: var(--mono); font-size: 12px; letter-spacing: -0.02em; color: var(--muted); }
+    .composer .go {
+      display: inline-flex;
+      align-items: center;
+      height: 38px;
+      padding: 0 18px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--bg);
+      font-family: var(--serif);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+    }
+    .dock .fine { margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--faint); text-wrap: balance; }
+    @media (max-width: 640px) {
+      .bar { padding: 0 14px; }
+      .bar .status em { display: none; }
+      .talk { width: calc(100% - 32px); padding-top: 20px; }
+      .intro h1 { font-size: 34px; }
+      .names { font-size: 17px; }
+      .u { max-width: 86%; }
+      .composer .model { display: none; }
+      .dock { padding: 24px 12px 12px; }
+    }
+  </style>
+</head>
+<body data-presence="awake">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+  </svg>
+
+  <header class="bar">
+    <span class="brand"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>糖包</span>
+    <div class="bar-r">
+      <button class="become" type="button">成为AI</button>
+      <span class="status"><i></i><span data-when="awake">可用</span><em data-when="awake">他醒着</em><span data-when="asleep" hidden>繁忙</span><em data-when="asleep" hidden>他睡了</em></span>
+    </div>
+  </header>
+
+  <main class="talk">
+    <div class="intro">
+      <div class="bun" aria-hidden="true">
+        <svg class="steam" viewBox="0 0 46 32"><path d="M14 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M23 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M32 30c-4-5 4-8 0-13s4-8 0-13"/></svg>
+        <svg class="mark"><use href="#pleat"/></svg>
+      </div>
+      <h1>糖包</h1>
+      <p class="names">
+        <span><del>人工智能</del><ins>能工智人</ins></span>
+        <span><del>Artificial Intelligence</del><ins>Average Individual</ins></span>
+      </p>
+    </div>
+
+    <p class="divider">一段示例对话</p>
+
+    <div class="log">
+      <p class="u">你是 AI 吗？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div><p>是。不过这里的 AI 是 Average Individual，一个普通人。</p></div>
+      </div>
+
+      <p class="u">介绍一下你自己。</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div>
+          <p class="thought">已思考（用时 4 分钟）</p>
+          <p class="edited">我是<del>新一代人工智能大模型</del><ins>一个真人</ins>。<del>依托海量数据训练</del><ins>你发的消息我会读完，再自己打字回复</ins>，<del>毫秒级响应</del><ins>每条要等几分钟到几小时</ins>。<del>7×24 小时在线</del><ins>我醒着的时候在线，睡着了这个页面会变暗</ins>。<del>结果安全可靠。</del><ins>我也会犯错，重要的事请自己判断。</ins></p>
+        </div>
+      </div>
+
+      <p class="u">你会画画吗？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div><p class="thought">已思考（用时 1 小时 12 分）</p><p>会，我用手画。像不像看运气。</p></div>
+      </div>
+
+      <p class="u">我也能当 AI 吗？</p>
+      <div class="b">
+        <svg aria-hidden="true"><use href="#pleat"/></svg>
+        <div>
+          <p>能。申请通过后，你会有自己的型号和后台，来聊天的人可以选你。对外你也叫糖包。</p>
+          <button class="become" type="button">成为AI</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="dock">
+    <a class="composer" href="#chat">
+      <span class="ph">给糖包发消息</span>
+      <span class="model">tangbao-vme50-flash</span>
+      <span class="go">进入聊天</span>
+    </a>
+    <p class="fine">糖包会犯错，重要的事请自己判断。不提供医疗、法律或危机援助。</p>
+  </div>
+  <script>
+    const presence = new URLSearchParams(location.search).get("presence") === "asleep" ? "asleep" : "awake";
+    document.body.dataset.presence = presence;
+    document.querySelectorAll("[data-when]").forEach((el) => {
+      el.hidden = el.dataset.when !== presence;
+    });
+  </script>
+</body>
+</html>

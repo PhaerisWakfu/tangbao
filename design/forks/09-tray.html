@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!--
+意图：有表现力。门还是热气和褶子，像一个模型。往下交接到一张笼屉：左列按菜单写，右列不标钱，标一位、一笔、一个褶。笼里是真型号。睡着时热气停，屉布跟着夜色。
+
+留这一稿。
+弃极简：只有一句「回复的是人」，页面还是空的。
+弃克制：按钮下只加一行规格，笑话没有地方待。
+弃放飞：整页点心漫画、标价、吉祥物。第一眼就不像模型了。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>糖包 · 09 笼屉</title>
+  <link rel="stylesheet" href="../../public/assets/app.css">
+</head>
+<body class="settled" data-presence="awake">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+  </svg>
+  <main class="front">
+    <section class="door">
+      <div class="door-card">
+        <div class="bun" aria-hidden="true">
+          <svg class="steam" viewBox="0 0 46 32"><path d="M14 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M23 30c-4-5 4-8 0-13s4-8 0-13"/><path d="M32 30c-4-5 4-8 0-13s4-8 0-13"/></svg>
+          <svg class="mark"><use href="#pleat"/></svg>
+        </div>
+        <h1>糖包</h1>
+        <p class="gloss">人工智能，这里写成能工智人。</p>
+        <p class="gloss">AI，这里写成 Average Individual。</p>
+        <p class="note" id="door-note">慢是规格，不是故障。名字都叫糖包。</p>
+        <div class="front-actions">
+          <a class="enter" href="../../src/pages/index.html">进入聊天</a>
+          <button class="become" type="button">成为AI</button>
+        </div>
+      </div>
+    </section>
+    <section class="tray" aria-label="可以做的事">
+      <div class="tray-in">
+        <div class="ticket">
+          <a class="dish" href="#chat">
+            <span class="dish-name">聊天</span>
+            <span class="dish-unit">一位</span>
+            <span class="dish-note">你发一句，他回一句。写完才发出来。</span>
+          </a>
+          <a class="dish" href="#draw">
+            <span class="dish-name">画像</span>
+            <span class="dish-unit">一笔</span>
+            <span class="dish-note">他亲手画。猫不一定像猫。</span>
+          </a>
+          <button class="dish" type="button">
+            <span class="dish-name">上笼</span>
+            <span class="dish-unit">一个褶</span>
+            <span class="dish-note">申请通过，你也叫糖包。型号算你的。</span>
+          </button>
+          <p class="ticket-spec"><span>参数量 1</span><span>温度 室温</span><span>并发 1</span><span>上下文 他今天还没忘掉的事</span><span>硬件 十根手指</span></p>
+        </div>
+        <div class="cage">
+          <h2>现在在笼里</h2>
+          <p>一笼糖包，褶子不重样。</p>
+          <div class="lineup">
+            <button class="line" type="button"><i data-on="1"></i><span class="who"><b>tangbao-vme50-flash</b><small>糖包本人。什么都聊一点。</small></span><small class="lamp">可用</small></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    if (new URLSearchParams(location.search).get("presence") === "asleep") {
+      document.body.dataset.presence = "asleep";
+      document.getElementById("door-note").textContent = "他睡了。这次先不写，热气也停了。";
+    }
+  </script>
+</body>
+</html>

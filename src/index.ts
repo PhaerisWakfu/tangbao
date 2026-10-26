@@ -4,6 +4,7 @@ import { inOffHours, nextOffAt } from "./hours";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
+import homeHtml from "./pages/home.html";
 import indexHtml from "./pages/index.html";
 import mdJs from "./client/md.txt";
 
@@ -124,12 +125,14 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   const page =
     path === "/" || path === "/index.html"
-      ? indexHtml
-      : path === "/about" || path === "/about.html"
-        ? aboutHtml
-        : path === "/desk" || path === "/desk.html"
-          ? deskHtml
-          : null;
+      ? homeHtml
+      : path === "/chat" || path === "/chat.html"
+        ? indexHtml
+        : path === "/about" || path === "/about.html"
+          ? aboutHtml
+          : path === "/desk" || path === "/desk.html"
+            ? deskHtml
+            : null;
   if (page && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : page, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
