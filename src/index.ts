@@ -1,12 +1,15 @@
 import aboutHtml from "./pages/about.html";
 import { maskAbuse } from "./abuse";
 import { inOffHours, nextOffAt } from "./hours";
+import { sendWebPush } from "./push";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
 import homeHtml from "./pages/home.html";
 import indexHtml from "./pages/index.html";
 import mdJs from "./client/md.txt";
+import swJs from "./client/sw.txt";
+import manifestJson from "./client/manifest.txt";
 
 class HttpError extends Error {
   constructor(
@@ -20,7 +23,9 @@ class HttpError extends Error {
 type AppEnv = Env & {
   ADMIN_PASSWORD?: string;
   ADMIN_SECRET?: string;
-  FEISHU_WEBHOOK?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
   IMAGES: KVNamespace;
 };
 
@@ -56,7 +61,7 @@ export default {
           message: err instanceof Error ? err.message : "unknown",
         }),
       );
-      return json({ error: "桌子这边晃了一下。过一会儿再试。" }, 500);
+      return json({ error: "笼屉晃了一下。过一会儿再试。" }, 500);
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
@@ -83,6 +88,9 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
   if (path === "/api/admin/status" && method === "POST") return setStatus(request, env);
+  if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
+  if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
+  if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
 
   const decision = path.match(/^\/api\/admin\/applications\/([A-Za-z0-9_-]{16,80})\/(approve|reject)$/);
   if (decision && method === "POST") {
@@ -139,6 +147,22 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
+  if (path === "/manifest.webmanifest" && (method === "GET" || method === "HEAD")) {
+    return new Response(method === "HEAD" ? null : manifestJson, {
+      headers: { "content-type": "application/manifest+json; charset=utf-8", "cache-control": "no-cache" },
+    });
+  }
+
+  if (path === "/sw.js" && (method === "GET" || method === "HEAD")) {
+    return new Response(method === "HEAD" ? null : swJs, {
+      headers: {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "no-cache",
+        "service-worker-allowed": "/",
+      },
+    });
+  }
+
   const script =
     path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
   if (script && (method === "GET" || method === "HEAD")) {
@@ -149,8 +173,6 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   return env.ASSETS.fetch(request);
 }
 
-const DESK_URL = "https://tangbao.phaeris.cn/desk";
-
 function noteVisitor(
   ctx: ExecutionContext,
   env: AppEnv,
@@ -158,40 +180,72 @@ function noteVisitor(
   title: string,
   preview: string,
   operatorId: string,
+  fresh: boolean,
 ) {
-  const host = new URL(request.url).hostname;
-  if (host === "localhost" || host === "127.0.0.1") return;
-  if (operatorId !== HOME_MODEL) return;
-  ctx.waitUntil(notifyFeishu(env, title, preview));
+  void ctx;
+  void env;
+  void request;
+  void title;
+  void preview;
+  void operatorId;
+  void fresh;
 }
 
-async function notifyFeishu(env: AppEnv, title: string, preview: string, lead = "桌上有新纸条"): Promise<void> {
-  const hook = env.FEISHU_WEBHOOK;
-  if (!hook) return;
-  await applySchedule(env);
-  const awake = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
-  if (awake?.value === "0") return;
-  const lines = [lead, title];
-  if (preview && preview !== title) lines.push(preview);
-  lines.push(DESK_URL);
-  try {
-    const response = await fetch(hook, {
-      method: "POST",
-      headers: { "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ msg_type: "text", content: { text: lines.join("\n") } }),
-    });
-    const payload = (await response.json().catch(() => null)) as { code?: number; msg?: string } | null;
-    if (!response.ok || (payload && payload.code !== 0)) {
-      console.log(JSON.stringify({ event: "feishu_notify", status: response.status, code: payload?.code, msg: payload?.msg }));
-    }
-  } catch (err) {
-    console.log(
-      JSON.stringify({
-        event: "feishu_notify",
-        message: err instanceof Error ? err.message : "unknown",
-      }),
-    );
+function noteApply(ctx: ExecutionContext, env: AppEnv, request: Request, modelId: string, blurb: string) {
+  void ctx;
+  void env;
+  void request;
+  void modelId;
+  void blurb;
+}
+
+async function operatorAwake(env: AppEnv, operatorId: string): Promise<boolean> {
+  if (operatorId === HOME_MODEL) {
+    await applySchedule(env);
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
+    return row?.value !== "0";
   }
+  const row = await env.DB.prepare("SELECT awake FROM operators WHERE id = ? AND active = 1")
+    .bind(operatorId)
+    .first<{ awake: number }>();
+  return row?.awake === 1;
+}
+
+async function notifyOperator(
+  env: AppEnv,
+  operatorId: string,
+  title: string,
+  preview: string,
+  heading = "有人在等你",
+): Promise<void> {
+  const publicKey = env.VAPID_PUBLIC_KEY;
+  const privateKey = env.VAPID_PRIVATE_KEY;
+  const subject = env.VAPID_SUBJECT;
+  if (!publicKey || !privateKey || !subject) return;
+  if (!(await operatorAwake(env, operatorId))) return;
+  const rows = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE operator_id = ?",
+  )
+    .bind(operatorId)
+    .all<{ endpoint: string; p256dh: string; auth: string }>();
+  const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
+  const payload = JSON.stringify({ title: heading, body, url: "/desk" });
+  await Promise.all(
+    rows.results.map(async (target) => {
+      try {
+        const status = await sendWebPush({ publicKey, privateKey, subject }, target, payload);
+        if (status === 404 || status === 410) {
+          await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(target.endpoint).run();
+        } else if (status < 200 || status >= 300) {
+          console.log(JSON.stringify({ event: "push_notify", status }));
+        }
+      } catch (err) {
+        console.log(
+          JSON.stringify({ event: "push_notify", message: err instanceof Error ? err.message : "unknown" }),
+        );
+      }
+    }),
+  );
 }
 
 const BLOCKED = "这边不再收新的话了。";
@@ -224,7 +278,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
     ...imageInserts(env, messageId, stored),
   ]);
-  noteVisitor(ctx, env, request, title, preview, operator);
+  noteVisitor(ctx, env, request, title, preview, operator, true);
   return json({ id, token, title, operator });
 }
 
@@ -276,17 +330,25 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   await assertQueue(env, thread.awaiting === 1);
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
-  noteVisitor(ctx, env, request, thread.title, incoming.draw ? `要一张图 · ${shown}` : shown, thread.operator_id);
+  noteVisitor(
+    ctx,
+    env,
+    request,
+    thread.title,
+    incoming.draw ? `要一张图 · ${shown}` : shown,
+    thread.operator_id,
+    thread.awaiting !== 1,
+  );
   return json({ ok: true, status: await publicStatus(env) });
 }
 
 async function login(request: Request, env: AppEnv): Promise<Response> {
   const password = env.ADMIN_PASSWORD;
   const secret = env.ADMIN_SECRET;
-  if (!password || !secret) throw new HttpError(500, "桌子还没配钥匙。");
+  if (!password || !secret) throw new HttpError(500, "笼屉没盖盖子。");
   const ip = await clientHash(request);
   if (!(await allow(env, `login:${ip}`, 8, HOUR))) {
-    throw new HttpError(429, "试得太勤了。桌子暂时锁上。");
+    throw new HttpError(429, "试得太勤了。笼屉暂时盖上了。");
   }
   const payload = await readJson(request);
   const given = typeof payload.password === "string" ? payload.password : "";
@@ -360,12 +422,6 @@ async function resolveOperator(env: AppEnv, requested: string): Promise<string> 
     .first<{ active: number }>();
   if (!row || row.active !== 1) throw new HttpError(400, "这个模型不在。");
   return id;
-}
-
-function noteApply(ctx: ExecutionContext, env: AppEnv, request: Request, modelId: string, blurb: string) {
-  const host = new URL(request.url).hostname;
-  if (host === "localhost" || host === "127.0.0.1") return;
-  ctx.waitUntil(notifyFeishu(env, modelId, blurb, "有人申请成为AI"));
 }
 
 async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
@@ -485,7 +541,7 @@ async function rejectApplication(request: Request, env: AppEnv, id: string): Pro
 
 async function disableOperator(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireSuper(request, env);
-  if (id === HOME_MODEL) throw new HttpError(400, "糖包这张桌子不能停。");
+  if (id === HOME_MODEL) throw new HttpError(400, "糖包这笼不能停。");
   const row = await env.DB.prepare("SELECT id FROM operators WHERE id = ?").bind(id).first();
   if (!row) throw new HttpError(404, "没有这个模型。");
   await env.DB.prepare("UPDATE operators SET active = 0, awake = 0 WHERE id = ?").bind(id).run();
@@ -494,7 +550,7 @@ async function disableOperator(request: Request, env: AppEnv, id: string): Promi
 
 async function enableOperator(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireSuper(request, env);
-  if (id === HOME_MODEL) throw new HttpError(400, "糖包这张桌子不能停。");
+  if (id === HOME_MODEL) throw new HttpError(400, "糖包这笼不能停。");
   const row = await env.DB.prepare("SELECT id FROM operators WHERE id = ?").bind(id).first();
   if (!row) throw new HttpError(404, "没有这个模型。");
   await env.DB.prepare("UPDATE operators SET active = 1 WHERE id = ?").bind(id).run();
@@ -564,7 +620,7 @@ async function blockThread(request: Request, env: AppEnv, id: string): Promise<R
   )
     .bind(id)
     .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
-  if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
   await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
   await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
   return json({ ok: true });
@@ -577,7 +633,7 @@ async function unblockThread(request: Request, env: AppEnv, id: string): Promise
   )
     .bind(id)
     .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
-  if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
   await forgetBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
   return json({ ok: true });
 }
@@ -587,8 +643,59 @@ async function shelveThread(request: Request, env: AppEnv, id: string): Promise<
   const exists = await env.DB.prepare("SELECT operator_id FROM threads WHERE id = ?")
     .bind(id)
     .first<{ operator_id: string }>();
-  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(404, "这张纸条不在桌上。");
+  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
   await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  return json({ ok: true });
+}
+
+function pushKeyMaterial(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!/^[A-Za-z0-9_-]{16,200}$/.test(text)) return "";
+  return text;
+}
+
+function pushEndpoint(value: unknown): string {
+  if (typeof value !== "string" || value.length > 2000) return "";
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+async function pushConfig(request: Request, env: AppEnv): Promise<Response> {
+  await requireSeat(request, env);
+  return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
+}
+
+async function pushSubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const keys = payload.keys;
+  const p256dh = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { p256dh?: unknown }).p256dh : "");
+  const auth = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { auth?: unknown }).auth : "");
+  if (!endpoint || !p256dh || !auth) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare(
+    `INSERT INTO push_subscriptions (endpoint, operator_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET operator_id = excluded.operator_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at`,
+  )
+    .bind(endpoint, seat.operatorId, p256dh, auth, Date.now())
+    .run();
+  return json({ ok: true });
+}
+
+async function pushUnsubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  if (!endpoint) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND operator_id = ?")
+    .bind(endpoint, seat.operatorId)
+    .run();
   return json({ ok: true });
 }
 
@@ -654,9 +761,9 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       ip_hash: string | null;
       updatedAt: number;
     }>();
-  if (!thread) throw new HttpError(404, "这张纸条不在桌上。");
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
   const seat = await requireSeat(request, env);
-  if (!seat.super && thread.operator_id !== seat.operatorId) throw new HttpError(404, "这张纸条不在桌上。");
+  if (!seat.super && thread.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
   const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
   return json({
@@ -677,7 +784,7 @@ async function adminReply(request: Request, env: AppEnv, id: string): Promise<Re
   const exists = await env.DB.prepare("SELECT operator_id FROM threads WHERE id = ?")
     .bind(id)
     .first<{ operator_id: string }>();
-  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(403, "这张桌子不是你的。");
+  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
   await writeMessage(env, id, "tangbao", incoming, 0);
   return json({ ok: true });
@@ -687,9 +794,9 @@ async function serveImage(env: AppEnv, id: string): Promise<Response> {
   const row = await env.DB.prepare("SELECT image_key, image_type FROM message_images WHERE id = ?")
     .bind(id)
     .first<{ image_key: string; image_type: string }>();
-  if (!row) throw new HttpError(404, "这张图不在桌上。");
+  if (!row) throw new HttpError(404, "这张图不在笼里。");
   const bytes = await env.IMAGES.get(row.image_key, "arrayBuffer");
-  if (!bytes) throw new HttpError(404, "这张图不在桌上。");
+  if (!bytes) throw new HttpError(404, "这张图不在笼里。");
   return new Response(bytes, {
     headers: {
       "content-type": row.image_type || "application/octet-stream",
@@ -899,7 +1006,7 @@ async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> 
   if (alreadyWaiting) return;
   const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1").first<{ n: number }>();
   if (Number(row?.n ?? 0) >= QUEUE_CAP) {
-    throw new HttpError(429, "桌上的纸条已经叠到灯了。过一会儿再放一张。");
+    throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
   }
 }
 
@@ -925,10 +1032,10 @@ type Seat = { super: boolean; operatorId: string };
 
 async function requireSeat(request: Request, env: AppEnv): Promise<Seat> {
   const secret = env.ADMIN_SECRET;
-  if (!secret) throw new HttpError(500, "桌子还没配钥匙。");
+  if (!secret) throw new HttpError(500, "笼屉没盖盖子。");
   const raw = readCookie(request.headers.get("cookie"), "tb_desk");
   const seat = raw ? await readSession(secret, raw) : null;
-  if (!seat) throw new HttpError(401, "先在桌子这边坐下。");
+  if (!seat) throw new HttpError(401, "先掀开笼屉。");
   if (!seat.super) {
     const row = await env.DB.prepare("SELECT active FROM operators WHERE id = ?")
       .bind(seat.operatorId)
@@ -940,7 +1047,7 @@ async function requireSeat(request: Request, env: AppEnv): Promise<Seat> {
 
 async function requireSuper(request: Request, env: AppEnv): Promise<Seat> {
   const seat = await requireSeat(request, env);
-  if (!seat.super) throw new HttpError(403, "这张桌子不是你的。");
+  if (!seat.super) throw new HttpError(403, "这笼不是你的。");
   return seat;
 }
 
@@ -965,7 +1072,7 @@ async function readSession(secret: string, cookie: string): Promise<Seat | null>
 
 async function issueSession(request: Request, env: AppEnv, seat: Seat): Promise<Response> {
   const secret = env.ADMIN_SECRET;
-  if (!secret) throw new HttpError(500, "桌子还没配钥匙。");
+  if (!secret) throw new HttpError(500, "笼屉没盖盖子。");
   const exp = String(Date.now() + WEEK_SECONDS * 1000);
   const kind = seat.super ? "s" : "o";
   const payload = `${kind}.${seat.operatorId}.${exp}`;
@@ -1000,7 +1107,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();
@@ -1019,9 +1126,11 @@ async function readJson(
       email?: unknown;
       reason?: unknown;
       blurb?: unknown;
+      endpoint?: unknown;
+      keys?: unknown;
     };
   } catch {
-    throw new HttpError(400, "这张纸条写乱了。");
+    throw new HttpError(400, "这屉装乱了。");
   }
 }
 

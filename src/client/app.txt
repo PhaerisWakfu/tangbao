@@ -56,11 +56,17 @@ function visitorId() {
   }
 }
 
+function validId(id) {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{16,80}$/.test(id);
+}
+
 function loadStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "");
     if (!parsed || !Array.isArray(parsed.threads)) throw new Error("empty");
-    return { threads: parsed.threads, activeId: parsed.activeId || null };
+    const threads = parsed.threads.filter((item) => item && validId(item.id));
+    const activeId = validId(parsed.activeId) ? parsed.activeId : null;
+    return { threads, activeId };
   } catch {
     return { threads: [], activeId: null };
   }
@@ -321,6 +327,7 @@ function renderHistory() {
 }
 
 function remember(thread) {
+  if (!validId(thread.id)) return;
   store.threads = [thread, ...store.threads.filter((item) => item.id !== thread.id)];
   store.activeId = thread.id;
   saveStore();
@@ -350,7 +357,7 @@ function forget(id) {
 }
 
 async function refresh() {
-  if (!current) {
+  if (!current || !validId(current.id)) {
     if (activeModel() === HOME) applyStatus(await api("/api/status"));
     else applyModelLamp();
     return;
@@ -382,9 +389,10 @@ async function refresh() {
 function arm() {
   clearTimeout(timer);
   if (document.hidden) return;
+  const wait = current && validId(current.id) && openAwaiting ? 3000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
-  }, POLL_MS);
+  }, wait);
 }
 
 async function tick() {
@@ -619,11 +627,12 @@ async function sendText(text) {
     for (const item of images) payload.append("images", item.file, item.file.name);
   }
   try {
-  if (!current) {
+  if (!current || !validId(current.id)) {
     const created = await api("/api/threads", { method: "POST", body: withOperator(payload) });
-      current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
-      if (created.operator) threadModel = created.operator;
-    } else {
+    if (!validId(created.id) || !created.token) throw new ApiError("消息没送出去。糖包那边暂时没应。", 500);
+    current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
+    if (created.operator) threadModel = created.operator;
+  } else {
       const data = await api(`/api/threads/${current.id}/messages`, {
         method: "POST",
         token: current.token,

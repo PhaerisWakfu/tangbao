@@ -13,6 +13,7 @@ const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
 
 let awake = true;
+let waiting = 0;
 let selected = null;
 let shown = "";
 let timer = 0;
@@ -40,10 +41,10 @@ async function api(path, options = {}) {
       credentials: "same-origin",
     });
   } catch {
-    throw new ApiError("桌子这边晃了一下。", 0);
+    throw new ApiError("笼屉晃了一下。", 0);
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(data.error || "桌子这边晃了一下。", response.status);
+  if (!response.ok) throw new ApiError(data.error || "笼屉晃了一下。", response.status);
   return data;
 }
 
@@ -65,6 +66,14 @@ function clock(ts) {
 function showDesk(on) {
   gate.hidden = on;
   desk.hidden = !on;
+  if (!on) {
+    waiting = 0;
+    paintTitle();
+  }
+}
+
+function paintTitle() {
+  document.title = waiting > 0 ? "(新消息) 笼屉" : "笼屉";
 }
 
 function applyAwake(next) {
@@ -117,7 +126,7 @@ function renderQueue(data) {
   const recent = data.recent || [];
   count.textContent = waiting.length
     ? `${waiting.length} 条待写。这些 token 还没生成，GPU 是你的手指。`
-    : "桌上空着。GPU 在休息。";
+    : "笼是空的。";
   pile.replaceChildren();
   const waitingTitle = document.createElement("h3");
   waitingTitle.textContent = "待你亲自处理";
@@ -228,10 +237,12 @@ function renderThread(data) {
 
 async function loadQueue() {
   const data = await api("/api/admin/queue");
+  waiting = (data.waiting || []).length;
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
   renderQueue(data);
+  paintTitle();
 }
 
 function showPane(name, nav) {
@@ -262,10 +273,11 @@ async function openSlip(id, fromAudit) {
 
 function arm() {
   clearTimeout(timer);
-  if (document.hidden || desk.hidden) return;
+  if (desk.hidden) return;
+  const wait = document.hidden ? 60000 : waiting > 0 ? 3000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
-  }, POLL_MS);
+  }, wait);
 }
 
 async function tick() {
@@ -303,7 +315,7 @@ $("#block").addEventListener("click", async () => {
     shown = "";
     await openSlip(selected, readonly);
   } catch (err) {
-    replyErr.textContent = err.message || "这句还在桌上。";
+    replyErr.textContent = err.message || "这句还在笼里。";
   }
 });
 
@@ -327,7 +339,7 @@ $("#shelve").addEventListener("click", async () => {
     shown = "";
     await openSlip(selected);
   } catch (err) {
-    replyErr.textContent = err.message || "这句还在桌上。";
+    replyErr.textContent = err.message || "这句还在笼里。";
   }
 });
 
@@ -425,7 +437,7 @@ async function loadApplications() {
     const password = issued.get(item.id);
     if (password) {
       const once = document.createElement("p");
-      once.innerHTML = `口令 <span class="pass"></span>。只出现这一次，交给对方。对方到 /desk 用它坐下。`;
+      once.innerHTML = `口令 <span class="pass"></span>。只出现这一次，交给对方。对方到 /desk 用它掀开笼屉。`;
       once.querySelector(".pass").textContent = password;
       paper.append(once);
     }
@@ -939,8 +951,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) clearTimeout(timer);
-  else if (!desk.hidden) void tick();
+  if (!desk.hidden) void tick();
 });
 
 void tick();

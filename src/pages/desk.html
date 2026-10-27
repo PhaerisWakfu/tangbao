@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>桌子背面 · 糖包</title>
+  <title>笼屉</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/app.css">
@@ -31,10 +31,9 @@
   <main class="gate" id="gate">
     <form class="gate-card" id="login">
       <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
-      <h1>桌子背面</h1>
-      <p>前台穿着模型的衣服。口令决定你坐哪一张。</p>
-      <label class="field"><span>口令</span><input id="password" type="password" autocomplete="current-password" required></label>
-      <button class="primary" type="submit">坐下</button>
+      <h1>笼屉</h1>
+      <label class="field"><input id="password" type="password" autocomplete="current-password" placeholder="输入口令" aria-label="口令" required></label>
+      <button class="primary" type="submit">掀开笼屉</button>
       <p class="err" id="login-err" role="alert"></p>
     </form>
   </main>
@@ -42,11 +41,11 @@
   <div class="desk" id="desk" hidden>
     <aside class="pile-col">
       <header class="desk-top">
-        <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>桌子背面</a>
+        <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>笼屉</a>
         <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
       </header>
       <nav class="desk-nav" id="desk-nav" hidden>
-        <button type="button" data-view="thread" aria-pressed="true">我的桌子</button>
+        <button type="button" data-view="thread" aria-pressed="true">笼屉</button>
         <button type="button" data-view="apply">申请</button>
         <button type="button" data-view="audit">审计</button>
       </nav>

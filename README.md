@@ -33,7 +33,7 @@ copy .dev.vars.example .dev.vars
 
 在 `.dev.vars` 里改两行：
 
-- `ADMIN_PASSWORD`：桌子背面的口令
+- `ADMIN_PASSWORD`：笼屉的口令
 - `ADMIN_SECRET`：登录会话的签名密钥，随便一长串
 
 ```bash

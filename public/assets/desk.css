@@ -11,6 +11,8 @@
 }
 .gate-card svg.mark { display: block; width: 44px; height: 44px; margin: 0 auto 14px; }
 .gate-card h1 { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 600; letter-spacing: 0.06em; }
+.gate-card .field { margin-top: 22px; }
+.gate-card .field input::placeholder { color: var(--faint); }
 .gate-card p { margin: 8px 0 22px; font-size: 14px; line-height: 1.6; color: var(--muted); }
 .field { display: grid; gap: 6px; text-align: left; font-size: 13px; color: var(--muted); }
 .field input {
