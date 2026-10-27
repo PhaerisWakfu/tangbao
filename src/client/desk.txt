@@ -14,6 +14,7 @@ const replyErr = $("#reply-err");
 
 let awake = true;
 let waiting = 0;
+let pending = 0;
 let selected = null;
 let shown = "";
 let timer = 0;
@@ -68,12 +69,13 @@ function showDesk(on) {
   desk.hidden = !on;
   if (!on) {
     waiting = 0;
+    pending = 0;
     paintTitle();
   }
 }
 
 function paintTitle() {
-  document.title = waiting > 0 ? "(新消息) 笼屉" : "笼屉";
+  document.title = waiting > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
 }
 
 function applyAwake(next) {
@@ -238,6 +240,7 @@ function renderThread(data) {
 async function loadQueue() {
   const data = await api("/api/admin/queue");
   waiting = (data.waiting || []).length;
+  pending = Number(data.pending) || 0;
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
@@ -274,7 +277,8 @@ async function openSlip(id, fromAudit) {
 function arm() {
   clearTimeout(timer);
   if (desk.hidden) return;
-  const wait = document.hidden ? 60000 : waiting > 0 ? 3000 : POLL_MS;
+  const fresh = waiting > 0 || pending > 0;
+  const wait = document.hidden ? 60000 : fresh ? 3000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);
@@ -399,6 +403,8 @@ async function loadApplications() {
   const box = $("#applications");
   box.replaceChildren();
   const rows = data.applications || [];
+  pending = rows.filter((item) => item.status === "pending").length;
+  paintTitle();
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.className = "quiet";

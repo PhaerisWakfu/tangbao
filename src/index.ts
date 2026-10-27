@@ -571,7 +571,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
-  const [waiting, closed, status, lamp] = await Promise.all([
+  const [waiting, closed, status, lamp, pendingRow] = await Promise.all([
     env.DB.prepare(
       "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND operator_id = ? ORDER BY updated_at ASC LIMIT 100",
     )
@@ -588,6 +588,9 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
     seat.super
       ? Promise.resolve(null)
       : env.DB.prepare("SELECT awake FROM operators WHERE id = ?").bind(own).first<{ awake: number }>(),
+    seat.super
+      ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
+      : Promise.resolve(null),
   ]);
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
@@ -607,6 +610,7 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
     operatorId: seat.operatorId,
     awake: seat.super ? status.awake : lamp?.awake === 1,
     waiting: waiting.results.filter((row) => !blockedIds.has(row.id)),
+    pending: pendingRow?.n ?? 0,
     recent: rows.filter((row) => row.lastRole !== "visitor" && !blockedIds.has(row.id)).slice(0, 20),
     shelved: rows.filter((row) => row.lastRole === "visitor" && !blockedIds.has(row.id)).slice(0, 20),
     blocked: blocked.results,
