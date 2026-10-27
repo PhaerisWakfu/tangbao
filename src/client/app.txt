@@ -852,9 +852,10 @@ async function loadModels(pick) {
       if (picked) localStorage.removeItem(MODEL_KEY);
     } catch {}
     const fromAbout = models.find((item) => item.id === picked);
-    const awake = models.find((item) => item.awake);
+    const guestAwake = models.find((item) => !item.home && item.awake);
     const home = models.find((item) => item.home) || models[0];
-    const next = fromAbout || awake || home;
+    const guest = models.find((item) => !item.home);
+    const next = fromAbout || guestAwake || (home?.awake ? home : null) || guest || home;
     if (next) chosen = next.id;
   }
   paintModels();
