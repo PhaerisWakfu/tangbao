@@ -331,6 +331,7 @@
       const online = status.status === "online";
       const present = online || status.status === "busy" || Boolean(status.awake);
       document.body.dataset.presence = present ? "awake" : "asleep";
+      $("#status").dataset.state = status.status || (online ? "online" : "away");
       $("#status-label").textContent = status.label || (online ? "在线" : "离开");
       try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
     }
@@ -347,6 +348,7 @@
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line";
+        button.dataset.state = model.status || (online ? "online" : "away");
         button.disabled = !online;
         button.setAttribute("aria-disabled", String(!online));
         const dot = document.createElement("i");

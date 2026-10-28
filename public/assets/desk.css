@@ -383,6 +383,8 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .presence[data-state="away"] .presence-dot,
 .presence[data-state="off"] .presence-dot { background: var(--faint); }
 .presence b { font-size: 13px; font-weight: 600; }
+.presence[data-state="busy"] b { color: var(--accent); }
+.presence[data-state="away"] b { color: var(--muted); }
 
 .count { margin: 14px 10px 2px; font-size: 12.5px; line-height: 1.6; color: var(--faint); }
 .pile { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 8px; }

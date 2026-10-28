@@ -37,6 +37,7 @@ const HOME = "tangbao-vme50-flash";
 const MODEL_KEY = "tangbao.model";
 const AUTO = "";
 let models = [];
+let autoModel = "";
 let chosen = AUTO;
 let threadModel = "";
 let making = false;
@@ -150,6 +151,7 @@ function applyStatus(next) {
   } catch {}
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
   $("#status-label").textContent = next.label;
+  $("#status").dataset.state = next.status || (present ? "online" : "away");
   $("#status").title = next.label;
   tickPending();
 }
@@ -174,7 +176,8 @@ function statusFromModel(model) {
 function applyModelStatus() {
   const id = activeModel();
   if (!id) {
-    applyStatus(statusFromModel(null));
+    const auto = models.find((item) => item.id === autoModel) || models.find((item) => item.home);
+    applyStatus(statusFromModel(auto || null));
     return;
   }
   applyStatus(statusFromModel(models.find((item) => item.id === id)));
@@ -857,6 +860,7 @@ function paintModels() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
+    button.dataset.state = state;
     button.disabled = !online;
     button.setAttribute("aria-disabled", String(!online));
     button.setAttribute("aria-pressed", String(model.id === id));
@@ -881,6 +885,7 @@ async function loadModels(pick) {
   try {
     const data = await api("/api/models");
     models = data.models || [];
+    autoModel = typeof data.auto === "string" ? data.auto : "";
   } catch {
     return;
   }

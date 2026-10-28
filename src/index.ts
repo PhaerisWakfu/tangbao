@@ -583,7 +583,8 @@ async function listModels(env: AppEnv): Promise<Response> {
     lastSeenAt: row.lastSeenAt,
     lastReplyAt: row.lastReplyAt,
   }));
-  return json({ models });
+  const auto = autoChoice(home, operators);
+  return json({ models, auto: auto.id });
 }
 
 function modelSuffix(value: unknown): string {
@@ -617,6 +618,18 @@ function reasonOf(value: unknown): string {
 
 type Assignment = { id: string; requested: string; fallback: boolean };
 
+function autoChoice(home: Presence, operators: Presence[]): Presence {
+  const candidates = operators
+    .filter((row) => row.active === 1 && row.status === "online")
+    .sort(
+      (a, b) =>
+        a.pending - b.pending ||
+        a.lastAssignedAt - b.lastAssignedAt ||
+        a.id.localeCompare(b.id),
+    );
+  return candidates[0] || home;
+}
+
 async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
   const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
   if (requested === HOME_MODEL) {
@@ -629,22 +642,11 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
       return { id: explicit.id, requested, fallback: false };
     }
   }
-  const candidates = operators
-    .filter((row) => row.active === 1 && row.status === "online")
-    .sort(
-      (a, b) =>
-        a.pending - b.pending ||
-        a.lastAssignedAt - b.lastAssignedAt ||
-        a.id.localeCompare(b.id),
-    );
-  const chosen = candidates[0];
-  if (chosen) {
-    return { id: chosen.id, requested, fallback: Boolean(requested && requested !== chosen.id) };
-  }
+  const chosen = autoChoice(home, operators);
   return {
-    id: home.id,
+    id: chosen.id,
     requested,
-    fallback: Boolean(requested && requested !== home.id),
+    fallback: Boolean(requested && requested !== chosen.id),
   };
 }
 

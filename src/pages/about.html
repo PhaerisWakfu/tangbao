@@ -141,6 +141,7 @@
       .then((status) => {
         const present = status.status === "online" || status.status === "busy" || Boolean(status.awake);
         body.dataset.presence = present ? "awake" : "asleep";
+        document.getElementById("status").dataset.state = status.status || (present ? "online" : "away");
         try {
           localStorage.setItem("tangbao.presence", body.dataset.presence);
         } catch {}
@@ -176,6 +177,7 @@
           const button = document.createElement("button");
           button.type = "button";
           button.className = "line";
+          button.dataset.state = model.status || (online ? "online" : "away");
           button.disabled = !online;
           button.setAttribute("aria-disabled", String(!online));
           const state = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";

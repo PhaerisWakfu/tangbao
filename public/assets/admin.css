@@ -479,6 +479,7 @@ body[data-presence="asleep"] {
 }
 #pane-audit .seat-status[data-state="online"] { color: var(--up); }
 #pane-audit .seat-status[data-state="busy"] { color: var(--accent); }
+#pane-audit .seat-status[data-state="away"] { color: var(--faint); }
 #pane-audit .seat-err {
   flex: 1 0 100%;
   margin: 0;
