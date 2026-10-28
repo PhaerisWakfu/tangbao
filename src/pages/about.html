@@ -46,7 +46,7 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title">关于模型</span>
-        <span class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></span>
+        <span class="status" id="status"><i></i><span id="status-label">在线</span><em id="status-note">他在</em></span>
       </header>
 
       <section class="stage">
@@ -104,7 +104,7 @@
               <div class="bars" id="bars"></div>
               <div class="axis"><span>24 小时前</span><span>12 小时前</span><span>现在</span></div>
             </div>
-            <small id="uptime-note">灰色的小时是他在睡觉。数据来自他自己按的灯。</small>
+            <small id="uptime-note">灰色的小时表示他当时不在。数据来自笼屉页面的心跳。</small>
           </section>
 
           <section>
@@ -139,7 +139,8 @@
     fetch("/api/status")
       .then((response) => response.json())
       .then((status) => {
-        body.dataset.presence = status.awake ? "awake" : "asleep";
+        const present = status.status === "online" || status.status === "busy" || Boolean(status.awake);
+        body.dataset.presence = present ? "awake" : "asleep";
         try {
           localStorage.setItem("tangbao.presence", body.dataset.presence);
         } catch {}
@@ -158,11 +159,11 @@
         data.hours.forEach((share, index) => {
           const bar = bars.children[index];
           bar.style.setProperty("--f", String(share));
-          bar.title = share >= 0.99 ? "醒着" : share <= 0.01 ? "睡着" : `醒着 ${Math.round(share * 60)} 分钟`;
+          bar.title = share >= 0.99 ? "在线" : share <= 0.01 ? "离开" : `在线 ${Math.round(share * 60)} 分钟`;
         });
         if (!data.logged) {
           document.getElementById("uptime-note").textContent =
-            "他还没按过灯，这条先按现在的状态画。以后灰色的小时就是他在睡觉，数据来自他自己按的灯。";
+            "还没有在线记录。打开笼屉后按心跳自动记录，灰色的小时表示他当时不在。";
         }
       })
       .catch(() => {});
@@ -172,13 +173,18 @@
       .then((data) => {
         const lineup = document.getElementById("lineup");
         for (const model of data.models || []) {
+          const online = model.status === "online";
           const button = document.createElement("button");
           button.type = "button";
           button.className = "line";
-          button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="lamp">${model.awake ? "可用" : "繁忙"}</small>`;
+          button.disabled = !online;
+          button.setAttribute("aria-disabled", String(!online));
+          const state = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
+          button.innerHTML = `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="state">${state}</small>`;
           button.querySelector("b").textContent = model.id;
           button.querySelector(".who small").textContent = model.blurb || "";
           button.addEventListener("click", () => {
+            if (!online) return;
             try {
               localStorage.setItem("tangbao.model", model.id);
             } catch {}

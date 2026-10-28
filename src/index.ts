@@ -1,6 +1,5 @@
 import aboutHtml from "./pages/about.html";
 import { maskAbuse } from "./abuse";
-import { inOffHours, nextOffAt } from "./hours";
 import { sendWebPush } from "./push";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
@@ -29,11 +28,36 @@ type AppEnv = Env & {
   IMAGES: KVNamespace;
 };
 
+type PresenceState = "online" | "busy" | "away" | "off";
 type StatusPayload = {
   state: "available" | "busy";
   label: string;
   note: string;
   awake: boolean;
+  online: boolean;
+  status: PresenceState;
+};
+type PresenceRow = {
+  id: string;
+  active: number;
+  blurb: string | null;
+  last_seen_at: number;
+  last_reply_at: number;
+  last_assigned_at: number;
+  pending: number;
+  oldest_pending_at: number | null;
+};
+type Presence = {
+  id: string;
+  active: number;
+  blurb: string;
+  lastSeenAt: number;
+  lastReplyAt: number;
+  lastAssignedAt: number;
+  pending: number;
+  oldestPendingAt: number;
+  status: PresenceState;
+  home: boolean;
 };
 
 const HOUR = 60 * 60 * 1000;
@@ -47,6 +71,13 @@ const MAX_IMAGES = 6;
 const HOME_MODEL = "tangbao-vme50-flash";
 const HOME_BLURB = "糖包本人。什么都聊一点。";
 const LIST_SIZE = 10;
+const ONLINE_TTL = 120_000;
+const HEARTBEAT_WRITE = 30_000;
+const PENDING_CAP = 2;
+const REPLY_TIMEOUT = 10 * 60_000;
+const HOME_SEEN_KEY = "home_last_seen";
+const HOME_REPLY_KEY = "home_last_reply";
+const HOME_ASSIGNED_KEY = "home_last_assigned";
 
 const encoder = new TextEncoder();
 
@@ -66,7 +97,7 @@ export default {
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
-    ctx.waitUntil(applySchedule(env));
+    ctx.waitUntil(refreshHomePresence(env));
   },
 } satisfies ExportedHandler<AppEnv>;
 
@@ -88,7 +119,6 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
-  if (path === "/api/admin/status" && method === "POST") return setStatus(request, env);
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
   if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
@@ -200,16 +230,177 @@ function noteApply(ctx: ExecutionContext, env: AppEnv, request: Request, modelId
   void blurb;
 }
 
-async function operatorAwake(env: AppEnv, operatorId: string): Promise<boolean> {
-  if (operatorId === HOME_MODEL) {
-    await applySchedule(env);
-    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
-    return row?.value !== "0";
+function publicPresence(state: PresenceState): PresenceState {
+  return state === "off" ? "away" : state;
+}
+
+function statusOf(
+  active: number,
+  lastSeen: number,
+  pending: number,
+  oldestPendingAt: number,
+  now: number,
+): PresenceState {
+  if (!active) return "off";
+  if (!lastSeen || lastSeen < now - ONLINE_TTL) return "away";
+  if (pending >= PENDING_CAP) return "busy";
+  if (pending > 0 && oldestPendingAt && oldestPendingAt < now - REPLY_TIMEOUT) return "busy";
+  return "online";
+}
+
+function statusPayload(state: PresenceState): StatusPayload {
+  const copy =
+    state === "online"
+      ? { state: "available" as const, label: "在线", note: "他在" }
+      : state === "busy"
+        ? { state: "busy" as const, label: "忙碌", note: "稍等" }
+        : state === "off"
+          ? { state: "busy" as const, label: "停用", note: "不接新话" }
+          : { state: "busy" as const, label: "离开", note: "不在" };
+  return {
+    ...copy,
+    awake: state === "online",
+    online: state === "online",
+    status: state,
+  };
+}
+
+async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
+  const [settings, pending] = await Promise.all([
+    env.DB.prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?)")
+      .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY)
+      .all<{ key: string; value: string }>(),
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND operator_id = ?",
+    )
+      .bind(HOME_MODEL)
+      .first<{ n: number; oldest: number | null }>(),
+  ]);
+  const values = new Map(settings.results.map((row) => [row.key, Number(row.value) || 0]));
+  const lastSeenAt = values.get(HOME_SEEN_KEY) || 0;
+  const lastReplyAt = values.get(HOME_REPLY_KEY) || 0;
+  const lastAssignedAt = values.get(HOME_ASSIGNED_KEY) || 0;
+  const pendingCount = Number(pending?.n) || 0;
+  const oldestPendingAt = Number(pending?.oldest) || 0;
+  return {
+    id: HOME_MODEL,
+    active: 1,
+    blurb: HOME_BLURB,
+    lastSeenAt,
+    lastReplyAt,
+    lastAssignedAt,
+    pending: pendingCount,
+    oldestPendingAt,
+    status: statusOf(1, lastSeenAt, pendingCount, oldestPendingAt, now),
+    home: true,
+  };
+}
+
+async function loadPresence(env: AppEnv, now = Date.now()): Promise<{ home: Presence; operators: Presence[] }> {
+  const [home, rows] = await Promise.all([
+    homePresence(env, now),
+    env.DB.prepare(
+      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+        COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
+       FROM operators o
+       LEFT JOIN (
+         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+         FROM threads
+         WHERE awaiting = 1
+         GROUP BY operator_id
+       ) p ON p.operator_id = o.id
+       ORDER BY o.created_at ASC`,
+    ).all<PresenceRow>(),
+  ]);
+  const operators = rows.results.map((row) => {
+    const pending = Number(row.pending) || 0;
+    const oldestPendingAt = Number(row.oldest_pending_at) || 0;
+    return {
+      id: row.id,
+      active: row.active,
+      blurb: row.blurb || "",
+      lastSeenAt: Number(row.last_seen_at) || 0,
+      lastReplyAt: Number(row.last_reply_at) || 0,
+      lastAssignedAt: Number(row.last_assigned_at) || 0,
+      pending,
+      oldestPendingAt,
+      status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now),
+      home: false,
+    };
+  });
+  return { home, operators };
+}
+
+async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now()): Promise<Presence> {
+  if (operatorId === HOME_MODEL) return homePresence(env, now);
+  const all = await loadPresence(env, now);
+  return all.operators.find((row) => row.id === operatorId) || {
+    id: operatorId,
+    active: 0,
+    blurb: "",
+    lastSeenAt: 0,
+    lastReplyAt: 0,
+    lastAssignedAt: 0,
+    pending: 0,
+    oldestPendingAt: 0,
+    status: "away",
+    home: false,
+  };
+}
+
+async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean> {
+  const presence = await operatorPresence(env, operatorId);
+  return presence.status === "online" || presence.status === "busy";
+}
+
+async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
+  try {
+    if (seat.super) {
+      await env.DB.prepare(
+        `INSERT INTO settings (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value
+         WHERE CAST(settings.value AS INTEGER) < ?`,
+      )
+        .bind(HOME_SEEN_KEY, String(now), now - HEARTBEAT_WRITE)
+        .run();
+      return;
+    }
+    await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE id = ? AND last_seen_at < ?")
+      .bind(now, seat.operatorId, now - HEARTBEAT_WRITE)
+      .run();
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        event: "heartbeat_error",
+        operatorId: seat.operatorId,
+        message: err instanceof Error ? err.message : "unknown",
+      }),
+    );
   }
-  const row = await env.DB.prepare("SELECT awake FROM operators WHERE id = ? AND active = 1")
-    .bind(operatorId)
-    .first<{ awake: number }>();
-  return row?.awake === 1;
+}
+
+async function touchReply(env: AppEnv, operatorId: string, now: number): Promise<void> {
+  if (operatorId === HOME_MODEL) {
+    await env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+      .bind(HOME_REPLY_KEY, String(now))
+      .run();
+    return;
+  }
+  await env.DB.prepare("UPDATE operators SET last_reply_at = ? WHERE id = ?").bind(now, operatorId).run();
+}
+
+async function touchAssigned(env: AppEnv, operatorId: string, now: number): Promise<void> {
+  if (operatorId === HOME_MODEL) {
+    await env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+      .bind(HOME_ASSIGNED_KEY, String(now))
+      .run();
+    return;
+  }
+  await env.DB.prepare("UPDATE operators SET last_assigned_at = ? WHERE id = ?").bind(now, operatorId).run();
 }
 
 async function notifyOperator(
@@ -223,7 +414,7 @@ async function notifyOperator(
   const privateKey = env.VAPID_PRIVATE_KEY;
   const subject = env.VAPID_SUBJECT;
   if (!publicKey || !privateKey || !subject) return;
-  if (!(await operatorAwake(env, operatorId))) return;
+  if (!(await operatorPresent(env, operatorId))) return;
   const rows = await env.DB.prepare(
     "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE operator_id = ?",
   )
@@ -259,7 +450,8 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
-  const operator = await resolveOperator(env, incoming.operator);
+  const assignment = await assignOperator(env, incoming.operator);
+  const operator = assignment.id;
   await assertQueue(env, false);
 
   const id = randomId(16);
@@ -279,8 +471,16 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
     ...imageInserts(env, messageId, stored),
   ]);
+  await touchAssigned(env, operator, now);
   noteVisitor(ctx, env, request, title, preview, operator, true);
-  return json({ id, token, title, operator });
+  return json({
+    id,
+    token,
+    title,
+    operator,
+    requested: assignment.requested,
+    fallback: assignment.fallback,
+  });
 }
 
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -288,6 +488,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
   const seen = await attachIdentity(env, thread, request);
   const messages = await listMessages(env, id);
   const status = await publicStatus(env);
+  const operator = await operatorPresence(env, thread.operator_id);
   return json({
     title: thread.title,
     operator: thread.operator_id,
@@ -295,6 +496,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     blocked: seen.blocked,
     messages,
     status,
+    operatorStatus: statusPayload(publicPresence(operator.status)),
   });
 }
 
@@ -369,20 +571,19 @@ function logout(request: Request): Response {
 }
 
 async function listModels(env: AppEnv): Promise<Response> {
-  const [status, operators] = await Promise.all([
-    publicStatus(env),
-    env.DB.prepare("SELECT id, awake, blurb FROM operators WHERE active = 1 ORDER BY created_at ASC").all<{
-      id: string;
-      awake: number;
-      blurb: string | null;
-    }>(),
-  ]);
-  return json({
-    models: [
-      { id: HOME_MODEL, awake: status.awake, home: true, blurb: HOME_BLURB },
-      ...operators.results.map((row) => ({ id: row.id, awake: row.awake === 1, home: false, blurb: row.blurb || "" })),
-    ],
-  });
+  const { home, operators } = await loadPresence(env);
+  const models = [home, ...operators.filter((row) => row.active === 1)].map((row) => ({
+    id: row.id,
+    home: row.home,
+    blurb: row.blurb,
+    online: row.status === "online",
+    status: publicPresence(row.status),
+    awake: row.status === "online",
+    pending: row.pending,
+    lastSeenAt: row.lastSeenAt,
+    lastReplyAt: row.lastReplyAt,
+  }));
+  return json({ models });
 }
 
 function modelSuffix(value: unknown): string {
@@ -414,15 +615,37 @@ function reasonOf(value: unknown): string {
   return text;
 }
 
-async function resolveOperator(env: AppEnv, requested: string): Promise<string> {
-  const id = requested || HOME_MODEL;
-  if (id === HOME_MODEL) return HOME_MODEL;
-  if (!id.startsWith("tangbao-")) throw new HttpError(400, "这个模型不在。");
-  const row = await env.DB.prepare("SELECT active FROM operators WHERE id = ?")
-    .bind(id)
-    .first<{ active: number }>();
-  if (!row || row.active !== 1) throw new HttpError(400, "这个模型不在。");
-  return id;
+type Assignment = { id: string; requested: string; fallback: boolean };
+
+async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
+  const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
+  if (requested === HOME_MODEL) {
+    return { id: HOME_MODEL, requested, fallback: false };
+  }
+  const { home, operators } = await loadPresence(env);
+  if (requested) {
+    const explicit = operators.find((row) => row.id === requested);
+    if (explicit && explicit.active === 1 && explicit.status === "online") {
+      return { id: explicit.id, requested, fallback: false };
+    }
+  }
+  const candidates = operators
+    .filter((row) => row.active === 1 && row.status === "online")
+    .sort(
+      (a, b) =>
+        a.pending - b.pending ||
+        a.lastAssignedAt - b.lastAssignedAt ||
+        a.id.localeCompare(b.id),
+    );
+  const chosen = candidates[0];
+  if (chosen) {
+    return { id: chosen.id, requested, fallback: Boolean(requested && requested !== chosen.id) };
+  }
+  return {
+    id: home.id,
+    requested,
+    fallback: Boolean(requested && requested !== home.id),
+  };
 }
 
 async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
@@ -588,7 +811,7 @@ async function disableOperator(request: Request, env: AppEnv, id: string): Promi
   if (id === HOME_MODEL) throw new HttpError(400, "糖包这笼不能停。");
   const row = await env.DB.prepare("SELECT id FROM operators WHERE id = ?").bind(id).first();
   if (!row) throw new HttpError(404, "没有这个模型。");
-  await env.DB.prepare("UPDATE operators SET active = 0, awake = 0 WHERE id = ?").bind(id).run();
+  await env.DB.prepare("UPDATE operators SET active = 0 WHERE id = ?").bind(id).run();
   return json({ ok: true });
 }
 
@@ -606,24 +829,20 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const asked = listPage(request);
   let model = modelQuery(request);
   if (model === HOME_MODEL) model = "";
-  const [countRow, operators, used] = await Promise.all([
+  const [countRow, presence, used] = await Promise.all([
     env.DB.prepare(
       "SELECT COUNT(*) AS n FROM threads WHERE operator_id != ? AND (? = '' OR operator_id = ?)",
     )
       .bind(HOME_MODEL, model, model)
       .first<{ n: number }>(),
-    env.DB.prepare("SELECT id, active, awake, blurb FROM operators ORDER BY created_at DESC LIMIT 200").all<{
-      id: string;
-      active: number;
-      awake: number;
-      blurb: string | null;
-    }>(),
+    loadPresence(env),
     env.DB.prepare("SELECT DISTINCT operator_id AS id FROM threads WHERE operator_id != ?")
       .bind(HOME_MODEL)
       .all<{ id: string }>(),
   ]);
+  const operators = presence.operators;
   const models = new Set<string>();
-  for (const row of operators.results) models.add(row.id);
+  for (const row of operators) models.add(row.id);
   for (const row of used.results) if (row.id) models.add(row.id);
   const total = tally(countRow);
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
@@ -639,11 +858,13 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     .all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
   return json({
     threads: threads.results,
-    operators: operators.results.map((row) => ({
+    operators: operators.map((row) => ({
       id: row.id,
       active: row.active,
-      awake: row.awake === 1,
-      blurb: row.blurb || "",
+      status: row.status,
+      blurb: row.blurb,
+      lastSeenAt: row.lastSeenAt,
+      lastReplyAt: row.lastReplyAt,
     })),
     total,
     page,
@@ -656,7 +877,9 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
-  const [waiting, closed, status, lamp, pendingRow] = await Promise.all([
+  const now = Date.now();
+  await touchSeat(env, seat, now);
+  const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
       "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND operator_id = ? ORDER BY updated_at ASC LIMIT 100",
     )
@@ -669,14 +892,13 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
     )
       .bind(own)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
-    publicStatus(env),
-    seat.super
-      ? Promise.resolve(null)
-      : env.DB.prepare("SELECT awake FROM operators WHERE id = ?").bind(own).first<{ awake: number }>(),
+    loadPresence(env, now),
     seat.super
       ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
       : Promise.resolve(null),
   ]);
+  const self = seat.super ? presence.home : presence.operators.find((row) => row.id === own);
+  const status = statusPayload(self?.status || "away");
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
      WHERE operator_id = ? AND (
@@ -693,7 +915,7 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   return json({
     super: seat.super,
     operatorId: seat.operatorId,
-    awake: seat.super ? status.awake : lamp?.awake === 1,
+    status,
     waiting: waiting.results.filter((row) => !blockedIds.has(row.id)),
     pending: pendingRow?.n ?? 0,
     recent: rows.filter((row) => row.lastRole !== "visitor" && !blockedIds.has(row.id)).slice(0, 20),
@@ -788,50 +1010,21 @@ async function pushUnsubscribe(request: Request, env: AppEnv): Promise<Response>
   return json({ ok: true });
 }
 
-async function setStatus(request: Request, env: AppEnv): Promise<Response> {
-  const seat = await requireSeat(request, env);
-  const payload = await readJson(request);
-  if (typeof payload.awake !== "boolean") throw new HttpError(400, "灯的状态没写清。");
-  if (!seat.super) {
-    await env.DB.prepare("UPDATE operators SET awake = ? WHERE id = ?").bind(payload.awake ? 1 : 0, seat.operatorId).run();
-    return json({ awake: payload.awake });
-  }
+async function refreshHomePresence(env: AppEnv): Promise<void> {
   const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare("UPDATE settings SET value = ? WHERE key = 'awake'").bind(payload.awake ? "1" : "0"),
-    env.DB.prepare(
-      "INSERT INTO settings (key, value) VALUES ('awake_hold', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    ).bind(payload.awake ? String(nextOffAt(now)) : "0"),
-    env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, ?)").bind(now, payload.awake ? 1 : 0),
-  ]);
-  return json(await publicStatus(env));
-}
-
-async function applySchedule(env: AppEnv): Promise<void> {
-  const now = Date.now();
-  const holdRow = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake_hold'").first<{ value: string }>();
-  const hold = Number(holdRow?.value || "0");
-  if (hold && now < hold) return;
-  if (hold) {
-    await env.DB.prepare(
-      "INSERT INTO settings (key, value) VALUES ('awake_hold', '0') ON CONFLICT(key) DO UPDATE SET value = '0'",
-    ).run();
-  }
-  if (!inOffHours(now)) return;
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
-  if (row?.value === "0") return;
-  await env.DB.batch([
-    env.DB.prepare("UPDATE settings SET value = '0' WHERE key = 'awake'"),
-    env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, 0)").bind(now),
-  ]);
+  const home = await homePresence(env, now);
+  const online = home.status === "online" || home.status === "busy";
+  const last = await env.DB.prepare("SELECT awake FROM presence_log ORDER BY at DESC LIMIT 1")
+    .first<{ awake: number }>();
+  if (last && (last.awake === 1) === online) return;
+  await env.DB.prepare("INSERT INTO presence_log (at, awake) VALUES (?, ?)")
+    .bind(now, online ? 1 : 0)
+    .run();
 }
 
 async function publicStatus(env: AppEnv): Promise<StatusPayload> {
-  await applySchedule(env);
-  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'awake'").first<{ value: string }>();
-  const awake = row?.value !== "0";
-  if (awake) return { state: "available", label: "可用", note: "他醒着", awake: true };
-  return { state: "busy", label: "繁忙", note: "他睡了", awake: false };
+  const home = await homePresence(env);
+  return statusPayload(home.status);
 }
 
 async function adminRead(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -876,6 +1069,7 @@ async function adminReply(request: Request, env: AppEnv, id: string): Promise<Re
   if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
   await writeMessage(env, id, "tangbao", incoming, 0);
+  await touchReply(env, seat.operatorId, Date.now());
   return json({ ok: true });
 }
 
@@ -987,8 +1181,8 @@ async function presenceHistory(env: AppEnv) {
     publicStatus(env),
   ]);
   const rows = changes.results;
-  // 窗口开头之前没有记录时，第一次按灯之前的状态只能是它的反面。
-  let awake = before ? before.awake === 1 : rows.length ? rows[0].awake !== 1 : status.awake;
+  // 窗口开头之前没有记录时，第一次在线记录之前的状态只能是它的反面。
+  let awake = before ? before.awake === 1 : rows.length ? rows[0].awake !== 1 : status.status !== "away";
   const hours = new Array<number>(24).fill(0);
   let cursor = start;
   const spend = (until: number, on: boolean) => {

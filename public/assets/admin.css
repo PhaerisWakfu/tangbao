@@ -473,11 +473,12 @@ body[data-presence="asleep"] {
   gap: 7px;
   margin-top: 5px;
 }
-#pane-audit .seat-lamp {
+#pane-audit .seat-status {
   font-size: 11px;
   color: var(--faint);
 }
-#pane-audit .seat-lamp.on { color: var(--up); }
+#pane-audit .seat-status[data-state="online"] { color: var(--up); }
+#pane-audit .seat-status[data-state="busy"] { color: var(--accent); }
 #pane-audit .seat-err {
   flex: 1 0 100%;
   margin: 0;

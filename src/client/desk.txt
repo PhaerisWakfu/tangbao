@@ -7,12 +7,13 @@ const pile = $("#pile");
 const thread = $("#thread");
 const reply = $("#reply");
 const answer = $("#answer");
-const lamp = $("#lamp");
+const presence = $("#presence");
+const presenceLabel = $("#presence-label");
+const presenceNote = $("#presence-note");
 const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
 
-let awake = true;
 let waiting = 0;
 let pending = 0;
 let applyPage = 1;
@@ -97,18 +98,19 @@ function paintTitle() {
   document.title = waiting > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
 }
 
-function applyAwake(next) {
-  awake = next;
-  body.dataset.presence = next ? "awake" : "asleep";
+function applyPresence(status) {
+  const state = status?.status || (status?.online ? "online" : "away");
+  const present = state === "online" || state === "busy";
+  body.dataset.presence = present ? "awake" : "asleep";
   if (seat.super) {
     try {
       localStorage.setItem("tangbao.presence", body.dataset.presence);
     } catch {}
   }
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
-  lamp.setAttribute("aria-checked", String(next));
-  lamp.querySelector("b").textContent = next ? "灯亮着" : "灯灭了";
-  lamp.querySelector("small").textContent = next ? "前台显示：可用 · 他醒着" : "前台显示：繁忙 · 他睡了";
+  presence.dataset.state = state;
+  presenceLabel.textContent = status?.label || (state === "online" ? "在线" : "离开");
+  presenceNote.textContent = status?.label ? `前台显示：${status.label} · ${status.note || ""}` : "打开笼屉即在线";
 }
 
 function slip(item, kind) {
@@ -142,7 +144,7 @@ function slip(item, kind) {
 }
 
 function renderQueue(data) {
-  applyAwake(Boolean(data.awake));
+  applyPresence(data.status);
   const waiting = data.waiting || [];
   const recent = data.recent || [];
   count.textContent = waiting.length
@@ -384,15 +386,6 @@ $("#login").addEventListener("submit", async (event) => {
 
 $("#look").addEventListener("click", () => {
   void tick();
-});
-
-lamp.addEventListener("click", async () => {
-  try {
-    const data = await api("/api/admin/status", { method: "POST", body: { awake: !awake } });
-    applyAwake(data.awake);
-  } catch (err) {
-    count.textContent = err.message;
-  }
 });
 
 function statusWord(status) {
@@ -688,10 +681,18 @@ function operatorSeat(operator) {
   }
   const metaRow = document.createElement("span");
   metaRow.className = "seat-meta";
-  const lampNote = document.createElement("span");
-  lampNote.className = operator.awake ? "seat-lamp on" : "seat-lamp";
-  lampNote.textContent = operator.awake ? "灯亮着" : "灯灭了";
-  metaRow.append(lampNote);
+  const statusNote = document.createElement("span");
+  statusNote.className = "seat-status";
+  statusNote.dataset.state = operator.status || (operator.active ? "away" : "off");
+  statusNote.textContent =
+    operator.status === "online"
+      ? "在线"
+      : operator.status === "busy"
+        ? "忙碌"
+        : operator.status === "off"
+          ? "停用"
+          : "离开";
+  metaRow.append(statusNote);
   name.append(metaRow);
   pick.append(name);
   pick.addEventListener("click", () => {
@@ -717,7 +718,7 @@ function operatorSeat(operator) {
   toggle.setAttribute("aria-label", `${operator.id} ${on ? "停用" : "启用"}`);
   toggle.innerHTML = "<b></b>";
   const label = toggle.querySelector("b");
-  label.textContent = on ? "在用" : "停了";
+  label.textContent = on ? "接单" : "启用";
   toggle.addEventListener("click", async () => {
     const live = toggle.getAttribute("aria-checked") === "true";
     if (live && toggle.dataset.confirm !== "1") {
@@ -726,7 +727,7 @@ function operatorSeat(operator) {
       window.setTimeout(() => {
         if (toggle.dataset.confirm !== "1") return;
         toggle.dataset.confirm = "";
-        label.textContent = "在用";
+        label.textContent = "接单";
       }, 2200);
       return;
     }

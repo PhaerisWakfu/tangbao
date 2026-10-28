@@ -51,11 +51,11 @@
         <button type="button" data-view="apply">申请</button>
         <button type="button" data-view="audit">审计</button>
       </nav>
-      <button class="lamp" type="button" id="lamp" role="switch" aria-checked="true">
-        <span class="track" aria-hidden="true"></span>
-        <b>灯亮着</b>
-        <small>前台显示：可用 · 他醒着</small>
-      </button>
+      <div class="presence" id="presence" aria-live="polite">
+        <span class="presence-dot" aria-hidden="true"></span>
+        <b id="presence-label">在线</b>
+        <small id="presence-note">打开笼屉即在线</small>
+      </div>
       <p class="count" id="count"></p>
       <nav class="pile" id="pile" aria-label="消息"></nav>
     </aside>

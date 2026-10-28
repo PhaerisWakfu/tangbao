@@ -4,7 +4,7 @@ const BLOCKED = "这边不再收新的话了。";
 const POLL_MS = 30000;
 const WAIT = {
   awake: "他在看这句，不是在生成。",
-  asleep: "他睡了，这句会留到他起来。",
+  asleep: "他不在，这句会留到他回来。",
 };
 const STEAM =
   '<svg class="steam" viewBox="0 0 26 18" aria-hidden="true">' +
@@ -25,7 +25,7 @@ const titleEl = $("#title");
 
 let store = loadStore();
 let current = store.threads.find((item) => item.id === store.activeId) || null;
-let status = { state: "available", label: "可用", note: "他醒着", awake: true };
+let status = { state: "available", label: "在线", note: "他在", awake: true, online: true, status: "online" };
 let messages = [];
 let openAwaiting = true;
 let painted = "";
@@ -35,8 +35,9 @@ let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
 const HOME = "tangbao-vme50-flash";
 const MODEL_KEY = "tangbao.model";
+const AUTO = "";
 let models = [];
-let chosen = HOME;
+let chosen = AUTO;
 let threadModel = "";
 let making = false;
 let blocked = false;
@@ -141,16 +142,43 @@ function showSys(text) {
 }
 
 function applyStatus(next) {
-  status = next;
-  body.dataset.presence = next.awake ? "awake" : "asleep";
+  const present = next.status === "online" || next.status === "busy" || Boolean(next.awake);
+  status = { ...next, awake: present, online: next.status === "online" };
+  body.dataset.presence = present ? "awake" : "asleep";
   try {
     localStorage.setItem("tangbao.presence", body.dataset.presence);
   } catch {}
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
   $("#status-label").textContent = next.label;
   $("#status-note").textContent = next.note;
-  $("#status").title = next.awake ? "他醒着，消息会被看到" : "他睡了，消息会留到他起来";
+  $("#status").title = present ? "他在，消息会被看到" : "他不在，消息会留到他回来";
   tickPending();
+}
+
+function statusFromState(state) {
+  if (state === "online") {
+    return { state: "available", label: "在线", note: "他在", awake: true, online: true, status: state };
+  }
+  if (state === "busy") {
+    return { state: "busy", label: "忙碌", note: "稍等", awake: false, online: false, status: state };
+  }
+  return { state: "busy", label: "离开", note: "不在", awake: false, online: false, status: state };
+}
+
+function statusFromModel(model) {
+  if (!model) {
+    return { state: "available", label: "自动匹配", note: "在线模型优先", awake: true, online: true, status: "online" };
+  }
+  return statusFromState(model.status || (model.online ? "online" : "away"));
+}
+
+function applyModelStatus() {
+  const id = activeModel();
+  if (!id) {
+    applyStatus(statusFromModel(null));
+    return;
+  }
+  applyStatus(statusFromModel(models.find((item) => item.id === id)));
 }
 
 function botRow(message, askedAt) {
@@ -358,15 +386,13 @@ function forget(id) {
 
 async function refresh() {
   if (!current || !validId(current.id)) {
-    if (activeModel() === HOME) applyStatus(await api("/api/status"));
-    else applyModelLamp();
+    applyModelStatus();
     return;
   }
   try {
     const data = await api(`/api/threads/${current.id}`, { token: current.token });
     if (data.operator) threadModel = data.operator;
-    if (!threadModel || threadModel === HOME) applyStatus(data.status);
-    else applyModelLamp();
+    applyStatus(data.operatorStatus || data.status || statusFromModel(null));
     openAwaiting = data.awaiting !== false && data.awaiting !== 0;
     applyBlocked(Boolean(data.blocked));
     if (data.title && data.title !== current.title) {
@@ -632,6 +658,9 @@ async function sendText(text) {
     if (!validId(created.id) || !created.token) throw new ApiError("消息没送出去。糖包那边暂时没应。", 500);
     current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
     if (created.operator) threadModel = created.operator;
+    if (created.fallback && created.requested && created.operator) {
+      showSys(`他刚走，这次由 ${created.operator} 接。`);
+    }
   } else {
       const data = await api(`/api/threads/${current.id}/messages`, {
         method: "POST",
@@ -803,48 +832,50 @@ function activeModel() {
   return threadModel || chosen;
 }
 
-function applyModelLamp() {
-  if (activeModel() === HOME) return;
-  const model = models.find((item) => item.id === activeModel());
-  const on = Boolean(model?.awake);
-  applyStatus({
-    state: on ? "available" : "busy",
-    label: on ? "可用" : "繁忙",
-    note: on ? "他醒着" : "他睡了",
-    awake: on,
-  });
-}
-
 function paintModels() {
   const id = activeModel();
-  $("#model-name").textContent = id;
+  $("#model-name").textContent = id || "自动匹配";
   const list = $("#model-list");
   list.replaceChildren();
+
+  const auto = document.createElement("button");
+  auto.type = "button";
+  auto.className = "model-row";
+  auto.setAttribute("aria-pressed", String(!id));
+  auto.innerHTML =
+    '<i data-on="1"></i><span class="who"><b>自动匹配</b><small>按在线状态挑一个</small></span><small class="model-state">自动</small>';
+  if (!id) auto.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
+  auto.addEventListener("click", () => {
+    if (current) return;
+    chosen = AUTO;
+    paintModels();
+  });
+  list.append(auto);
+
   for (const model of models) {
+    const online = model.status === "online" || model.online === true;
+    const state = model.status || (online ? "online" : "away");
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
+    button.disabled = !online;
+    button.setAttribute("aria-disabled", String(!online));
     button.setAttribute("aria-pressed", String(model.id === id));
-    button.innerHTML = `<i data-on="${model.awake ? "1" : "0"}"></i><span class="who"><b></b><small></small></span>`;
+    button.innerHTML =
+      `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
     button.querySelector("b").textContent = model.id;
     button.querySelector("small").textContent = model.blurb || "";
+    button.querySelector(".model-state").textContent =
+      state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
-      if (current) return;
+      if (current || !online) return;
       chosen = model.id;
       paintModels();
     });
     list.append(button);
   }
-  syncLamp();
-}
-
-function syncLamp() {
-  if (activeModel() === HOME) {
-    if (!current) void api("/api/status").then(applyStatus).catch(() => {});
-    return;
-  }
-  applyModelLamp();
+  if (!current) applyModelStatus();
 }
 
 async function loadModels(pick) {
@@ -860,12 +891,12 @@ async function loadModels(pick) {
       picked = localStorage.getItem(MODEL_KEY) || "";
       if (picked) localStorage.removeItem(MODEL_KEY);
     } catch {}
-    const fromAbout = models.find((item) => item.id === picked);
-    const guestAwake = models.find((item) => !item.home && item.awake);
-    const home = models.find((item) => item.home) || models[0];
-    const guest = models.find((item) => !item.home);
-    const next = fromAbout || guestAwake || (home?.awake ? home : null) || guest || home;
-    if (next) chosen = next.id;
+    const fromAbout = models.find((item) => item.id === picked && item.status === "online");
+    chosen = fromAbout ? fromAbout.id : AUTO;
+  }
+  if (!current && chosen) {
+    const selected = models.find((item) => item.id === chosen);
+    if (!selected || selected.status !== "online") chosen = AUTO;
   }
   paintModels();
 }

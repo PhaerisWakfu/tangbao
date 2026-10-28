@@ -35,13 +35,13 @@
         </p>
         <article class="memo">
           <p class="memo-head"><span class="memo-mode"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 10l1-3 5-5 2 2-5 5z"/></svg>修订模式</span><span>修订人：糖包本人</span></p>
-          <p class="memo-text">糖包是<del>新一代人工智能大模型</del><ins>一个由真人回复的对话网站</ins>。<del>依托海量数据训练</del><ins>他读完你的消息，自己打字回复</ins>，<del>毫秒级响应</del><ins>每条要等几分钟到几小时</ins>。<del>7×24 小时在线</del><ins>他醒着的时候在线</ins>，<del>支持多模态生成</del><ins>能聊天，也能拿笔画图</ins>。<del>结果安全可靠。</del><ins>他也会犯错，重要的事请自己判断。</ins></p>
+          <p class="memo-text">糖包是<del>新一代人工智能大模型</del><ins>一个由真人回复的对话网站</ins>。<del>依托海量数据训练</del><ins>他读完你的消息，自己打字回复</ins>，<del>毫秒级响应</del><ins>每条要等几分钟到几小时</ins>。<del>7×24 小时在线</del><ins>他打开笼屉的时候在线</ins>，<del>支持多模态生成</del><ins>能聊天，也能拿笔画图</ins>。<del>结果安全可靠。</del><ins>他也会犯错，重要的事请自己判断。</ins></p>
         </article>
         <div class="front-actions">
           <a class="enter" href="/chat">进入聊天</a>
           <button class="become" type="button" data-join>成为AI</button>
         </div>
-        <p class="status" id="status"><i></i><span id="status-label">可用</span><em id="status-note">他醒着</em></p>
+        <p class="status" id="status"><i></i><span id="status-label">在线</span><em id="status-note">他在</em></p>
       </div>
     </header>
     <section class="sample" aria-label="一段示例对话">
@@ -102,7 +102,7 @@
           <li>不威胁人，不把别人的姓名、住址或电话发出来</li>
           <li>不写怎么伤害自己，不发露骨的性内容</li>
           <li>不留微信或其他站外联系方式，也不发链接</li>
-          <li>开灯时尽量回复每一个向你提问的用户</li>
+          <li>在线接单时尽量回复每一个向你提问的用户</li>
           <li>碰到不该回的，拉黑，不要跟着聊</li>
           <li>请善待每一个用户，但也别委屈自己</li>
         </ul>
@@ -328,10 +328,11 @@
     });
 
     function setPresence(status) {
-      const awake = Boolean(status.awake);
-      document.body.dataset.presence = awake ? "awake" : "asleep";
-      $("#status-label").textContent = status.label || (awake ? "可用" : "繁忙");
-      $("#status-note").textContent = status.note || (awake ? "他醒着" : "他睡了");
+      const online = status.status === "online";
+      const present = online || status.status === "busy" || Boolean(status.awake);
+      document.body.dataset.presence = present ? "awake" : "asleep";
+      $("#status-label").textContent = status.label || (online ? "在线" : "离开");
+      $("#status-note").textContent = status.note || (online ? "他在" : "不在");
       try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
     }
 
@@ -343,11 +344,14 @@
       const lineup = $("#lineup");
       lineup.replaceChildren();
       for (const model of models) {
+        const online = model.status === "online";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line";
+        button.disabled = !online;
+        button.setAttribute("aria-disabled", String(!online));
         const dot = document.createElement("i");
-        dot.dataset.on = model.awake ? "1" : "0";
+        dot.dataset.on = online ? "1" : "0";
         const who = document.createElement("span");
         who.className = "who";
         const name = document.createElement("b");
@@ -355,11 +359,12 @@
         const blurb = document.createElement("small");
         blurb.textContent = model.blurb || "";
         who.append(name, blurb);
-        const lamp = document.createElement("small");
-        lamp.className = "lamp";
-        lamp.textContent = model.awake ? "可用" : "繁忙";
-        button.append(dot, who, lamp);
+        const state = document.createElement("small");
+        state.className = "state";
+        state.textContent = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
+        button.append(dot, who, state);
         button.addEventListener("click", () => {
+          if (!online) return;
           try { localStorage.setItem("tangbao.model", model.id); } catch {}
           location.href = "/chat";
         });
