@@ -677,21 +677,17 @@ function operatorSeat(operator) {
     blurb.textContent = operator.blurb;
     name.append(blurb);
   }
-  const metaRow = document.createElement("span");
-  metaRow.className = "seat-meta";
-  const statusNote = document.createElement("span");
-  statusNote.className = "seat-status";
-  statusNote.dataset.state = operator.status || (operator.active ? "away" : "off");
-  statusNote.textContent =
-    operator.status === "online"
-      ? "在线"
-      : operator.status === "busy"
-        ? "忙碌"
-        : operator.status === "off"
-          ? "停用"
-          : "离开";
-  metaRow.append(statusNote);
-  name.append(metaRow);
+  if (operator.active) {
+    const metaRow = document.createElement("span");
+    metaRow.className = "seat-meta";
+    const statusNote = document.createElement("span");
+    statusNote.className = "seat-status";
+    statusNote.dataset.state = operator.status || "away";
+    statusNote.textContent =
+      operator.status === "online" ? "在线" : operator.status === "busy" ? "忙碌" : "离开";
+    metaRow.append(statusNote);
+    name.append(metaRow);
+  }
   pick.append(name);
   pick.addEventListener("click", () => {
     auditModel = auditModel === operator.id ? "" : operator.id;
@@ -716,7 +712,7 @@ function operatorSeat(operator) {
   toggle.setAttribute("aria-label", `${operator.id} ${on ? "停用" : "启用"}`);
   toggle.innerHTML = "<b></b>";
   const label = toggle.querySelector("b");
-  label.textContent = on ? "接单" : "启用";
+  label.textContent = on ? "启用" : "停用";
   toggle.addEventListener("click", async () => {
     const live = toggle.getAttribute("aria-checked") === "true";
     if (live && toggle.dataset.confirm !== "1") {
@@ -725,7 +721,7 @@ function operatorSeat(operator) {
       window.setTimeout(() => {
         if (toggle.dataset.confirm !== "1") return;
         toggle.dataset.confirm = "";
-        label.textContent = "接单";
+        label.textContent = "启用";
       }, 2200);
       return;
     }
