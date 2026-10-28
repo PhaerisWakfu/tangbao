@@ -15,6 +15,13 @@ const replyErr = $("#reply-err");
 let awake = true;
 let waiting = 0;
 let pending = 0;
+let applyPage = 1;
+let auditPage = 1;
+let auditModel = "";
+let applyToken = 0;
+let auditToken = 0;
+let applyStamp = "";
+let auditStamp = "";
 let selected = null;
 let shown = "";
 let timer = 0;
@@ -64,12 +71,24 @@ function clock(ts) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function when(ts) {
+  const date = new Date(ts);
+  const time = clock(ts);
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.getMonth() + 1}/${date.getDate()} ${time}`;
+}
+
 function showDesk(on) {
   gate.hidden = on;
   desk.hidden = !on;
   if (!on) {
     waiting = 0;
     pending = 0;
+    applyPage = 1;
+    auditPage = 1;
+    auditModel = "";
+    applyStamp = "";
+    auditStamp = "";
     paintTitle();
   }
 }
@@ -398,216 +417,454 @@ function confirmClick(button, idle, armed) {
   return true;
 }
 
-async function loadApplications() {
-  const data = await api("/api/admin/applications");
-  const box = $("#applications");
-  box.replaceChildren();
-  const rows = data.applications || [];
-  pending = rows.filter((item) => item.status === "pending").length;
+function paintPager(parent, page, total, size, move, unit = "") {
+  const pages = Math.max(1, Math.ceil((Number(total) || 0) / (Number(size) || 10)));
+  if (pages <= 1) return;
+  const nav = document.createElement("nav");
+  nav.className = "pager";
+  nav.setAttribute("aria-label", "分页");
+  const info = document.createElement("span");
+  info.className = "pager-info";
+  const current = document.createElement("b");
+  current.textContent = String(page);
+  info.append("第 ", current, ` / ${pages} 页 · 共 ${total} ${unit}`);
+  const actions = document.createElement("div");
+  actions.className = "pager-actions";
+  const prev = document.createElement("button");
+  prev.type = "button";
+  prev.textContent = "上一页";
+  prev.disabled = page <= 1;
+  prev.addEventListener("click", () => move(page - 1));
+  const next = document.createElement("button");
+  next.type = "button";
+  next.textContent = "下一页";
+  next.disabled = page >= pages;
+  next.addEventListener("click", () => move(page + 1));
+  actions.append(prev, next);
+  nav.append(info, actions);
+  parent.append(nav);
+}
+
+function openApplyPage(page) {
+  applyPage = page;
+  applyStamp = "";
+  void loadApplications(true).then(() => {
+    if (!window.matchMedia("(max-width: 860px)").matches) return;
+    requestAnimationFrame(() => {
+      const pane = $("#pane-apply");
+      if (pane) pane.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, () => {});
+}
+
+function openAuditPage(page) {
+  auditPage = page;
+  auditStamp = "";
+  const list = $("#audit .talks-list");
+  if (list) list.scrollTop = 0;
+  void loadAudit().then(() => {
+    if (!window.matchMedia("(max-width: 1179px)").matches) return;
+    requestAnimationFrame(() => {
+      const talks = document.querySelector("#audit .talks-col");
+      if (talks) talks.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, () => {});
+}
+
+function paperNote(paper, message) {
+  let note = paper.querySelector(".paper-err");
+  if (!note) {
+    note = document.createElement("p");
+    note.className = "paper-err";
+    paper.append(note);
+  }
+  note.textContent = message;
+}
+
+function applicationCard(item) {
+  const paper = document.createElement("article");
+  paper.className = "paper";
+  paper.dataset.status = item.status;
+
+  const body = document.createElement("div");
+  body.className = "body";
+  const head = document.createElement("div");
+  head.className = "head";
+  const title = document.createElement("b");
+  title.textContent = `tangbao-${item.suffix}`;
+  title.title = title.textContent;
+  head.append(title);
+  body.append(head);
+
+  if (item.blurb) {
+    const blurb = document.createElement("p");
+    blurb.className = "blurb";
+    blurb.textContent = item.blurb;
+    body.append(blurb);
+  } else {
+    const blurb = document.createElement("p");
+    blurb.className = "blurb empty";
+    blurb.textContent = "这一份没写说明。";
+    body.append(blurb);
+  }
+
+  const meta = document.createElement("p");
+  meta.className = "mail";
+  meta.textContent = item.email;
+  if (item.createdAt) {
+    if (item.status === "pending") {
+      const wait = document.createElement("span");
+      wait.className = "wait";
+      wait.textContent = ` · 等了 ${spent(Date.now() - item.createdAt)}`;
+      meta.append(wait, ` · ${when(item.createdAt)}`);
+    } else {
+      meta.append(` · ${when(item.createdAt)}`);
+    }
+  }
+  body.append(meta);
+
+  if (item.status === "rejected" && item.reason) {
+    const why = document.createElement("p");
+    why.className = "why";
+    const label = document.createElement("b");
+    label.textContent = "没过的理由";
+    why.append(label, document.createTextNode(item.reason));
+    body.append(why);
+  }
+
+  const side = document.createElement("div");
+  side.className = "paper-side";
+  const state = document.createElement("span");
+  state.className = "state";
+  state.textContent = statusWord(item.status);
+  side.append(state);
+
+  if (item.status === "pending") {
+    const acts = document.createElement("div");
+    acts.className = "decide";
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.className = "yes";
+    approve.textContent = "通过";
+    approve.addEventListener("click", async () => {
+      if (!confirmClick(approve, "通过", "确定通过")) return;
+      try {
+        const result = await api(`/api/admin/applications/${item.id}/approve`, { method: "POST" });
+        issued.set(item.id, result.password);
+        await loadApplications(true);
+      } catch (err) {
+        paperNote(paper, err.message);
+      }
+    });
+    const reject = document.createElement("button");
+    reject.type = "button";
+    reject.className = "no";
+    reject.textContent = "没过";
+    reject.addEventListener("click", () => {
+      if (paper.querySelector(".reject-box")) return;
+      const form = document.createElement("div");
+      form.className = "reject-box";
+      const note = document.createElement("textarea");
+      note.rows = 2;
+      note.maxLength = 200;
+      note.placeholder = "写一句没过的理由，申请人能看见";
+      const row = document.createElement("div");
+      row.className = "decide";
+      const send = document.createElement("button");
+      send.type = "button";
+      send.className = "yes";
+      send.textContent = "确定没过";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "quiet";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", () => form.remove());
+      send.addEventListener("click", async () => {
+        const reason = note.value.trim();
+        if (!reason) {
+          paperNote(paper, "先写一句没过的理由。");
+          return;
+        }
+        try {
+          await api(`/api/admin/applications/${item.id}/reject`, { method: "POST", body: { reason } });
+          await loadApplications(true);
+        } catch (err) {
+          paperNote(paper, err.message);
+        }
+      });
+      row.append(send, cancel);
+      form.append(note, row);
+      paper.append(form);
+      note.focus();
+    });
+    acts.append(approve, reject);
+    side.append(acts);
+  }
+
+  paper.append(body, side);
+
+  const password = issued.get(item.id);
+  if (password) {
+    const once = document.createElement("p");
+    once.className = "once";
+    const label = document.createElement("span");
+    label.className = "once-label";
+    label.textContent = "口令";
+    const pass = document.createElement("span");
+    pass.className = "pass";
+    pass.textContent = password;
+    const note = document.createElement("span");
+    note.className = "once-note";
+    note.textContent = "只在这张批条上出现一次。对方在首页也能看到；到 /desk 用它掀开笼屉。";
+    once.append(label, pass, note);
+    paper.append(once);
+  }
+
+  return paper;
+}
+
+async function loadApplications(force) {
+  const token = ++applyToken;
+  const data = await api(`/api/admin/applications?page=${applyPage}`);
+  if (token !== applyToken) return;
+  pending = Number(data.pending) || 0;
   paintTitle();
+  applyPage = Number(data.page) || 1;
+  const lead = $("#apply-lead");
+  if (lead) lead.textContent = pending ? `${pending} 份在等` : "没有待审的";
+  const box = $("#applications");
+  if (!force && box.querySelector(".reject-box")) return;
+  const mark = JSON.stringify(data);
+  if (!force && mark === applyStamp) return;
+  applyStamp = mark;
+  const rows = data.applications || [];
+  const sheet = document.createElement("div");
+  sheet.className = "sheet";
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.className = "quiet";
     empty.textContent = "没有申请。";
-    box.append(empty);
+    sheet.append(empty);
+    box.replaceChildren(sheet);
     return;
   }
-  for (const item of rows) {
-    const paper = document.createElement("article");
-    paper.className = "paper";
-    const head = document.createElement("div");
-    head.className = "head";
-    const title = document.createElement("b");
-    title.textContent = `tangbao-${item.suffix}`;
-    const state = document.createElement("span");
-    state.className = "state";
-    state.textContent = statusWord(item.status);
-    head.append(title, state);
-    paper.append(head);
-    const meta = document.createElement("p");
-    meta.className = "mail";
-    meta.textContent = item.email;
-    paper.append(meta);
-    if (item.blurb) {
-      const blurb = document.createElement("p");
-      blurb.className = "blurb";
-      blurb.textContent = item.blurb;
-      paper.append(blurb);
-    }
-    if (item.status === "rejected" && item.reason) {
-      const why = document.createElement("p");
-      why.className = "why";
-      why.textContent = item.reason;
-      paper.append(why);
-    }
-    const password = issued.get(item.id);
-    if (password) {
-      const once = document.createElement("p");
-      once.innerHTML = `口令 <span class="pass"></span>。只出现这一次，交给对方。对方到 /desk 用它掀开笼屉。`;
-      once.querySelector(".pass").textContent = password;
-      paper.append(once);
-    }
-    if (item.status === "pending") {
-      const acts = document.createElement("div");
-      acts.className = "decide";
-      const approve = document.createElement("button");
-      approve.type = "button";
-      approve.className = "yes";
-      approve.textContent = "通过";
-      approve.addEventListener("click", async () => {
-        if (!confirmClick(approve, "通过", "确定通过")) return;
-        try {
-          const result = await api(`/api/admin/applications/${item.id}/approve`, { method: "POST" });
-          issued.set(item.id, result.password);
-          await loadApplications();
-        } catch (err) {
-          meta.textContent = err.message;
-        }
-      });
-      const reject = document.createElement("button");
-      reject.type = "button";
-      reject.className = "no";
-      reject.textContent = "没过";
-      reject.addEventListener("click", () => {
-        if (paper.querySelector(".reject-box")) return;
-        const box = document.createElement("div");
-        box.className = "reject-box";
-        const note = document.createElement("textarea");
-        note.rows = 2;
-        note.maxLength = 200;
-        note.placeholder = "写一句没过的理由，申请人能看见";
-        const row = document.createElement("div");
-        row.className = "decide";
-        const send = document.createElement("button");
-        send.type = "button";
-        send.className = "yes";
-        send.textContent = "确定没过";
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "no";
-        cancel.textContent = "取消";
-        cancel.addEventListener("click", () => box.remove());
-        send.addEventListener("click", async () => {
-          const reason = note.value.trim();
-          if (!reason) {
-            meta.textContent = "先写一句没过的理由。";
-            return;
-          }
-          try {
-            await api(`/api/admin/applications/${item.id}/reject`, { method: "POST", body: { reason } });
-            await loadApplications();
-          } catch (err) {
-            meta.textContent = err.message;
-          }
-        });
-        row.append(send, cancel);
-        box.append(note, row);
-        acts.after(box);
-        note.focus();
-      });
-      acts.append(approve, reject);
-      paper.append(acts);
-    }
-    box.append(paper);
+  for (const item of rows) sheet.append(applicationCard(item));
+  box.replaceChildren(sheet);
+  paintPager(box, applyPage, data.total, data.pageSize, openApplyPage, "份");
+}
+
+function operatorSeat(operator) {
+  const seat = document.createElement("div");
+  seat.className = "seat";
+  if (!operator.active) seat.dataset.off = "1";
+  if (auditModel === operator.id) seat.dataset.active = "1";
+
+  const pick = document.createElement("button");
+  pick.type = "button";
+  pick.className = "seat-pick";
+  const picked = auditModel === operator.id;
+  pick.setAttribute("aria-pressed", String(picked));
+  pick.setAttribute("aria-label", picked ? `取消只看 ${operator.id}` : `只看 ${operator.id}`);
+
+  const name = document.createElement("div");
+  name.className = "name";
+  const title = document.createElement("b");
+  title.textContent = operator.id;
+  name.append(title);
+  if (operator.blurb) {
+    const blurb = document.createElement("span");
+    blurb.className = "blurb";
+    blurb.textContent = operator.blurb;
+    name.append(blurb);
   }
+  const metaRow = document.createElement("span");
+  metaRow.className = "seat-meta";
+  const lampNote = document.createElement("span");
+  lampNote.className = operator.awake ? "seat-lamp on" : "seat-lamp";
+  lampNote.textContent = operator.awake ? "灯亮着" : "灯灭了";
+  metaRow.append(lampNote);
+  name.append(metaRow);
+  pick.append(name);
+  pick.addEventListener("click", () => {
+    auditModel = auditModel === operator.id ? "" : operator.id;
+    auditPage = 1;
+    auditStamp = "";
+    const reveal = () => {
+      if (!window.matchMedia("(max-width: 1179px)").matches) return;
+      requestAnimationFrame(() => {
+        const talks = document.querySelector("#audit .talks-col");
+        if (talks) talks.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    };
+    void loadAudit().then(reveal, reveal);
+  });
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "gate-switch";
+  toggle.setAttribute("role", "switch");
+  const on = Boolean(operator.active);
+  toggle.setAttribute("aria-checked", String(on));
+  toggle.setAttribute("aria-label", `${operator.id} ${on ? "停用" : "启用"}`);
+  toggle.innerHTML = "<b></b>";
+  const label = toggle.querySelector("b");
+  label.textContent = on ? "在用" : "停了";
+  toggle.addEventListener("click", async () => {
+    const live = toggle.getAttribute("aria-checked") === "true";
+    if (live && toggle.dataset.confirm !== "1") {
+      toggle.dataset.confirm = "1";
+      label.textContent = "确定停用";
+      window.setTimeout(() => {
+        if (toggle.dataset.confirm !== "1") return;
+        toggle.dataset.confirm = "";
+        label.textContent = "在用";
+      }, 2200);
+      return;
+    }
+    toggle.dataset.confirm = "";
+    try {
+      await api(`/api/admin/operators/${operator.id}/${live ? "disable" : "enable"}`, { method: "POST" });
+      auditStamp = "";
+      await loadAudit();
+    } catch (err) {
+      let note = seat.querySelector(".seat-err");
+      if (!note) {
+        note = document.createElement("p");
+        note.className = "seat-err";
+        seat.append(note);
+      }
+      note.textContent = err.message;
+    }
+  });
+  seat.append(pick, toggle);
+  return seat;
+}
+
+function auditLine(item) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = item.awaiting ? "audit-line waiting" : "audit-line";
+  const main = document.createElement("span");
+  main.className = "audit-main";
+  const title = document.createElement("b");
+  title.textContent = item.title || "没有标题";
+  main.append(title);
+  const head = (item.title || "").replace(/…$/, "");
+  const latest = (item.preview || "").replace(/…$/, "");
+  if (latest && !latest.startsWith(head)) {
+    const preview = document.createElement("span");
+    preview.className = "preview";
+    preview.textContent = item.preview;
+    main.append(preview);
+  }
+  const who = document.createElement("span");
+  who.className = "who";
+  who.textContent = item.operatorId;
+  main.append(who);
+  const meta = document.createElement("small");
+  meta.textContent = item.awaiting ? `在等 · ${when(item.updatedAt)}` : when(item.updatedAt);
+  button.append(main, meta);
+  button.addEventListener("click", () => {
+    void openSlip(item.id, true);
+  });
+  return button;
 }
 
 async function loadAudit() {
-  const data = await api("/api/admin/audit");
+  const token = ++auditToken;
+  const params = new URLSearchParams({ page: String(auditPage) });
+  if (auditModel) params.set("model", auditModel);
+  const data = await api(`/api/admin/audit?${params}`);
+  if (token !== auditToken) return;
+  auditPage = Number(data.page) || 1;
+  auditModel = data.model || "";
+  const total = Number(data.total) || 0;
+  const operators = data.operators || [];
+  if (auditModel && !operators.some((operator) => operator.id === auditModel)) {
+    auditModel = "";
+    auditStamp = "";
+    void loadAudit();
+    return;
+  }
+  const lead = $("#audit-lead");
+  if (lead) {
+    lead.textContent = "";
+    if (!total) {
+      lead.textContent = auditModel ? "这个型号还没有对话" : "还没有对话";
+    } else if (auditModel) {
+      const id = document.createElement("span");
+      id.className = "lead-model";
+      id.textContent = auditModel;
+      lead.append(id, ` · ${total} 条`);
+    } else {
+      lead.textContent = `${total} 条对话`;
+    }
+  }
+  const mark = JSON.stringify(data);
+  if (mark === auditStamp) return;
+  auditStamp = mark;
   const box = $("#audit");
-  box.replaceChildren();
+
+  const roster = document.createElement("section");
+  roster.className = "roster";
+  const rosterHead = document.createElement("div");
+  rosterHead.className = "roster-head";
   const models = document.createElement("h3");
   models.textContent = "型号";
-  box.append(models);
+  const hint = document.createElement("span");
+  hint.className = "roster-hint";
+  hint.textContent = "点一下只看它";
+  rosterHead.append(models, hint);
+  roster.append(rosterHead);
+
   const seats = document.createElement("div");
   seats.className = "seats";
-  const operators = data.operators || [];
   if (!operators.length) {
     const empty = document.createElement("p");
     empty.className = "quiet";
     empty.textContent = "还没有别的型号。";
     seats.append(empty);
-  }
-  for (const operator of operators) {
-    const seat = document.createElement("div");
-    seat.className = "seat";
-    const name = document.createElement("div");
-    name.className = "name";
-    const title = document.createElement("b");
-    title.textContent = operator.id;
-    name.append(title);
-    if (operator.blurb) {
-      const blurb = document.createElement("span");
-      blurb.className = "blurb";
-      blurb.textContent = operator.blurb;
-      name.append(blurb);
-    }
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "gate-switch";
-    toggle.setAttribute("role", "switch");
-    const on = Boolean(operator.active);
-    toggle.setAttribute("aria-checked", String(on));
-    toggle.innerHTML = '<b></b>';
-    const label = toggle.querySelector("b");
-    label.textContent = on ? "在用" : "停了";
-    toggle.addEventListener("click", async () => {
-      const live = toggle.getAttribute("aria-checked") === "true";
-      if (live && toggle.dataset.confirm !== "1") {
-        toggle.dataset.confirm = "1";
-        label.textContent = "确定停用";
-        window.setTimeout(() => {
-          if (toggle.dataset.confirm !== "1") return;
-          toggle.dataset.confirm = "";
-          label.textContent = "在用";
-        }, 2200);
-        return;
-      }
-      toggle.dataset.confirm = "";
-      try {
-        await api(`/api/admin/operators/${operator.id}/${live ? "disable" : "enable"}`, { method: "POST" });
-        await loadAudit();
-      } catch (err) {
-        let note = seat.querySelector(".seat-err");
-        if (!note) {
-          note = document.createElement("p");
-          note.className = "seat-err";
-          seat.append(note);
-        }
-        note.textContent = err.message;
-      }
+  } else {
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "seat-all";
+    all.setAttribute("aria-pressed", String(!auditModel));
+    all.textContent = "全部型号";
+    all.addEventListener("click", () => {
+      if (!auditModel) return;
+      auditModel = "";
+      auditPage = 1;
+      auditStamp = "";
+      void loadAudit();
     });
-    seat.append(name, toggle);
-    seats.append(seat);
+    roster.append(all);
+    for (const operator of operators) seats.append(operatorSeat(operator));
   }
-  box.append(seats);
+  roster.append(seats);
+
+  const talksCol = document.createElement("section");
+  talksCol.className = "talks-col";
+  const talksHead = document.createElement("div");
+  talksHead.className = "talks-head";
   const talks = document.createElement("h3");
-  talks.className = "talks";
   talks.textContent = "对话";
-  box.append(talks);
+  const note = document.createElement("span");
+  note.className = "talks-note";
+  note.textContent = auditModel ? "只看这个型号" : "最近更新";
+  talksHead.append(talks, note);
+  const list = document.createElement("div");
+  list.className = "talks-list";
   const threads = data.threads || [];
   if (!threads.length) {
     const empty = document.createElement("p");
     empty.className = "quiet";
-    empty.textContent = "还没有对话。";
-    box.append(empty);
+    empty.textContent = auditModel ? "这个型号还没有对话。" : "还没有对话。";
+    list.append(empty);
   }
-  for (const item of threads) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "audit-line";
-    const title = document.createElement("b");
-    title.textContent = item.title || "没有标题";
-    const who = document.createElement("span");
-    who.textContent = item.operatorId;
-    const meta = document.createElement("small");
-    meta.textContent = item.awaiting ? "在等" : clock(item.updatedAt);
-    button.append(title, who, meta);
-    button.addEventListener("click", () => {
-      void openSlip(item.id, true);
-    });
-    box.append(button);
-  }
+  for (const item of threads) list.append(auditLine(item));
+  talksCol.append(talksHead, list);
+  paintPager(talksCol, auditPage, total, data.pageSize, openAuditPage, "条");
+  box.replaceChildren(roster, talksCol);
 }
 
 $("#desk-nav").addEventListener("click", (event) => {
@@ -616,8 +873,16 @@ $("#desk-nav").addEventListener("click", (event) => {
   readonly = false;
   const next = button.dataset.view;
   showPane(next);
-  if (next === "apply") void loadApplications();
-  if (next === "audit") void loadAudit();
+  const reveal = () => {
+    if (!window.matchMedia("(max-width: 860px)").matches) return;
+    requestAnimationFrame(() => {
+      const reader = $("#reader");
+      if (reader) reader.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+  if (next === "apply") void loadApplications().then(reveal, reveal);
+  else if (next === "audit") void loadAudit().then(reveal, reveal);
+  else reveal();
 });
 
 $("#back-audit").addEventListener("click", () => {

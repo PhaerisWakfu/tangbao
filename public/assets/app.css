@@ -168,6 +168,30 @@ body[data-presence="asleep"] svg.steam { display: none; }
   transition: background-color 0.15s, color 0.15s;
 }
 .icon-btn:hover { background: var(--hover); color: var(--ink); }
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.text-btn:hover { background: var(--hover); color: var(--ink); }
+.text-btn:active { background: var(--hover-2); }
+.text-btn svg.i { width: 15px; height: 15px; color: currentColor; }
 .new {
   display: flex;
   align-items: center;
@@ -224,6 +248,18 @@ body[data-presence="asleep"] svg.steam { display: none; }
   text-overflow: ellipsis;
 }
 .hist-row[data-current="true"] a { color: var(--ink); }
+.hist .text-btn {
+  display: inline-flex;
+  flex: none;
+  width: auto;
+  height: 30px;
+  margin: 1px 0;
+  padding: 0 9px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.hist .text-btn svg.i { width: 15px; height: 15px; color: var(--muted); }
+.hist .text-btn:hover svg.i { color: var(--ink); }
 .hist-x {
   display: none;
   place-items: center;

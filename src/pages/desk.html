@@ -9,6 +9,7 @@
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/desk.css">
+  <link rel="stylesheet" href="/assets/admin.css">
 </head>
 <body data-presence="awake">
   <script>
@@ -23,6 +24,7 @@
     </symbol>
     <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
     <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9"/></symbol>
+    <symbol id="i-back" viewBox="0 0 20 20"><path d="M15.5 10h-11M9 5.5 4.5 10 9 14.5"/></symbol>
     <symbol id="i-image" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8" r="1.2"/><path d="m4 14 4-3.5 2.5 2 2-1.5L16 14"/></symbol>
     <symbol id="i-pen" viewBox="0 0 20 20"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M15.6 7.6A6.2 6.2 0 1 0 16.2 12"/><path d="M16.2 4v3.8h-3.8"/></symbol>
@@ -61,7 +63,7 @@
     <section class="reader" id="reader">
       <div id="pane-thread">
       <header class="reader-top">
-        <button class="back" type="button" id="back-audit" hidden>回到审计</button>
+        <button class="back text-btn" type="button" id="back-audit" hidden><svg class="i" aria-hidden="true"><use href="#i-back"/></svg>回到审计</button>
         <h2 id="slip-title">还没选消息</h2>
         <small id="slip-meta"></small>
         <button class="shelve" type="button" id="shelve" hidden>先放下</button>
@@ -90,11 +92,23 @@
       </form>
       </div>
       <div class="pane" id="pane-apply" hidden>
-        <header class="reader-top"><h2>申请</h2></header>
+        <header class="page-head">
+          <div class="page-title-row">
+            <h2>申请</h2>
+            <span class="page-count" id="apply-lead">0 份在等</span>
+          </div>
+          <p class="page-sub">有人想进这笼。先看人，再看型号。</p>
+        </header>
         <div class="papers" id="applications"></div>
       </div>
       <div class="pane" id="pane-audit" hidden>
-        <header class="reader-top"><h2>审计</h2></header>
+        <header class="page-head">
+          <div class="page-title-row">
+            <h2>审计</h2>
+            <span class="page-count" id="audit-lead">0 条对话</span>
+          </div>
+          <p class="page-sub">别的型号和它们聊过的话。点一个型号，只看它。</p>
+        </header>
         <div class="papers" id="audit"></div>
       </div>
     </section>
@@ -119,7 +133,7 @@
       <canvas id="sketch-pad"></canvas>
       <p class="sketch-err" id="sketch-err"></p>
       <footer>
-        <button type="button" id="sketch-cancel">取消</button>
+        <button class="text-btn" type="button" id="sketch-cancel">取消</button>
         <button type="button" class="primary" id="sketch-ok">放进回复</button>
       </footer>
     </div>

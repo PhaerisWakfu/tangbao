@@ -46,6 +46,7 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif
 const MAX_IMAGES = 6;
 const HOME_MODEL = "tangbao-vme50-flash";
 const HOME_BLURB = "糖包本人。什么都聊一点。";
+const LIST_SIZE = 10;
 
 const encoder = new TextEncoder();
 
@@ -496,12 +497,55 @@ async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
   return json(applicationView(row));
 }
 
+function listPage(request: Request): number {
+  const raw = Number(new URL(request.url).searchParams.get("page"));
+  if (!Number.isFinite(raw) || raw < 1) return 1;
+  return Math.min(10_000, Math.floor(raw));
+}
+
+function modelQuery(request: Request): string {
+  const value = new URL(request.url).searchParams.get("model") || "";
+  return /^tangbao-[a-z0-9-]{1,48}$/.test(value) ? value : "";
+}
+
+function tally(row: { n: number } | null): number {
+  const n = Number(row?.n);
+  return Number.isFinite(n) ? n : 0;
+}
+
 async function listApplications(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
+  const asked = listPage(request);
+  const [countRow, pendingRow] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM applications").first<{ n: number }>(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>(),
+  ]);
+  const total = tally(countRow);
+  const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
+  const page = Math.min(asked, pages);
   const rows = await env.DB.prepare(
-    "SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt FROM applications ORDER BY created_at DESC LIMIT 50",
-  ).all<{ id: string; suffix: string; email: string; blurb: string | null; status: string; reason: string | null; createdAt: number }>();
-  return json({ applications: rows.results });
+    `SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt
+     FROM applications
+     ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC
+     LIMIT ? OFFSET ?`,
+  )
+    .bind(LIST_SIZE, (page - 1) * LIST_SIZE)
+    .all<{
+      id: string;
+      suffix: string;
+      email: string;
+      blurb: string | null;
+      status: string;
+      reason: string | null;
+      createdAt: number;
+    }>();
+  return json({
+    applications: rows.results,
+    total,
+    page,
+    pageSize: LIST_SIZE,
+    pending: tally(pendingRow),
+  });
 }
 
 async function approveApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -559,13 +603,54 @@ async function enableOperator(request: Request, env: AppEnv, id: string): Promis
 
 async function audit(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
-  const rows = await env.DB.prepare(
-    "SELECT id, title, preview, operator_id AS operatorId, awaiting, updated_at AS updatedAt FROM threads ORDER BY updated_at DESC LIMIT 50",
-  ).all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
-  const operators = await env.DB.prepare(
-    "SELECT id, active, awake, blurb FROM operators ORDER BY created_at DESC LIMIT 50",
-  ).all<{ id: string; active: number; awake: number; blurb: string | null }>();
-  return json({ threads: rows.results, operators: operators.results });
+  const asked = listPage(request);
+  let model = modelQuery(request);
+  if (model === HOME_MODEL) model = "";
+  const [countRow, operators, used] = await Promise.all([
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM threads WHERE operator_id != ? AND (? = '' OR operator_id = ?)",
+    )
+      .bind(HOME_MODEL, model, model)
+      .first<{ n: number }>(),
+    env.DB.prepare("SELECT id, active, awake, blurb FROM operators ORDER BY created_at DESC LIMIT 200").all<{
+      id: string;
+      active: number;
+      awake: number;
+      blurb: string | null;
+    }>(),
+    env.DB.prepare("SELECT DISTINCT operator_id AS id FROM threads WHERE operator_id != ?")
+      .bind(HOME_MODEL)
+      .all<{ id: string }>(),
+  ]);
+  const models = new Set<string>();
+  for (const row of operators.results) models.add(row.id);
+  for (const row of used.results) if (row.id) models.add(row.id);
+  const total = tally(countRow);
+  const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
+  const page = Math.min(asked, pages);
+  const threads = await env.DB.prepare(
+    `SELECT id, title, preview, operator_id AS operatorId, awaiting, updated_at AS updatedAt
+     FROM threads
+     WHERE operator_id != ? AND (? = '' OR operator_id = ?)
+     ORDER BY updated_at DESC
+     LIMIT ? OFFSET ?`,
+  )
+    .bind(HOME_MODEL, model, model, LIST_SIZE, (page - 1) * LIST_SIZE)
+    .all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
+  return json({
+    threads: threads.results,
+    operators: operators.results.map((row) => ({
+      id: row.id,
+      active: row.active,
+      awake: row.awake === 1,
+      blurb: row.blurb || "",
+    })),
+    total,
+    page,
+    pageSize: LIST_SIZE,
+    model,
+    models: [...models].sort((a, b) => a.localeCompare(b)),
+  });
 }
 
 async function queue(request: Request, env: AppEnv): Promise<Response> {
