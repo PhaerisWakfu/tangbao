@@ -523,12 +523,21 @@ function applicationCard(item) {
   }
   body.append(meta);
 
-  if (item.status === "rejected" && item.reason) {
+  if (item.status === "rejected") {
+    const reason = String(item.reason || "").trim();
     const why = document.createElement("p");
-    why.className = "why";
+    why.className = reason ? "why" : "why empty";
     const label = document.createElement("b");
     label.textContent = "没过的理由";
-    why.append(label, document.createTextNode(item.reason));
+    why.append(label);
+    if (reason) {
+      why.append(document.createTextNode(reason));
+    } else {
+      const none = document.createElement("span");
+      none.className = "why-none";
+      none.textContent = "当时没写理由。";
+      why.append(none);
+    }
     body.append(why);
   }
 

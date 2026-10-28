@@ -64,9 +64,19 @@ body[data-presence="asleep"] {
   color: var(--muted);
 }
 #pane-apply .papers,
-#pane-audit .papers { padding-top: 18px; }
-#pane-apply #applications { width: min(72rem, 100%); }
-#pane-audit #audit { width: min(72rem, 100%); }
+#pane-audit .papers {
+  width: min(72rem, 100%);
+  margin: 0 auto;
+  padding-top: 18px;
+}
+#pane-apply #applications {
+  width: min(72rem, 100%);
+  margin: 0 auto;
+}
+#pane-audit #audit {
+  width: min(72rem, 100%);
+  margin: 0 auto;
+}
 
 /* ---------- applications: one slip at a time ---------- */
 
@@ -183,6 +193,7 @@ body[data-presence="asleep"] {
   letter-spacing: 0.12em;
   color: var(--faint);
 }
+#pane-apply .paper .why.empty { color: var(--muted); }
 #pane-apply .paper .once {
   grid-column: 1 / -1;
   margin: 14px 0 0;
@@ -678,14 +689,16 @@ body[data-presence="asleep"] {
 }
 
 @media (min-width: 1180px) {
-  #applications .sheet {
+  #pane-apply .paper .body {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
+    column-gap: 24px;
     align-content: start;
-    gap: 12px;
   }
-  #applications .sheet > .paper { margin: 0; }
-  #applications .sheet > .quiet { grid-column: 1 / -1; }
+  #pane-apply .paper .head { grid-column: 1; grid-row: 1; align-self: start; }
+  #pane-apply .paper .blurb { grid-column: 2; grid-row: 1; margin: 0; align-self: start; }
+  #pane-apply .paper .mail { grid-column: 2; grid-row: 2; margin: 8px 0 0; }
+  #pane-apply .paper .why { grid-column: 1 / -1; grid-row: 3; }
   #pane-audit #audit {
     grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
     gap: 0;
