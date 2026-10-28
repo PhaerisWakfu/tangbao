@@ -46,7 +46,7 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title">关于模型</span>
-        <span class="status" id="status"><i></i><span id="status-label">在线</span><em id="status-note">他在</em></span>
+        <span class="status" id="status"><i></i><span id="status-label">在线</span></span>
       </header>
 
       <section class="stage">
@@ -145,7 +145,6 @@
           localStorage.setItem("tangbao.presence", body.dataset.presence);
         } catch {}
         document.getElementById("status-label").textContent = status.label;
-        document.getElementById("status-note").textContent = status.note;
       })
       .catch(() => {})
       .finally(() => requestAnimationFrame(() => body.classList.add("settled")));

@@ -150,8 +150,7 @@ function applyStatus(next) {
   } catch {}
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
   $("#status-label").textContent = next.label;
-  $("#status-note").textContent = next.note;
-  $("#status").title = present ? "他在，消息会被看到" : "他不在，消息会留到他回来";
+  $("#status").title = next.label;
   tickPending();
 }
 
@@ -167,7 +166,7 @@ function statusFromState(state) {
 
 function statusFromModel(model) {
   if (!model) {
-    return { state: "available", label: "自动匹配", note: "在线模型优先", awake: true, online: true, status: "online" };
+    return { state: "available", label: "Auto", note: "", awake: true, online: true, status: "online" };
   }
   return statusFromState(model.status || (model.online ? "online" : "away"));
 }
@@ -834,7 +833,7 @@ function activeModel() {
 
 function paintModels() {
   const id = activeModel();
-  $("#model-name").textContent = id || "自动匹配";
+  $("#model-name").textContent = id || "Auto";
   const list = $("#model-list");
   list.replaceChildren();
 
@@ -843,7 +842,7 @@ function paintModels() {
   auto.className = "model-row";
   auto.setAttribute("aria-pressed", String(!id));
   auto.innerHTML =
-    '<i data-on="1"></i><span class="who"><b>自动匹配</b><small>按在线状态挑一个</small></span><small class="model-state">自动</small>';
+    '<i data-on="1"></i><span class="who"><b>Auto</b><small>自动匹配</small></span>';
   if (!id) auto.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
   auto.addEventListener("click", () => {
     if (current) return;

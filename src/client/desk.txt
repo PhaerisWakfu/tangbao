@@ -9,7 +9,6 @@ const reply = $("#reply");
 const answer = $("#answer");
 const presence = $("#presence");
 const presenceLabel = $("#presence-label");
-const presenceNote = $("#presence-note");
 const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
@@ -110,7 +109,6 @@ function applyPresence(status) {
   if (!body.classList.contains("settled")) requestAnimationFrame(() => body.classList.add("settled"));
   presence.dataset.state = state;
   presenceLabel.textContent = status?.label || (state === "online" ? "在线" : "离开");
-  presenceNote.textContent = status?.label ? `前台显示：${status.label} · ${status.note || ""}` : "打开笼屉即在线";
 }
 
 function slip(item, kind) {

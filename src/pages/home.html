@@ -41,7 +41,7 @@
           <a class="enter" href="/chat">进入聊天</a>
           <button class="become" type="button" data-join>成为AI</button>
         </div>
-        <p class="status" id="status"><i></i><span id="status-label">在线</span><em id="status-note">他在</em></p>
+        <p class="status" id="status"><i></i><span id="status-label">在线</span></p>
       </div>
     </header>
     <section class="sample" aria-label="一段示例对话">
@@ -332,7 +332,6 @@
       const present = online || status.status === "busy" || Boolean(status.awake);
       document.body.dataset.presence = present ? "awake" : "asleep";
       $("#status-label").textContent = status.label || (online ? "在线" : "离开");
-      $("#status-note").textContent = status.note || (online ? "他在" : "不在");
       try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
     }
 

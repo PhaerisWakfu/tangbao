@@ -331,7 +331,6 @@ body[data-state="empty"] .title { visibility: hidden; }
   background: var(--dot);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent);
 }
-.status em { font-style: normal; font-size: 11.5px; color: var(--faint); }
 .join {
   margin-left: auto;
   display: inline-flex;
