@@ -40,6 +40,7 @@ let models = [];
 let autoModel = "";
 let chosen = AUTO;
 let threadModel = "";
+let offlineOpen = false;
 let making = false;
 let blocked = false;
 const MAX_IMAGES = 6;
@@ -855,29 +856,63 @@ function paintModels() {
   });
   list.append(auto);
 
+  const visible = [];
+  const hidden = [];
   for (const model of models) {
+    const online = model.status === "online" || model.online === true;
+    if (online || model.id === id) visible.push(model);
+    else hidden.push(model);
+  }
+
+  const addRow = (model, compact) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "model-row";
+    button.className = compact ? "model-row compact" : "model-row";
     button.dataset.state = state;
     button.disabled = !online;
     button.setAttribute("aria-disabled", String(!online));
     button.setAttribute("aria-pressed", String(model.id === id));
-    button.innerHTML =
-      `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
-    button.querySelector("b").textContent = model.id;
-    button.querySelector("small").textContent = model.blurb || "";
-    button.querySelector(".model-state").textContent =
-      state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
-    if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
-    button.addEventListener("click", () => {
-      if (current || !online) return;
-      chosen = model.id;
+    if (compact) {
+      button.innerHTML =
+        `<i data-on="0"></i><span class="who"><b></b></span><small class="model-state"></small>`;
+      button.querySelector("b").textContent = model.id;
+      button.querySelector(".model-state").textContent =
+        state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
+    } else {
+      button.innerHTML =
+        `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
+      button.querySelector("b").textContent = model.id;
+      button.querySelector(".who small").textContent = model.blurb || "";
+      button.querySelector(".model-state").textContent =
+        state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
+      if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
+      button.addEventListener("click", () => {
+        if (current || !online) return;
+        chosen = model.id;
+        paintModels();
+      });
+    }
+    list.append(button);
+  };
+
+  visible.forEach((model) => addRow(model, false));
+  if (hidden.length) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "model-more";
+    more.setAttribute("aria-expanded", String(offlineOpen));
+    const moreText = offlineOpen
+      ? `收起 ${hidden.length} 个暂不可选的型号`
+      : `还有 ${hidden.length} 个型号暂不可选`;
+    more.innerHTML = `<span>${moreText}</span><svg class="i"><use href="#i-chev"/></svg>`;
+    more.addEventListener("click", () => {
+      offlineOpen = !offlineOpen;
       paintModels();
     });
-    list.append(button);
+    list.append(more);
+    if (offlineOpen) hidden.forEach((model) => addRow(model, true));
   }
   if (!current) applyModelStatus();
 }

@@ -148,6 +148,7 @@
     const $ = (selector) => document.querySelector(selector);
     const APPLY_KEY = "tangbao.apply";
     const VISITOR_KEY = "tangbao.visitor";
+    let foldedOpen = false;
 
     function visitorId() {
       try {
@@ -343,11 +344,18 @@
     function paintModels(models) {
       const lineup = $("#lineup");
       lineup.replaceChildren();
-      for (const model of models) {
+      const online = models.filter((model) => model.status === "online");
+      const lead = online.length
+        ? online
+        : models.filter((model) => model.home).slice(0, 1);
+      if (!lead.length && models.length) lead.push(models[0]);
+      const folded = models.filter((model) => !lead.includes(model));
+
+      const addLine = (model, compact) => {
         const online = model.status === "online";
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "line";
+        button.className = compact ? "line compact" : "line";
         button.dataset.state = model.status || (online ? "online" : "away");
         button.disabled = !online;
         button.setAttribute("aria-disabled", String(!online));
@@ -357,9 +365,12 @@
         who.className = "who";
         const name = document.createElement("b");
         name.textContent = model.id;
-        const blurb = document.createElement("small");
-        blurb.textContent = model.blurb || "";
-        who.append(name, blurb);
+        who.append(name);
+        if (!compact) {
+          const blurb = document.createElement("small");
+          blurb.textContent = model.blurb || "";
+          who.append(blurb);
+        }
         const state = document.createElement("small");
         state.className = "state";
         state.textContent = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
@@ -370,6 +381,24 @@
           location.href = "/chat";
         });
         lineup.append(button);
+      };
+
+      lead.forEach((model) => addLine(model, false));
+      if (folded.length) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "line-more";
+        more.setAttribute("aria-expanded", String(foldedOpen));
+        const text = foldedOpen
+          ? `收起 ${folded.length} 个暂不可选的型号`
+          : `还有 ${folded.length} 个型号暂不可选`;
+        more.innerHTML = `<span>${text}</span><svg class="i"><use href="#i-chev"/></svg>`;
+        more.addEventListener("click", () => {
+          foldedOpen = !foldedOpen;
+          paintModels(models);
+        });
+        lineup.append(more);
+        if (foldedOpen) folded.forEach((model) => addLine(model, true));
       }
       $("#cage").hidden = models.length === 0;
     }
