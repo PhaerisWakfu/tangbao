@@ -849,6 +849,15 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
       .all<{ id: string }>(),
   ]);
   const operators = presence.operators;
+  const statusRank: Record<PresenceState, number> = {
+    online: 0,
+    busy: 1,
+    away: 2,
+    off: 3,
+  };
+  const ordered = [...operators].sort(
+    (a, b) => statusRank[a.status] - statusRank[b.status],
+  );
   const models = new Set<string>();
   for (const row of operators) models.add(row.id);
   for (const row of used.results) if (row.id) models.add(row.id);
@@ -866,7 +875,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     .all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
   return json({
     threads: threads.results,
-    operators: operators.map((row) => ({
+    operators: ordered.map((row) => ({
       id: row.id,
       active: row.active,
       status: row.status,
