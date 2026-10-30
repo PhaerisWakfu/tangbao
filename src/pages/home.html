@@ -327,6 +327,10 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !$("#apply").hidden) $("#apply").hidden = true;
     });
+    if (new URLSearchParams(location.search).get("apply") === "1") {
+      history.replaceState(null, "", location.pathname);
+      void openApply();
+    }
 
     function setPresence(status) {
       const online = status.status === "online";
