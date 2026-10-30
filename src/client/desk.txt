@@ -225,6 +225,7 @@ function renderThread(data) {
         text.className = "md";
         text.innerHTML = renderMarkdown(message.body);
         wrap.append(text);
+        if (typeof typesetMath === "function") typesetMath(text);
       } else {
         const text = document.createElement("p");
         text.textContent = message.body;

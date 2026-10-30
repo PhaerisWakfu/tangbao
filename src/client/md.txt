@@ -41,6 +41,26 @@ function renderMarkdown(source) {
       blocks.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
       continue;
     }
+    if (/^\s*\$\$/.test(line)) {
+      const block = line.trim();
+      if (block.slice(2).includes("$$")) {
+        blocks.push(`<div class="math-block">${escapeHtml(block)}</div>`);
+        index += 1;
+        continue;
+      }
+      const math = [block];
+      index += 1;
+      while (index < lines.length && !lines[index].includes("$$")) {
+        math.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        math.push(lines[index].trim());
+        index += 1;
+      }
+      blocks.push(`<div class="math-block">${escapeHtml(math.join("\n"))}</div>`);
+      continue;
+    }
     if (isTableStart(lines, index)) {
       const head = splitRow(lines[index]);
       index += 2;
@@ -78,13 +98,15 @@ function renderMarkdown(source) {
     }
     if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
       const ordered = /^\s*\d+\.\s+/.test(line);
+      const firstNumber = Number((/^\s*(\d+)\./.exec(line) || [])[1] || 1);
       const items = [];
       while (index < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[index])) {
         items.push(lines[index].replace(/^\s*([-*+]|\d+\.)\s+/, ""));
         index += 1;
       }
       const tag = ordered ? "ol" : "ul";
-      blocks.push(`<${tag}>${items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join("")}</${tag}>`);
+      const start = ordered && firstNumber !== 1 ? ` start="${firstNumber}"` : "";
+      blocks.push(`<${tag}${start}>${items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join("")}</${tag}>`);
       continue;
     }
     if (!line.trim()) {
@@ -100,4 +122,25 @@ function renderMarkdown(source) {
     blocks.push(`<p>${inlineMarkdown(para.join("\n"))}</p>`);
   }
   return blocks.join("");
+}
+
+function typesetMath(root) {
+  if (!root || typeof renderMathInElement !== "function") return;
+  try {
+    renderMathInElement(root, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+      ],
+      throwOnError: false,
+      trust: false,
+      strict: "ignore",
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+      ignoredClasses: ["katex"],
+    });
+  } catch {
+    // Keep the original text if KaTeX cannot parse it.
+  }
 }

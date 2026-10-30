@@ -219,6 +219,7 @@ function botRow(message, askedAt) {
     text.classList.add("md");
     text.innerHTML = typeof renderMarkdown === "function" ? renderMarkdown(message.body) : "";
     if (typeof renderMarkdown !== "function") text.textContent = message.body;
+    if (typeof typesetMath === "function") typesetMath(text);
   } else text.remove();
   appendShot(row.querySelector(".b-body"), message);
   const files = shotFiles(message);
