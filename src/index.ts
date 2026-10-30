@@ -1,4 +1,6 @@
 import aboutHtml from "./pages/about.html";
+import aboutSiteHtml from "./pages/about-site.html";
+import privacyHtml from "./pages/privacy.html";
 import { maskAbuse } from "./abuse";
 import { sendWebPush } from "./push";
 import appJs from "./client/app.txt";
@@ -169,9 +171,13 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
         ? indexHtml
         : path === "/about" || path === "/about.html"
           ? aboutHtml
-          : path === "/desk" || path === "/desk.html"
-            ? deskHtml
-            : null;
+          : path === "/about-site" || path === "/about-site.html"
+            ? aboutSiteHtml
+            : path === "/privacy" || path === "/privacy.html"
+              ? privacyHtml
+              : path === "/desk" || path === "/desk.html"
+                ? deskHtml
+                : null;
   if (page && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : page, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },

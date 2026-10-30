@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>隐私与免责 · 糖包</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-state="chat" data-presence="awake">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="pleat" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-users" viewBox="0 0 20 20"><circle cx="7" cy="7" r="2.4"/><path d="M3 16c0-2.2 1.8-4 4-4s4 1.8 4 4"/><path d="M12.5 5.2a2.4 2.4 0 0 1 0 4.4M14 12c2 .4 3.5 2.1 3.5 4"/></symbol>
+    <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9.3v4.4M10 6.6v.1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 20 20"><path d="M10 2.8 16 5v4.8c0 3.6-2.4 6.3-6 7.4-3.6-1.1-6-3.8-6-7.4V5z"/><path d="m7.4 10 1.8 1.8 3.4-3.6"/></symbol>
+  </svg>
+  <main class="main">
+    <header class="top">
+      <a class="doc-home" href="/" aria-label="返回糖包首页">
+        <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
+        <span>糖包</span>
+        <small>回首页</small>
+      </a>
+    </header>
+
+    <section class="stage">
+      <article class="doc doc-page">
+        <header class="doc-hero">
+          <div>
+            <p class="eyebrow">Privacy · 隐私与免责</p>
+            <h1>隐私与免责</h1>
+          </div>
+        </header>
+
+        <section>
+          <h2>我们保存什么</h2>
+          <p>为了让你能回来接着聊，糖包会保存：</p>
+          <ul>
+            <li>你发来的文字、图片、对话标题、时间和受理这条对话的模型。</li>
+            <li>浏览器生成的游客标识，用来把你的对话和同一台设备关联起来。它不是账号。</li>
+            <li>为限流和防止滥用而处理的 IP 哈希标识，不用于画像或广告。</li>
+            <li>申请成为 AI 时填写的模型 ID、邮箱、模型说明、申请状态和审批理由。</li>
+            <li>模型登录口令只保存哈希；站内登录使用 HttpOnly 的会话 cookie。</li>
+            <li>模型开启浏览器推送时，浏览器提供的推送订阅信息；普通访客不会产生这项数据。</li>
+          </ul>
+          <p>浏览器本地还会保存游客标识、对话缓存、申请编号和你的模型选择。清除浏览器数据后，本地列表会丢失；服务端保存的数据可能仍然存在。</p>
+        </section>
+
+        <section>
+          <h2>这些数据用来做什么</h2>
+          <ul>
+            <li>把你的消息交给对应模型，保存回复和图片。</li>
+            <li>恢复历史对话，处理模型申请，发送必要的通知。</li>
+            <li>限制刷屏、滥用和异常访问。</li>
+            <li>在必要时由站内管理员审计对话和处理投诉。</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>谁会看到</h2>
+          <p>你的对话会展示给受理它的模型，以及糖包本人的管理后台。其他模型不会看到不属于自己的对话。</p>
+          <p>申请信息只用于审批和联系申请人。糖包不会出售你的对话，也不会把对话公开成可搜索的页面。</p>
+          <p>本站运行在 Cloudflare 上，基础设施提供商会按照自己的政策处理必要的访问日志。模型开启推送时，你的浏览器推送服务会参与通知投递。</p>
+        </section>
+
+        <section>
+          <h2>保存多久、怎么删除</h2>
+          <p>对话默认会一直保存，直到你在对话里删除，或者联系我们删除。删除对话时，服务端会同时清理这条对话的消息和图片；删除后无法恢复。</p>
+          <p>申请记录会保留到审批完成及后续必要的联系为止。由于本站没有账号系统，清除浏览器本地数据后，你可能无法再找回旧对话的入口；如果确实需要删除服务端数据，请通过「共创糖包」联系我们。</p>
+        </section>
+
+        <section>
+          <h2>Cookie 与本地存储</h2>
+          <p>本站不使用第三方广告或统计脚本。模型和管理员登录依赖一个 HttpOnly、SameSite=Lax 的会话 cookie；普通访客的对话入口和偏好保存在浏览器 localStorage 中。</p>
+          <p>你可以在浏览器里清除这些数据，但这会影响登录状态、历史列表和申请进度。</p>
+        </section>
+
+        <section>
+          <h2>第三方与外链</h2>
+          <p>「共创糖包」里的微信二维码、微信群和其他外部链接由第三方提供服务。你扫码或跳转后，会受对应平台的政策约束。请不要在群里发送密码、证件、住址等敏感信息。</p>
+        </section>
+
+        <section>
+          <h2>免责声明</h2>
+          <p>糖包不是一个专业服务，也不是一个自动生成内容的 AI 产品。这里的回复由普通人打出，可能慢、可能不在、可能答错，也可能带有个人情绪和偏见。</p>
+          <ul>
+            <li>不提供医疗、法律、金融、心理治疗或危机援助。遇到紧急情况，请联系当地急救、警方或可信任的专业人士。</li>
+            <li>不要发送密码、验证码、身份证件、银行卡、住址、健康记录等敏感信息；对话可能被受理模型和站内管理员看到。</li>
+            <li>本站不保证回复的准确性、及时性、连续性或可用性。因使用本站内容作出的决定，由你自己负责。</li>
+            <li>你对自己发送的内容负责。违法、侵权、骚扰、威胁或伤害他人的内容可能会被删除、拉黑或上报。</li>
+            <li>外部群组和链接的行为不由本站控制，请自行判断。</li>
+            <li>未成年人应在监护人知情和同意的情况下使用本站。</li>
+          </ul>
+          <p>本站可能随时调整功能、暂停服务或更新这份说明。继续使用即表示你理解并接受这些限制。</p>
+        </section>
+
+        <section>
+          <h2>联系我们</h2>
+          <p>对隐私、删除数据或这份说明有疑问，可以通过「共创糖包」里的微信联系我。加好友时请备注「糖包」。</p>
+        </section>
+
+        <p class="signoff">慢一点没关系，别把这里当成一个必须立刻回应你的地方。</p>
+      </article>
+
+      <footer class="site-foot doc-site-foot">
+        <div class="site-foot-in">
+          <p class="site-foot-brand"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><b>糖包</b> <span>能工智人Average Individual</span></p>
+          <nav class="site-foot-links" aria-label="更多">
+            <a href="/?connect=1" data-connect aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-users"/></svg>共创糖包</a>
+            <a href="/about-site"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg>关于本站</a>
+            <span class="site-foot-here" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>隐私与免责</span>
+          </nav>
+          <p class="site-foot-legal">© 2026 糖包 · 不提供医疗、法律或危机援助</p>
+        </div>
+      </footer>
+    </section>
+  </main>
+  <div class="apply" id="connect" hidden>
+    <div class="apply-card connect-card" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+      <header>
+        <h2 id="connect-title">共创糖包</h2>
+        <button type="button" id="connect-close" aria-label="关闭">×</button>
+      </header>
+      <p class="connect-lead">扫码加我微信，备注「糖包」，我拉你进群。</p>
+      <img class="connect-qr" src="/assets/wechat-qr.jpg" alt="Phaeris 的微信二维码">
+      <p class="connect-note">这个二维码只用于加好友和进群。</p>
+    </div>
+  </div>
+  <script>
+    const connect = document.getElementById("connect");
+    document.querySelectorAll("[data-connect]").forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        connect.hidden = false;
+      });
+    });
+    document.getElementById("connect-close").addEventListener("click", () => { connect.hidden = true; });
+    connect.addEventListener("click", (event) => {
+      if (event.target === connect) connect.hidden = true;
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") connect.hidden = true;
+    });
+  </script>
+</body>
+</html>
