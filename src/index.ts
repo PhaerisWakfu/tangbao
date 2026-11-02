@@ -811,7 +811,7 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
   const { home, operators } = await loadPresence(env);
   if (requested) {
     const explicit = operators.find((row) => row.id === requested);
-    if (explicit && explicit.active === 1 && explicit.status === "online") {
+    if (explicit && explicit.active === 1) {
       return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }

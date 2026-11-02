@@ -1,7 +1,7 @@
 const STORE_KEY = "tangbao.v1";
 const VISITOR_KEY = "tangbao.visitor";
 const BLOCKED = "这边不再收新的话了。";
-const POLL_MS = 30000;
+const POLL_MS = 60000;
 const WAIT = {
   awake: "他在看这句，不是在生成。",
   asleep: "他不在，这句会留到他回来。",
@@ -460,7 +460,7 @@ async function refresh() {
 function arm() {
   clearTimeout(timer);
   if (document.hidden) return;
-  const wait = current && validId(current.id) && openAwaiting ? 8000 : POLL_MS;
+  const wait = current && validId(current.id) && openAwaiting ? 30000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);
@@ -1071,7 +1071,7 @@ function paintModels() {
 }
 
 async function loadModels(pick) {
-  if (!pick && Date.now() - modelsAt < 15000) return;
+  if (!pick && Date.now() - modelsAt < 60000) return;
   try {
     const data = await api("/api/models");
     models = data.models || [];
@@ -1091,7 +1091,7 @@ async function loadModels(pick) {
   }
   if (!current && chosen) {
     const selected = models.find((item) => item.id === chosen);
-    if (!selected || selected.status !== "online") chosen = AUTO;
+    if (!selected) chosen = AUTO;
   }
   paintModels();
 }
