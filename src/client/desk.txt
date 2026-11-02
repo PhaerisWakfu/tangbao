@@ -272,6 +272,7 @@ function showPane(name, nav) {
   $("#pane-thread").hidden = name !== "thread";
   $("#pane-apply").hidden = name !== "apply";
   $("#pane-audit").hidden = name !== "audit";
+  $("#pane-pool").hidden = name !== "pool";
   const current = nav || name;
   for (const button of $("#desk-nav").querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(button.dataset.view === current));
@@ -775,6 +776,50 @@ function auditLine(item) {
   return button;
 }
 
+async function loadPool() {
+  const lead = $("#pool-lead");
+  const list = $("#pool-list");
+  if (!lead || !list) return;
+  lead.textContent = "看看池子…";
+  try {
+    const data = await api("/api/admin/pool");
+    const count = Number(data.count) || 0;
+    lead.textContent = `${count} 条在等`;
+    list.replaceChildren();
+    const rows = data.threads || [];
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.className = "quiet";
+      empty.textContent = "池子是空的。";
+      list.append(empty);
+      return;
+    }
+    for (const item of rows) {
+      const row = document.createElement("div");
+      row.className = "pool-line";
+      const main = document.createElement("div");
+      main.className = "pool-main";
+      const title = document.createElement("b");
+      title.textContent = item.title || "新对话";
+      const preview = document.createElement("small");
+      preview.textContent = item.preview || "还没有预览";
+      main.append(title, preview);
+      const time = document.createElement("span");
+      time.className = "pool-time";
+      time.textContent = `等了 ${spent(Date.now() - Number(item.updatedAt || Date.now()))}`;
+      row.append(main, time);
+      list.append(row);
+    }
+  } catch (err) {
+    lead.textContent = "池子打不开";
+    list.replaceChildren();
+    const note = document.createElement("p");
+    note.className = "quiet";
+    note.textContent = err.message || "过一会儿再看。";
+    list.append(note);
+  }
+}
+
 async function loadAudit() {
   const token = ++auditToken;
   const params = new URLSearchParams({ page: String(auditPage) });
@@ -887,6 +932,7 @@ $("#desk-nav").addEventListener("click", (event) => {
   };
   if (next === "apply") void loadApplications().then(reveal, reveal);
   else if (next === "audit") void loadAudit().then(reveal, reveal);
+  else if (next === "pool") void loadPool().then(reveal, reveal);
   else reveal();
 });
 

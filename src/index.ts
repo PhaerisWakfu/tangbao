@@ -120,6 +120,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/logout" && method === "POST") return logout(request);
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
+  if (path === "/api/admin/pool" && method === "GET") return pool(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
@@ -277,7 +278,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
       .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY)
       .all<{ key: string; value: string }>(),
     env.DB.prepare(
-      "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND operator_id = ?",
+      "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ?",
     )
       .bind(HOME_MODEL)
       .first<{ n: number; oldest: number | null }>(),
@@ -312,7 +313,7 @@ async function loadPresence(env: AppEnv, now = Date.now()): Promise<{ home: Pres
        LEFT JOIN (
          SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
          FROM threads
-         WHERE awaiting = 1
+         WHERE awaiting = 1 AND queued = 0
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        ORDER BY o.created_at ASC`,
@@ -458,11 +459,13 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   const assignment = await assignOperator(env, incoming.operator);
   const operator = assignment.id;
+  const now = Date.now();
+  const queued = assignment.queued ? 1 : 0;
+  const autoHome = queued || (operator === HOME_MODEL && assignment.requested !== HOME_MODEL) ? 1 : 0;
   await assertQueue(env, false);
 
   const id = randomId(16);
   const token = randomId(32);
-  const now = Date.now();
   const shown = caption(incoming.body, incoming.images.length);
   const title = titleFrom(shown);
   const preview = previewFrom(incoming.draw ? `要一张图 · ${shown}` : shown);
@@ -470,8 +473,8 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash, operator_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-    ).bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator),
+      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash, operator_id, auto_home, queued) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+    ).bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued),
     env.DB.prepare(
       "INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, 'visitor', ?, ?, ?)",
     ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
@@ -486,6 +489,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     operator,
     requested: assignment.requested,
     fallback: assignment.fallback,
+    queued: Boolean(queued),
   });
 }
 
@@ -499,6 +503,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     title: thread.title,
     operator: thread.operator_id,
     awaiting: thread.awaiting === 1,
+    queued: thread.queued === 1,
     blocked: seen.blocked,
     messages,
     status,
@@ -622,7 +627,7 @@ function reasonOf(value: unknown): string {
   return text;
 }
 
-type Assignment = { id: string; requested: string; fallback: boolean };
+type Assignment = { id: string; requested: string; fallback: boolean; queued: boolean };
 
 function autoChoice(home: Presence, operators: Presence[]): Presence {
   const candidates = operators
@@ -639,13 +644,13 @@ function autoChoice(home: Presence, operators: Presence[]): Presence {
 async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
   const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
   if (requested === HOME_MODEL) {
-    return { id: HOME_MODEL, requested, fallback: false };
+    return { id: HOME_MODEL, requested, fallback: false, queued: false };
   }
   const { home, operators } = await loadPresence(env);
   if (requested) {
     const explicit = operators.find((row) => row.id === requested);
     if (explicit && explicit.active === 1 && explicit.status === "online") {
-      return { id: explicit.id, requested, fallback: false };
+      return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }
   const chosen = autoChoice(home, operators);
@@ -653,6 +658,7 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
     id: chosen.id,
     requested,
     fallback: Boolean(requested && requested !== chosen.id),
+    queued: chosen.id === HOME_MODEL,
   };
 }
 
@@ -891,14 +897,83 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   });
 }
 
+async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<number> {
+  if (operatorId === HOME_MODEL) return 0;
+  const target = await operatorPresence(env, operatorId);
+  if (!target.active || target.status !== "online" || target.pending >= PENDING_CAP) return 0;
+
+  let slots = PENDING_CAP - target.pending;
+  const candidates = await env.DB.prepare(
+    `SELECT t.id
+     FROM threads t
+     WHERE t.operator_id = ? AND t.awaiting = 1 AND t.auto_home = 1
+       AND NOT EXISTS (
+         SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.role = 'tangbao'
+       )
+     ORDER BY t.updated_at ASC
+     LIMIT ?`,
+  )
+    .bind(HOME_MODEL, slots)
+    .all<{ id: string }>();
+  if (!candidates.results.length) return 0;
+
+  const now = Date.now();
+  const freshAfter = now - ONLINE_TTL;
+  let moved = 0;
+  for (const row of candidates.results) {
+    if (slots <= 0) break;
+    const result = await env.DB.prepare(
+      `UPDATE threads
+       SET operator_id = ?, queued = 0
+       WHERE id = ? AND operator_id = ? AND awaiting = 1 AND auto_home = 1
+         AND NOT EXISTS (
+           SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao'
+         )
+         AND EXISTS (
+           SELECT 1 FROM operators o
+           WHERE o.id = ? AND o.active = 1 AND o.last_seen_at >= ?
+         )
+         AND (
+           SELECT COUNT(*) FROM threads t
+           WHERE t.operator_id = ? AND t.awaiting = 1
+         ) < ?`,
+    )
+      .bind(operatorId, row.id, HOME_MODEL, operatorId, freshAfter, operatorId, PENDING_CAP)
+      .run();
+    if (result.meta.changes !== 1) continue;
+    moved += 1;
+    slots -= 1;
+    await touchAssigned(env, operatorId, now);
+  }
+  return moved;
+}
+
+async function pool(request: Request, env: AppEnv): Promise<Response> {
+  await requireSuper(request, env);
+  const [countRow, rows] = await Promise.all([
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND queued = 1",
+    ).first<{ n: number }>(),
+    env.DB.prepare(
+      `SELECT id, title, preview, updated_at AS updatedAt
+       FROM threads
+       WHERE awaiting = 1 AND queued = 1
+       ORDER BY updated_at ASC
+       LIMIT 100`,
+    ).all<{ id: string; title: string; preview: string; updatedAt: number }>(),
+  ]);
+  return json({ count: tally(countRow), threads: rows.results });
+}
+
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
   const now = Date.now();
   await touchSeat(env, seat, now);
+  if (!seat.super) await migrateHomeBacklog(env, own);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND operator_id = ? ORDER BY updated_at ASC LIMIT 100",
+      "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? ORDER BY updated_at ASC LIMIT 100",
     )
       .bind(own)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
@@ -1226,7 +1301,7 @@ async function presenceHistory(env: AppEnv) {
 async function loadOwned(env: AppEnv, id: string, token: string) {
   if (!token) throw new HttpError(401, "这把钥匙对不上这段对话。");
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued FROM threads WHERE id = ?",
   )
     .bind(id)
     .first<{
@@ -1237,6 +1312,7 @@ async function loadOwned(env: AppEnv, id: string, token: string) {
       visitor_hash: string | null;
       ip_hash: string | null;
       operator_id: string;
+      queued: number;
     }>();
   const hash = await sha256(token);
   if (!thread || !safeEqual(hash, thread.token_hash)) {

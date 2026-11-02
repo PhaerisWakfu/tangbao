@@ -66,10 +66,46 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .pane { flex: 1; min-height: 0; overflow: auto; }
 .pane[hidden] { display: none; }
 #pane-apply,
-#pane-audit { display: flex; flex-direction: column; overflow: hidden; }
+#pane-audit,
+#pane-pool { display: flex; flex-direction: column; overflow: hidden; }
 #pane-apply[hidden],
-#pane-audit[hidden] { display: none; }
+#pane-audit[hidden],
+#pane-pool[hidden] { display: none; }
 .papers { padding: 0 24px 20px; }
+#pane-pool .pool-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+#pane-pool .pool-main { min-width: 0; flex: 1; }
+#pane-pool .pool-main b {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#pane-pool .pool-main small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#pane-pool .pool-time {
+  flex: none;
+  padding-top: 2px;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
 .papers h3 {
   margin: 2px 2px 10px;
   font-size: 12px;

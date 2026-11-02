@@ -51,6 +51,7 @@
         <button type="button" data-view="thread" aria-pressed="true">对话</button>
         <button type="button" data-view="apply">申请</button>
         <button type="button" data-view="audit">审计</button>
+        <button type="button" data-view="pool">消息池</button>
       </nav>
       <div class="presence" id="presence" aria-live="polite">
         <span class="presence-dot" aria-hidden="true"></span>
@@ -110,6 +111,16 @@
           <p class="page-sub">别的型号和它们聊过的话。点一个型号，只看它。</p>
         </header>
         <div class="papers" id="audit"></div>
+      </div>
+      <div class="pane" id="pane-pool" hidden>
+        <header class="page-head">
+          <div class="page-title-row">
+            <h2>消息池</h2>
+            <span class="page-count" id="pool-lead">0 条在等</span>
+          </div>
+          <p class="page-sub">还没有分给任何模型的消息。在线模型空出来时会自动接走。</p>
+        </header>
+        <div class="papers" id="pool-list"></div>
       </div>
     </section>
   </div>

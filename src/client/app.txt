@@ -382,6 +382,7 @@ function forget(id) {
   if (store.activeId === id) store.activeId = null;
   saveStore();
   current = null;
+  threadModel = "";
   painted = "";
   openAwaiting = true;
   paint([]);
@@ -395,7 +396,13 @@ async function refresh() {
   }
   try {
     const data = await api(`/api/threads/${current.id}`, { token: current.token });
-    if (data.operator) threadModel = data.operator;
+    if (data.operator) {
+      const previous = threadModel;
+      threadModel = data.operator;
+      if (previous && previous !== data.operator) {
+        showSys(`这个包子可能凉了，已为您换了一屉新的「${data.operator}」`);
+      }
+    }
     applyStatus(data.operatorStatus || data.status || statusFromModel(null));
     openAwaiting = data.awaiting !== false && data.awaiting !== 0;
     applyBlocked(Boolean(data.blocked));
@@ -662,7 +669,7 @@ async function sendText(text) {
     if (!validId(created.id) || !created.token) throw new ApiError("消息没送出去。糖包那边暂时没应。", 500);
     current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
     if (created.operator) threadModel = created.operator;
-    if (created.fallback && created.requested && created.operator) {
+    if (created.fallback && created.requested && created.operator && !created.queued) {
       showSys(`他刚走，这次由 ${created.operator} 接。`);
     }
   } else {
