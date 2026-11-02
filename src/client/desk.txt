@@ -189,7 +189,7 @@ function renderThread(data) {
   const shelve = $("#shelve");
   const block = $("#block");
   shelve.hidden = locked || Boolean(data.thread.blocked) || !data.thread.awaiting;
-  block.hidden = !seat.super;
+  block.hidden = !seat.super && !own;
   $("#back-audit").hidden = !readonly;
   reply.hidden = locked;
   if (!data.thread.awaiting) {

@@ -1312,26 +1312,42 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
 }
 
 async function blockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  await requireSuper(request, env);
+  const seat = await requireSeat(request, env);
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, visitor_hash, ip_hash FROM threads WHERE id = ?",
+    "SELECT id, token_hash, visitor_hash, ip_hash, operator_id FROM threads WHERE id = ?",
   )
     .bind(id)
-    .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
-  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+    .first<{
+      id: string;
+      token_hash: string;
+      visitor_hash: string | null;
+      ip_hash: string | null;
+      operator_id: string;
+    }>();
+  if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
+    throw new HttpError(404, "这屉不在笼里。");
+  }
   await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
   await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
   return json({ ok: true });
 }
 
 async function unblockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  await requireSuper(request, env);
+  const seat = await requireSeat(request, env);
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, visitor_hash, ip_hash FROM threads WHERE id = ?",
+    "SELECT id, token_hash, visitor_hash, ip_hash, operator_id FROM threads WHERE id = ?",
   )
     .bind(id)
-    .first<{ id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null }>();
-  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+    .first<{
+      id: string;
+      token_hash: string;
+      visitor_hash: string | null;
+      ip_hash: string | null;
+      operator_id: string;
+    }>();
+  if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
+    throw new HttpError(404, "这屉不在笼里。");
+  }
   await forgetBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
   return json({ ok: true });
 }
