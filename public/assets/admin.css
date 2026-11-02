@@ -561,10 +561,21 @@ body[data-presence="asleep"] {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   margin: 0;
   padding: 2px 0 10px;
   border-bottom: 1px solid var(--line);
+}
+#pane-audit .talks-head .audit-filter {
+  margin-left: auto;
+  padding: 0;
+  gap: 5px;
+}
+#pane-audit .talks-head .audit-filter button {
+  height: 27px;
+  padding: 0 11px;
+  font-size: 12px;
 }
 #pane-audit .talks-list { margin: 0; }
 #pane-audit .audit-line {
@@ -639,6 +650,26 @@ body[data-presence="asleep"] {
   vertical-align: middle;
 }
 #pane-audit .audit-line.waiting small { color: var(--accent); }
+#pane-audit .audit-line.reported {
+  border-bottom-color: #c15a36;
+  background: rgba(193, 90, 54, 0.1);
+  box-shadow: inset 3px 0 0 #c15a36;
+}
+#pane-audit .audit-line.reported:hover { background: rgba(193, 90, 54, 0.16); }
+#pane-audit .audit-line.reported small {
+  color: #a63e1d;
+  font-weight: 600;
+}
+#pane-audit .audit-line.reported .report {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #a63e1d;
+  font-size: 12px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pager {
   flex: none;
   display: flex;

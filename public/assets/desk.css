@@ -423,6 +423,45 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .audit-line .preview { margin-top: 3px; font-size: 13px; color: var(--muted); }
 .audit-line small { flex: none; font-size: 12px; color: var(--faint); }
 .audit-line.waiting small { color: var(--accent); }
+.audit-line.reported {
+  border-color: #c15a36;
+  background: rgba(193, 90, 54, 0.1);
+  box-shadow: inset 3px 0 0 #c15a36;
+}
+.audit-line.reported:hover { background: rgba(193, 90, 54, 0.15); }
+.audit-line.reported small { color: #a63e1d; font-weight: 600; }
+.audit-line .report {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #a94f2d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audit-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0;
+}
+.audit-filter button {
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.audit-filter button:hover { border-color: var(--line-2); color: var(--ink); }
+.audit-filter button[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--bg);
+}
 .pager {
   display: flex;
   align-items: center;

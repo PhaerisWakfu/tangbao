@@ -155,6 +155,22 @@ class TursoDatabase {
   }
 }
 
+let reportsSchemaReady = false;
+
+async function ensureReportSchema(env: AppEnv): Promise<void> {
+  if (reportsSchemaReady) return;
+  try {
+    await env.DB.prepare("ALTER TABLE threads ADD COLUMN reported_at INTEGER NOT NULL DEFAULT 0").run();
+  } catch {}
+  try {
+    await env.DB.prepare("ALTER TABLE threads ADD COLUMN report_reason TEXT").run();
+  } catch {}
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_threads_reported ON threads (reported_at)").run();
+  } catch {}
+  reportsSchemaReady = true;
+}
+
 let tursoCache: { url: string; token: string; client: Client } | null = null;
 
 function useTurso(env: AppEnv): AppEnv {
@@ -176,6 +192,7 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     try {
       const scoped = useTurso(env);
+      await ensureReportSchema(scoped);
       const url = new URL(request.url);
       const ttl = request.method === "GET" ? PUBLIC_CACHE_TTL[url.pathname] : 0;
       if (ttl) {
@@ -266,6 +283,9 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (block && method === "POST") return blockThread(request, env, block[1]);
   const unblock = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/unblock$/);
   if (unblock && method === "POST") return unblockThread(request, env, unblock[1]);
+
+  const report = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})\/report$/);
+  if (report && method === "POST") return reportThread(request, env, report[1]);
 
   const visitor = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})(\/messages)?$/);
   if (visitor) {
@@ -616,6 +636,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     operator: thread.operator_id,
     awaiting: thread.awaiting === 1,
     queued: thread.queued === 1,
+    reported: thread.reported_at > 0,
     blocked: seen.blocked,
     messages,
     status,
@@ -635,6 +656,35 @@ async function deleteThread(request: Request, env: AppEnv, id: string): Promise<
     env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(id),
   ]);
   await Promise.all(images.results.map((row) => env.IMAGES.delete(row.image_key)));
+  return json({ ok: true });
+}
+
+function reportReasonOf(value: unknown): string {
+  if (typeof value !== "string") throw new HttpError(400, "写一下举报原因。");
+  const text = sanitize(value);
+  if ([...text].length < 2) throw new HttpError(400, "写一下举报原因。");
+  if ([...text].length > 500) throw new HttpError(400, "举报原因太长了。");
+  return text;
+}
+
+async function reportThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const thread = await loadOwned(env, id, bearer(request));
+  const seen = await attachIdentity(env, thread, request);
+  if (seen.blocked) throw new HttpError(403, BLOCKED);
+  if (thread.queued === 1 || thread.operator_id === POOL_MODEL) {
+    throw new HttpError(400, "这条还没有模型接手。");
+  }
+  if (!(await allow(env, `report:${thread.token_hash}`, 3, HOUR))) {
+    throw new HttpError(429, "举报先歇一会儿。");
+  }
+  const payload = await readJson(request);
+  const reason = reportReasonOf(payload.reason);
+  const result = await env.DB.prepare(
+    "UPDATE threads SET reported_at = ?, report_reason = ? WHERE id = ? AND reported_at = 0",
+  )
+    .bind(Date.now(), reason, id)
+    .run();
+  if (result.meta.changes !== 1) return json({ ok: true, already: true });
   return json({ ok: true });
 }
 
@@ -989,19 +1039,36 @@ async function enableOperator(request: Request, env: AppEnv, id: string): Promis
   return json({ ok: true });
 }
 
+function auditState(request: Request): string {
+  const state = new URL(request.url).searchParams.get("state") || "";
+  return state === "waiting" || state === "replied" || state === "reported" ? state : "";
+}
+
 async function audit(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const asked = listPage(request);
   let model = modelQuery(request);
   if (model === HOME_MODEL) model = "";
+  const state = auditState(request);
+  const stateWhere =
+    state === "waiting"
+      ? " AND awaiting = 1"
+      : state === "replied"
+        ? " AND EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao')"
+        : state === "reported"
+          ? " AND reported_at > 0"
+          : "";
+  const visible = "((operator_id != ? AND queued = 0) OR reported_at > 0)";
   const [countRow, presence, used] = await Promise.all([
     env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM threads WHERE operator_id != ? AND queued = 0 AND (? = '' OR operator_id = ?)",
+      `SELECT COUNT(*) AS n FROM threads WHERE ${visible} AND (? = '' OR operator_id = ?)${stateWhere}`,
     )
       .bind(HOME_MODEL, model, model)
       .first<{ n: number }>(),
     loadPresence(env),
-    env.DB.prepare("SELECT DISTINCT operator_id AS id FROM threads WHERE operator_id != ? AND queued = 0")
+    env.DB.prepare(
+      `SELECT DISTINCT operator_id AS id FROM threads WHERE ${visible}`,
+    )
       .bind(HOME_MODEL)
       .all<{ id: string }>(),
   ]);
@@ -1022,14 +1089,27 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
   const page = Math.min(asked, pages);
   const threads = await env.DB.prepare(
-    `SELECT id, title, preview, operator_id AS operatorId, awaiting, updated_at AS updatedAt
+    `SELECT id, title, preview, operator_id AS operatorId, awaiting,
+            updated_at AS updatedAt, reported_at AS reportedAt,
+            report_reason AS reportReason,
+            EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao') AS replied
      FROM threads
-     WHERE operator_id != ? AND queued = 0 AND (? = '' OR operator_id = ?)
-     ORDER BY updated_at DESC
+     WHERE ${visible} AND (? = '' OR operator_id = ?)${stateWhere}
+     ORDER BY (reported_at > 0) DESC, updated_at DESC
      LIMIT ? OFFSET ?`,
   )
     .bind(HOME_MODEL, model, model, LIST_SIZE, (page - 1) * LIST_SIZE)
-    .all<{ id: string; title: string; preview: string; operatorId: string; awaiting: number; updatedAt: number }>();
+    .all<{
+      id: string;
+      title: string;
+      preview: string;
+      operatorId: string;
+      awaiting: number;
+      updatedAt: number;
+      reportedAt: number;
+      reportReason: string | null;
+      replied: number;
+    }>();
   return json({
     threads: threads.results,
     operators: ordered.map((row) => ({
@@ -1044,6 +1124,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     page,
     pageSize: LIST_SIZE,
     model,
+    state,
     models: [...models].sort((a, b) => a.localeCompare(b)),
   });
 }
@@ -1467,7 +1548,7 @@ async function presenceHistory(env: AppEnv) {
 async function loadOwned(env: AppEnv, id: string, token: string) {
   if (!token) throw new HttpError(401, "这把钥匙对不上这段对话。");
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at FROM threads WHERE id = ?",
   )
     .bind(id)
     .first<{
@@ -1479,6 +1560,7 @@ async function loadOwned(env: AppEnv, id: string, token: string) {
       ip_hash: string | null;
       operator_id: string;
       queued: number;
+      reported_at: number;
     }>();
   const hash = await sha256(token);
   if (!thread || !safeEqual(hash, thread.token_hash)) {

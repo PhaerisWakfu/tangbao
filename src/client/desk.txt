@@ -18,6 +18,7 @@ let pending = 0;
 let applyPage = 1;
 let auditPage = 1;
 let auditModel = "";
+let auditState = "";
 let applyToken = 0;
 let auditToken = 0;
 let applyStamp = "";
@@ -770,7 +771,10 @@ function operatorSeat(operator) {
 function auditLine(item) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = item.awaiting ? "audit-line waiting" : "audit-line";
+  const classes = ["audit-line"];
+  if (item.awaiting) classes.push("waiting");
+  if (item.reportedAt) classes.push("reported");
+  button.className = classes.join(" ");
   const main = document.createElement("span");
   main.className = "audit-main";
   const title = document.createElement("b");
@@ -788,8 +792,15 @@ function auditLine(item) {
   who.className = "who";
   who.textContent = item.operatorId;
   main.append(who);
+  if (item.reportedAt) {
+    const report = document.createElement("span");
+    report.className = "report";
+    report.textContent = `举报：${item.reportReason || "未写原因"}`;
+    main.append(report);
+  }
   const meta = document.createElement("small");
-  meta.textContent = item.awaiting ? `在等 · ${when(item.updatedAt)}` : when(item.updatedAt);
+  const state = item.reportedAt ? "举报" : item.awaiting ? "在等" : item.replied ? "已回" : "已处理";
+  meta.textContent = `${state} · ${when(item.updatedAt)}`;
   button.append(main, meta);
   button.addEventListener("click", () => {
     void openSlip(item.id, true);
@@ -841,14 +852,27 @@ async function loadPool() {
   }
 }
 
+$("#pane-audit").addEventListener("click", (event) => {
+  const button = event.target.closest("#audit-filter button[data-state]");
+  if (!button) return;
+  const next = button.dataset.state || "";
+  if (next === auditState) return;
+  auditState = next;
+  auditPage = 1;
+  auditStamp = "";
+  void loadAudit();
+});
+
 async function loadAudit() {
   const token = ++auditToken;
   const params = new URLSearchParams({ page: String(auditPage) });
   if (auditModel) params.set("model", auditModel);
+  if (auditState) params.set("state", auditState);
   const data = await api(`/api/admin/audit?${params}`);
   if (token !== auditToken) return;
   auditPage = Number(data.page) || 1;
   auditModel = data.model || "";
+  auditState = data.state || "";
   const total = Number(data.total) || 0;
   const operators = data.operators || [];
   if (auditModel && !operators.some((operator) => operator.id === auditModel)) {
@@ -921,8 +945,20 @@ async function loadAudit() {
   talks.textContent = "对话";
   const note = document.createElement("span");
   note.className = "talks-note";
-  note.textContent = auditModel ? "只看这个型号" : "最近更新";
-  talksHead.append(talks, note);
+  const stateLabel = { waiting: "在等", replied: "已回", reported: "举报" }[auditState];
+  note.textContent = stateLabel || (auditModel ? "只看这个型号" : "最近更新");
+  const filter = document.createElement("div");
+  filter.className = "audit-filter";
+  filter.id = "audit-filter";
+  for (const [value, label] of [["", "全部"], ["waiting", "在等"], ["replied", "已回"], ["reported", "举报"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.state = value;
+    button.setAttribute("aria-pressed", String(value === auditState));
+    button.textContent = label;
+    filter.append(button);
+  }
+  talksHead.append(talks, note, filter);
   const list = document.createElement("div");
   list.className = "talks-list";
   const threads = data.threads || [];

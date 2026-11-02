@@ -402,6 +402,7 @@ function forget(id) {
   current = null;
   threadModel = "";
   threadQueued = false;
+  updateReportEntry();
   painted = "";
   openAwaiting = true;
   paint([]);
@@ -431,13 +432,16 @@ async function refresh() {
     applyBlocked(Boolean(data.blocked));
     const previousOperator = current.operator;
     const previousQueued = Boolean(current.queued);
+    const previousReported = Boolean(current.reported);
     current.operator = data.operator || "";
     current.queued = Boolean(data.queued);
-    if (previousOperator !== current.operator || previousQueued !== current.queued || (data.title && data.title !== current.title)) {
+    current.reported = Boolean(data.reported);
+    if (previousOperator !== current.operator || previousQueued !== current.queued || previousReported !== current.reported || (data.title && data.title !== current.title)) {
       if (data.title) current.title = data.title;
       saveStore();
       renderHistory();
     }
+    updateReportEntry();
     paint(data.messages || []);
     paintModels();
   } catch (err) {
@@ -479,6 +483,7 @@ async function openThread(id) {
   current = found;
   threadModel = "";
   threadQueued = false;
+  updateReportEntry();
   store.activeId = id;
   saveStore();
   renderHistory();
@@ -495,10 +500,11 @@ async function openThread(id) {
   }
 }
 
-function newChat() {
+function newChat(pickModel) {
   current = null;
   threadModel = "";
   threadQueued = false;
+  updateReportEntry();
   store.activeId = null;
   saveStore();
   painted = "";
@@ -506,8 +512,14 @@ function newChat() {
   paint([]);
   renderHistory();
   closeSide();
+  closeCard();
   showSys(blocked ? BLOCKED : "");
-  void loadModels(true);
+  if (pickModel === undefined) {
+    void loadModels(true);
+  } else {
+    chosen = pickModel;
+    paintModels();
+  }
   if (!blocked) input.focus();
 }
 
@@ -703,6 +715,7 @@ async function sendText(text) {
       updatedAt: Date.now(),
       operator: created.operator || "",
       queued: Boolean(created.queued),
+      reported: false,
     };
     if (created.queued) {
       threadQueued = true;
@@ -771,6 +784,88 @@ document.addEventListener("keydown", (event) => {
   }
   closeCard();
   closeSide();
+});
+
+const reportOpen = $("#report-open");
+const reportModal = $("#report");
+const reportReason = $("#report-reason");
+const reportTarget = $("#report-target");
+const reportErr = $("#report-err");
+const reportSubmit = $("#report-submit");
+
+function canReport() {
+  return Boolean(
+    current &&
+      current.operator &&
+      current.operator !== "tangbao-pool" &&
+      !current.queued,
+  );
+}
+
+function updateReportEntry() {
+  if (!reportOpen) return;
+  reportOpen.hidden = !canReport();
+  reportOpen.textContent = current?.reported ? "已举报" : "举报模型";
+}
+
+function openReport() {
+  if (!canReport()) {
+    showSys("这条还没有模型接手。");
+    return;
+  }
+  if (current.reported) {
+    showSys("这条已经举报过了。");
+    return;
+  }
+  const label = current.operator === "tangbao-vme50-flash" ? "糖包本人" : current.operator;
+  reportTarget.textContent = `被举报：${label}`;
+  reportReason.value = "";
+  reportErr.textContent = "";
+  reportModal.hidden = false;
+  $("#report-close").focus();
+}
+
+function closeReport() {
+  reportModal.hidden = true;
+  updateReportEntry();
+}
+
+reportOpen?.addEventListener("click", openReport);
+$("#report-close")?.addEventListener("click", closeReport);
+reportModal?.addEventListener("click", (event) => {
+  if (event.target === reportModal) closeReport();
+});
+reportSubmit?.addEventListener("click", async () => {
+  if (!current || !canReport()) return;
+  const reason = reportReason.value.trim();
+  if ([...reason].length < 2) {
+    reportErr.textContent = "写一下举报原因。";
+    return;
+  }
+  reportSubmit.disabled = true;
+  reportErr.textContent = "";
+  try {
+    const data = await api(`/api/threads/${current.id}/report`, {
+      method: "POST",
+      token: current.token,
+      body: { reason },
+    });
+    current.reported = true;
+    saveStore();
+    closeReport();
+    showSys(data.already ? "这条已经举报过了。" : "举报已收到，感谢。");
+  } catch (err) {
+    reportErr.textContent = err.message;
+  } finally {
+    reportSubmit.disabled = false;
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && reportModal && !reportModal.hidden) {
+    closeReport();
+    return;
+  }
 });
 
 $("#new").addEventListener("click", newChat);
@@ -898,7 +993,10 @@ function paintModels() {
     '<i data-on="1"></i><span class="who"><b>Auto</b><small>自动匹配</small></span>';
   if (!id) auto.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
   auto.addEventListener("click", () => {
-    if (current) return;
+    if (current) {
+      newChat(AUTO);
+      return;
+    }
     chosen = AUTO;
     paintModels();
   });
@@ -937,7 +1035,11 @@ function paintModels() {
         state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
       if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
       button.addEventListener("click", () => {
-        if (current || !online) return;
+        if (!online) return;
+        if (current) {
+          newChat(model.id);
+          return;
+        }
         chosen = model.id;
         paintModels();
       });

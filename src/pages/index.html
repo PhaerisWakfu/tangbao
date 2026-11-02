@@ -112,8 +112,26 @@
           <button type="button">锟斤拷</button>
         </div>
       </div>
-      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「<b>能工智人</b>」，回复的是一个<b>叫糖包的人</b>。不是医疗、法律或危机援助。注意文明用语，禁止发送骂人、敏感与色情内容。</span></p>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「<b>能工智人</b>」，回复的是一个<b>叫糖包的人</b>。不是医疗、法律或危机援助。注意文明用语，禁止发送骂人、敏感与色情内容。</span><button class="report-link" type="button" id="report-open" hidden>举报模型</button></p>
     </main>
+  </div>
+
+  <div class="apply" id="report" hidden>
+    <div class="apply-card report-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
+      <header>
+        <h2 id="report-title">举报模型</h2>
+        <button type="button" id="report-close" aria-label="关闭">×</button>
+      </header>
+      <p class="report-lead">只用于举报模型的不当回复。请写清楚发生了什么。</p>
+      <p class="report-target" id="report-target"></p>
+      <label class="field">
+        <span>举报原因</span>
+        <textarea id="report-reason" maxlength="500" rows="4" placeholder="发生了什么？"></textarea>
+        <small>最多 500 字。</small>
+      </label>
+      <button class="primary" type="button" id="report-submit">提交举报</button>
+      <p class="err" id="report-err" role="alert"></p>
+    </div>
   </div>
 
   <div class="viewer" id="viewer" hidden>
