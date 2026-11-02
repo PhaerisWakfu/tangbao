@@ -218,7 +218,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const path = url.pathname;
   const method = request.method;
 
-  if (path === "/api/status" && method === "GET") return json(await publicStatus(env));
+  if (path === "/api/status" && method === "GET") return json(await siteStatus(env));
   if (path === "/api/models" && method === "GET") return listModels(env);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
@@ -1237,6 +1237,19 @@ async function refreshHomePresence(env: AppEnv): Promise<void> {
 async function publicStatus(env: AppEnv): Promise<StatusPayload> {
   const home = await homePresence(env);
   return statusPayload(home.status);
+}
+
+async function siteStatus(env: AppEnv): Promise<StatusPayload> {
+  const { home, operators } = await loadPresence(env);
+  const active = [home, ...operators].filter((row) => row.active === 1);
+  const state: PresenceState = active.some((row) => row.status === "online")
+    ? "online"
+    : active.some((row) => row.status === "busy")
+      ? "busy"
+      : "away";
+  const payload = statusPayload(state);
+  if (state === "online") payload.note = "有人在";
+  return payload;
 }
 
 async function adminRead(request: Request, env: AppEnv, id: string): Promise<Response> {
