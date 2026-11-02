@@ -300,7 +300,7 @@ function arm() {
   clearTimeout(timer);
   if (desk.hidden) return;
   const fresh = waiting > 0 || pending > 0;
-  const wait = document.hidden ? 120000 : fresh ? 15000 : POLL_MS;
+  const wait = document.hidden ? 120000 : fresh ? 30000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);

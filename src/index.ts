@@ -89,9 +89,9 @@ const AUTO_APPROVE_KEY = "auto_approve";
 const encoder = new TextEncoder();
 
 const PUBLIC_CACHE_TTL: Record<string, number> = {
-  "/api/status": 60,
-  "/api/models": 60,
-  "/api/presence": 300,
+  "/api/status": 300,
+  "/api/models": 300,
+  "/api/presence": 600,
 };
 
 function d1Meta(result: { rowsAffected?: number; lastInsertRowid?: bigint | number }) {
@@ -167,6 +167,18 @@ async function ensureReportSchema(env: AppEnv): Promise<void> {
   } catch {}
   try {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_threads_reported ON threads (reported_at)").run();
+  } catch {}
+  try {
+    await env.DB.prepare("ALTER TABLE threads ADD COLUMN last_role TEXT NOT NULL DEFAULT ''").run();
+  } catch {}
+  try {
+    await env.DB.prepare(
+      `UPDATE threads
+       SET last_role = COALESCE((
+         SELECT role FROM messages m WHERE m.thread_id = threads.id ORDER BY m.created_at DESC LIMIT 1
+       ), '')
+       WHERE last_role = ''`,
+    ).run();
   } catch {}
   reportsSchemaReady = true;
 }
@@ -435,7 +447,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
   };
 }
 
-async function loadPresence(env: AppEnv, now = Date.now()): Promise<{ home: Presence; operators: Presence[] }> {
+async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): Promise<{ home: Presence; operators: Presence[] }> {
   const [home, rows] = await Promise.all([
     homePresence(env, now),
     env.DB.prepare(
@@ -443,11 +455,14 @@ async function loadPresence(env: AppEnv, now = Date.now()): Promise<{ home: Pres
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
-         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
-         GROUP BY operator_id
+         SELECT t.operator_id, COUNT(*) AS n, MIN(t.updated_at) AS oldest
+         FROM threads t
+         JOIN operators o2 ON o2.id = t.operator_id
+         WHERE t.awaiting = 1 AND t.queued = 0
+           ${activeOnly ? "AND o2.active = 1" : ""}
+         GROUP BY t.operator_id
        ) p ON p.operator_id = o.id
+       ${activeOnly ? "WHERE o.active = 1" : ""}
        ORDER BY o.created_at ASC`,
     ).all<PresenceRow>(),
   ]);
@@ -633,7 +648,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const stored = await storeImages(env, incoming.images);
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash, operator_id, auto_home, queued) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash, operator_id, auto_home, queued, last_role) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'visitor')",
     ).bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued),
     env.DB.prepare(
       "INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, 'visitor', ?, ?, ?)",
@@ -774,7 +789,7 @@ function logout(request: Request): Response {
 }
 
 async function listModels(env: AppEnv): Promise<Response> {
-  const { home, operators } = await loadPresence(env);
+  const { home, operators } = await loadPresence(env, Date.now(), true);
   const models = [home, ...operators.filter((row) => row.active === 1)].map((row) => ({
     id: row.id,
     home: row.home,
@@ -838,7 +853,7 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
   if (requested === HOME_MODEL) {
     return { id: HOME_MODEL, requested, fallback: false, queued: false };
   }
-  const { home, operators } = await loadPresence(env);
+  const { home, operators } = await loadPresence(env, Date.now(), true);
   if (requested) {
     const explicit = operators.find((row) => row.id === requested);
     if (explicit && explicit.active === 1) {
@@ -1242,8 +1257,7 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
       .bind(own)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt,
-        (SELECT role FROM messages WHERE thread_id = threads.id ORDER BY created_at DESC LIMIT 1) AS lastRole
+      `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
        FROM threads WHERE awaiting = 0 AND operator_id = ? ORDER BY updated_at DESC LIMIT 40`,
     )
       .bind(own)
@@ -1383,7 +1397,7 @@ async function publicStatus(env: AppEnv): Promise<StatusPayload> {
 }
 
 async function siteStatus(env: AppEnv): Promise<StatusPayload> {
-  const { home, operators } = await loadPresence(env);
+  const { home, operators } = await loadPresence(env, Date.now(), true);
   const active = [home, ...operators].filter((row) => row.active === 1);
   const state: PresenceState = active.some((row) => row.status === "online")
     ? "online"
@@ -1502,10 +1516,11 @@ async function writeMessage(
       now,
     ),
     ...imageInserts(env, messageId, stored),
-    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ? WHERE id = ?").bind(
+    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
       previewFrom(draw ? `要一张图 · ${shown}` : shown),
       now,
       awaiting,
+      role,
       threadId,
     ),
   ]);
