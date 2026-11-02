@@ -40,6 +40,7 @@ let models = [];
 let autoModel = "";
 let chosen = AUTO;
 let threadModel = "";
+let modelsAt = 0;
 let offlineOpen = false;
 let making = false;
 let blocked = false;
@@ -426,7 +427,7 @@ async function refresh() {
 function arm() {
   clearTimeout(timer);
   if (document.hidden) return;
-  const wait = current && validId(current.id) && openAwaiting ? 3000 : POLL_MS;
+  const wait = current && validId(current.id) && openAwaiting ? 8000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);
@@ -925,10 +926,12 @@ function paintModels() {
 }
 
 async function loadModels(pick) {
+  if (!pick && Date.now() - modelsAt < 15000) return;
   try {
     const data = await api("/api/models");
     models = data.models || [];
     autoModel = typeof data.auto === "string" ? data.auto : "";
+    modelsAt = Date.now();
   } catch {
     return;
   }

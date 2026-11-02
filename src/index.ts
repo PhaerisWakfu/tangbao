@@ -6,6 +6,7 @@ import { sendWebPush } from "./push";
 import appJs from "./client/app.txt";
 import deskHtml from "./pages/desk.html";
 import deskJs from "./client/desk.txt";
+import { createClient, type Client } from "@libsql/client/web";
 import homeHtml from "./pages/home.html";
 import indexHtml from "./pages/index.html";
 import mdJs from "./client/md.txt";
@@ -27,6 +28,8 @@ type AppEnv = Env & {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
+  TURSO_DATABASE_URL?: string;
+  TURSO_AUTH_TOKEN?: string;
   IMAGES: KVNamespace;
 };
 
@@ -83,10 +86,116 @@ const HOME_ASSIGNED_KEY = "home_last_assigned";
 
 const encoder = new TextEncoder();
 
+const PUBLIC_CACHE_TTL: Record<string, number> = {
+  "/api/status": 15,
+  "/api/models": 15,
+  "/api/presence": 60,
+};
+
+function d1Meta(result: { rowsAffected?: number; lastInsertRowid?: bigint | number }) {
+  const changes = Number(result.rowsAffected) || 0;
+  return {
+    changes,
+    last_row_id: Number(result.lastInsertRowid) || 0,
+    duration: 0,
+    rows_read: 0,
+    rows_written: changes,
+  };
+}
+
+class TursoStatement {
+  constructor(
+    private readonly client: Client,
+    readonly sql: string,
+    readonly args: unknown[] = [],
+  ) {}
+
+  bind(...args: unknown[]): TursoStatement {
+    return new TursoStatement(this.client, this.sql, args);
+  }
+
+  async first<T>(column?: string): Promise<T | null> {
+    const result = await this.client.execute({ sql: this.sql, args: this.args as never });
+    if (!result.rows.length) return null;
+    const row = result.rows[0] as Record<string, unknown>;
+    return (column ? row[column] : row) as T;
+  }
+
+  async all<T>(): Promise<{ results: T[]; success: true; meta: ReturnType<typeof d1Meta> }> {
+    const result = await this.client.execute({ sql: this.sql, args: this.args as never });
+    return {
+      results: result.rows as T[],
+      success: true,
+      meta: d1Meta(result),
+    };
+  }
+
+  async run(): Promise<{ success: true; meta: ReturnType<typeof d1Meta> }> {
+    const result = await this.client.execute({ sql: this.sql, args: this.args as never });
+    return { success: true, meta: d1Meta(result) };
+  }
+}
+
+class TursoDatabase {
+  constructor(private readonly client: Client) {}
+
+  prepare(sql: string): TursoStatement {
+    return new TursoStatement(this.client, sql);
+  }
+
+  async batch(statements: TursoStatement[]) {
+    if (!statements.length) return [];
+    const results = await this.client.batch(
+      statements.map((statement) => ({ sql: statement.sql, args: statement.args as never })),
+      "write",
+    );
+    return results.map((result) => ({ success: true, meta: d1Meta(result) }));
+  }
+}
+
+let tursoCache: { url: string; token: string; client: Client } | null = null;
+
+function useTurso(env: AppEnv): AppEnv {
+  if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) return env;
+  if (!tursoCache || tursoCache.url !== env.TURSO_DATABASE_URL || tursoCache.token !== env.TURSO_AUTH_TOKEN) {
+    tursoCache = {
+      url: env.TURSO_DATABASE_URL,
+      token: env.TURSO_AUTH_TOKEN,
+      client: createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN }),
+    };
+  }
+  return {
+    ...env,
+    DB: new TursoDatabase(tursoCache.client) as unknown as D1Database,
+  };
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     try {
-      return await route(request, env, ctx);
+      const scoped = useTurso(env);
+      const url = new URL(request.url);
+      const ttl = request.method === "GET" ? PUBLIC_CACHE_TTL[url.pathname] : 0;
+      if (ttl) {
+        const cacheKey = new Request(url.toString(), { method: "GET" });
+        let hit: Response | undefined;
+        try {
+          hit = await caches.default.match(cacheKey);
+        } catch {}
+        if (hit) return hit;
+        const response = await route(request, scoped, ctx);
+        if (response.ok) {
+          const headers = new Headers(response.headers);
+          headers.set("cache-control", `public, max-age=${ttl}, s-maxage=${ttl}`);
+          const cached = new Response(response.body, { status: response.status, headers });
+          try {
+            ctx.waitUntil(caches.default.put(cacheKey, cached.clone()));
+          } catch {}
+          return cached;
+        }
+        return response;
+      }
+      return await route(request, scoped, ctx);
     } catch (err) {
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.log(
@@ -99,7 +208,7 @@ export default {
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
-    ctx.waitUntil(refreshHomePresence(env));
+    ctx.waitUntil(refreshHomePresence(useTurso(env)));
   },
 } satisfies ExportedHandler<AppEnv>;
 

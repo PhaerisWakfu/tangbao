@@ -16,6 +16,7 @@
     "wrangler": "^4.42.0"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
     "sensitive-word-tool": "^1.1.10"
   }
 }
