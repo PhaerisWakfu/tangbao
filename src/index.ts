@@ -156,9 +156,20 @@ class TursoDatabase {
 }
 
 let reportsSchemaReady = false;
+const SCHEMA_KEY = "schema_v";
+const SCHEMA_VERSION = "2";
 
 async function ensureReportSchema(env: AppEnv): Promise<void> {
   if (reportsSchemaReady) return;
+  try {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
+      .bind(SCHEMA_KEY)
+      .first<{ value: string }>();
+    if (row?.value === SCHEMA_VERSION) {
+      reportsSchemaReady = true;
+      return;
+    }
+  } catch {}
   try {
     await env.DB.prepare("ALTER TABLE threads ADD COLUMN reported_at INTEGER NOT NULL DEFAULT 0").run();
   } catch {}
@@ -179,6 +190,13 @@ async function ensureReportSchema(env: AppEnv): Promise<void> {
        ), '')
        WHERE last_role = ''`,
     ).run();
+  } catch {}
+  try {
+    await env.DB.prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+      .bind(SCHEMA_KEY, SCHEMA_VERSION)
+      .run();
   } catch {}
   reportsSchemaReady = true;
 }
