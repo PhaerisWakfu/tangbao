@@ -287,6 +287,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/login" && method === "POST") return login(request, env);
   if (path === "/api/admin/logout" && method === "POST") return logout(request);
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
+  if (path === "/api/admin/profile" && method === "GET") return readProfile(request, env);
+  if (path === "/api/admin/profile" && method === "POST") return saveProfile(request, env);
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/pool" && method === "GET") return pool(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
@@ -814,6 +816,58 @@ async function login(request: Request, env: AppEnv): Promise<Response> {
 
 function logout(request: Request): Response {
   return json({ ok: true }, 200, { "set-cookie": sessionCookie("", request, 0) });
+}
+
+async function readProfile(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (seat.super) throw new HttpError(403, "糖包本人不用改型号。");
+  const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE id = ?")
+    .bind(seat.operatorId)
+    .first<{ id: string; blurb: string | null }>();
+  if (!row) throw new HttpError(404, "这个型号不在了。");
+  return json({
+    id: row.id,
+    suffix: row.id.startsWith("tangbao-") ? row.id.slice("tangbao-".length) : row.id,
+    blurb: row.blurb || "",
+  });
+}
+
+async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (seat.super) throw new HttpError(403, "糖包本人不用改型号。");
+  const payload = await readJson(request);
+  const suffix = modelSuffix(payload.suffix);
+  if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
+  if (suffix === "vme50-flash" || suffix === "pool") throw new HttpError(400, "这个型号留给自己用。");
+  const blurb = blurbOf(payload.blurb);
+  const oldId = seat.operatorId;
+  const newId = `tangbao-${suffix}`;
+  if (newId === oldId) {
+    await env.DB.prepare("UPDATE operators SET blurb = ? WHERE id = ?").bind(blurb, oldId).run();
+    return json({ ok: true, id: oldId, suffix, blurb });
+  }
+  const conflict = await env.DB.prepare(
+    `SELECT 1 AS hit FROM operators WHERE id = ?
+     UNION ALL
+     SELECT 1 FROM applications WHERE suffix = ? AND status IN ('pending', 'approved')
+     LIMIT 1`,
+  )
+    .bind(newId, suffix)
+    .first<{ hit: number }>();
+  if (conflict) throw new HttpError(409, "这个型号已经有人了。");
+  await env.DB.batch([
+    env.DB.prepare("UPDATE operators SET id = ?, blurb = ? WHERE id = ?").bind(newId, blurb, oldId),
+    env.DB.prepare("UPDATE threads SET operator_id = ? WHERE operator_id = ?").bind(newId, oldId),
+    env.DB.prepare("UPDATE applications SET operator_id = ?, suffix = ? WHERE operator_id = ?").bind(
+      newId,
+      suffix,
+      oldId,
+    ),
+    env.DB.prepare("UPDATE push_subscriptions SET operator_id = ? WHERE operator_id = ?").bind(newId, oldId),
+  ]);
+  const session = await issueSession(request, env, { super: false, operatorId: newId });
+  const cookie = session.headers.get("set-cookie");
+  return json({ ok: true, id: newId, suffix, blurb }, 200, cookie ? { "set-cookie": cookie } : undefined);
 }
 
 async function listModels(env: AppEnv): Promise<Response> {

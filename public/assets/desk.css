@@ -48,6 +48,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .desk[hidden] { display: none; }
 .pile-col { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; background: var(--side); }
 .desk-top { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 2px 0 8px; }
+.top-actions { display: flex; align-items: center; gap: 2px; }
 .desk-nav { display: flex; gap: 6px; padding: 0 8px 8px; }
 .desk-nav[hidden] { display: none; }
 .desk-nav button {
@@ -67,10 +68,12 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .pane[hidden] { display: none; }
 #pane-apply,
 #pane-audit,
-#pane-pool { display: flex; flex-direction: column; overflow: hidden; }
+#pane-pool,
+#pane-profile { display: flex; flex-direction: column; overflow: hidden; }
 #pane-apply[hidden],
 #pane-audit[hidden],
-#pane-pool[hidden] { display: none; }
+#pane-pool[hidden],
+#pane-profile[hidden] { display: none; }
 .papers { padding: 0 24px 20px; }
 .auto-approve {
   display: flex;
@@ -134,6 +137,63 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   color: var(--muted);
 }
 .auto-approve-err { margin: -2px 24px 10px; }
+.profile-form {
+  width: min(32rem, 100%);
+  padding: 0 24px 24px;
+  display: grid;
+  gap: 18px;
+  overflow: auto;
+}
+.profile-id {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.profile-id span {
+  flex: none;
+  padding: 0 2px 0 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+.profile-id input {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  padding: 0 14px 0 2px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+.profile-id:focus-within {
+  border-color: var(--line-2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.profile-form textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.profile-form textarea:focus {
+  outline: 0;
+  border-color: var(--line-2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.profile-hint { margin: -4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.profile-ok { min-height: 1.4em; margin: 0; color: var(--accent); font-size: 13px; }
 #pane-pool .pool-line {
   display: flex;
   align-items: flex-start;

@@ -12,6 +12,12 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
+const profileOpen = $("#profile-open");
+const profileForm = $("#profile-form");
+const profileSuffix = $("#profile-suffix");
+const profileBlurb = $("#profile-blurb");
+const profileErr = $("#profile-err");
+const profileOk = $("#profile-ok");
 
 let waiting = 0;
 let pending = 0;
@@ -265,8 +271,49 @@ async function loadQueue() {
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
+  profileOpen.hidden = seat.super;
   renderQueue(data);
   paintTitle();
+}
+
+async function loadProfile() {
+  profileErr.textContent = "";
+  profileOk.textContent = "";
+  const data = await api("/api/admin/profile");
+  profileSuffix.value = data.suffix || "";
+  profileBlurb.value = data.blurb || "";
+}
+
+async function saveProfile(event) {
+  event.preventDefault();
+  profileErr.textContent = "";
+  profileOk.textContent = "";
+  const button = profileForm.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const oldId = seat.operatorId;
+    const data = await api("/api/admin/profile", {
+      method: "POST",
+      body: { suffix: profileSuffix.value.trim(), blurb: profileBlurb.value.trim() },
+    });
+    seat.operatorId = data.id;
+    profileSuffix.value = data.suffix;
+    profileBlurb.value = data.blurb;
+    profileOk.textContent = data.id === oldId ? "简介换好了。" : "型号换好了。旧对话都还在。";
+    if (data.id !== oldId) {
+      selected = null;
+      shown = "";
+      $("#slip-title").textContent = "还没选消息";
+      $("#slip-meta").textContent = "";
+      thread.replaceChildren();
+      reply.hidden = true;
+      await loadQueue();
+    }
+  } catch (err) {
+    profileErr.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function showPane(name, nav) {
@@ -274,6 +321,7 @@ function showPane(name, nav) {
   $("#pane-apply").hidden = name !== "apply";
   $("#pane-audit").hidden = name !== "audit";
   $("#pane-pool").hidden = name !== "pool";
+  $("#pane-profile").hidden = name !== "profile";
   const current = nav || name;
   for (const button of $("#desk-nav").querySelectorAll("button")) {
     button.setAttribute("aria-pressed", String(button.dataset.view === current));
@@ -320,6 +368,18 @@ async function tick() {
   }
   arm();
 }
+
+profileOpen.addEventListener("click", async () => {
+  if (seat.super) return;
+  showPane("profile");
+  try {
+    await loadProfile();
+  } catch (err) {
+    profileErr.textContent = err.message;
+  }
+});
+
+profileForm.addEventListener("submit", saveProfile);
 
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;

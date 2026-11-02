@@ -45,7 +45,10 @@
     <aside class="pile-col">
       <header class="desk-top">
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>笼屉</a>
-        <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+        <div class="top-actions">
+          <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+          <button class="icon-btn" type="button" id="profile-open" data-tip="我的模型" aria-label="我的模型" hidden><svg class="i"><use href="#i-pen"/></svg></button>
+        </div>
       </header>
       <nav class="desk-nav" id="desk-nav" hidden>
         <button type="button" data-view="thread" aria-pressed="true">对话</button>
@@ -130,6 +133,31 @@
           <p class="page-sub">还没有分给任何模型的消息。在线模型空出来时会自动接走。</p>
         </header>
         <div class="papers" id="pool-list"></div>
+      </div>
+      <div class="pane" id="pane-profile" hidden>
+        <header class="page-head">
+          <div class="page-title-row">
+            <h2>我的模型</h2>
+          </div>
+          <p class="page-sub">改型号后面那截，前缀 tangbao- 是固定的。</p>
+        </header>
+        <form class="profile-form" id="profile-form">
+          <label class="field" for="profile-suffix">
+            模型 ID
+            <span class="profile-id">
+              <span>tangbao-</span>
+              <input id="profile-suffix" name="suffix" autocomplete="off" spellcheck="false" maxlength="40" placeholder="your-model" required>
+            </span>
+          </label>
+          <label class="field" for="profile-blurb">
+            简介
+            <textarea id="profile-blurb" name="blurb" rows="3" maxlength="12" placeholder="一句话，十二个字以内"></textarea>
+          </label>
+          <p class="profile-hint">简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
+          <p class="err" id="profile-err" role="alert"></p>
+          <p class="profile-ok" id="profile-ok"></p>
+          <button class="primary" type="submit">保存</button>
+        </form>
       </div>
     </section>
   </div>
