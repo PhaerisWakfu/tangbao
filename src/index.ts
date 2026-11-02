@@ -74,6 +74,7 @@ const IMAGE_LIMIT = 2_000_000;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_IMAGES = 6;
 const HOME_MODEL = "tangbao-vme50-flash";
+const POOL_MODEL = "tangbao-pool";
 const HOME_BLURB = "糖包本人。什么都聊一点。";
 const LIST_SIZE = 10;
 const ONLINE_TTL = 120_000;
@@ -644,7 +645,7 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
     throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
-  if (thread.operator_id !== HOME_MODEL) {
+  if (thread.operator_id !== HOME_MODEL && thread.queued !== 1) {
     const row = await env.DB.prepare("SELECT active FROM operators WHERE id = ?")
       .bind(thread.operator_id)
       .first<{ active: number }>();
@@ -763,11 +764,19 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
     }
   }
   const chosen = autoChoice(home, operators);
+  if (chosen.id === HOME_MODEL) {
+    return {
+      id: POOL_MODEL,
+      requested,
+      fallback: Boolean(requested),
+      queued: true,
+    };
+  }
   return {
     id: chosen.id,
     requested,
     fallback: Boolean(requested && requested !== chosen.id),
-    queued: chosen.id === HOME_MODEL,
+    queued: false,
   };
 }
 
@@ -954,12 +963,12 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   if (model === HOME_MODEL) model = "";
   const [countRow, presence, used] = await Promise.all([
     env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM threads WHERE operator_id != ? AND (? = '' OR operator_id = ?)",
+      "SELECT COUNT(*) AS n FROM threads WHERE operator_id != ? AND queued = 0 AND (? = '' OR operator_id = ?)",
     )
       .bind(HOME_MODEL, model, model)
       .first<{ n: number }>(),
     loadPresence(env),
-    env.DB.prepare("SELECT DISTINCT operator_id AS id FROM threads WHERE operator_id != ?")
+    env.DB.prepare("SELECT DISTINCT operator_id AS id FROM threads WHERE operator_id != ? AND queued = 0")
       .bind(HOME_MODEL)
       .all<{ id: string }>(),
   ]);
@@ -982,7 +991,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const threads = await env.DB.prepare(
     `SELECT id, title, preview, operator_id AS operatorId, awaiting, updated_at AS updatedAt
      FROM threads
-     WHERE operator_id != ? AND (? = '' OR operator_id = ?)
+     WHERE operator_id != ? AND queued = 0 AND (? = '' OR operator_id = ?)
      ORDER BY updated_at DESC
      LIMIT ? OFFSET ?`,
   )
@@ -1015,7 +1024,8 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<numb
   const candidates = await env.DB.prepare(
     `SELECT t.id
      FROM threads t
-     WHERE t.operator_id = ? AND t.awaiting = 1 AND t.auto_home = 1
+     WHERE t.awaiting = 1 AND t.auto_home = 1
+       AND (t.operator_id = ? OR t.queued = 1)
        AND NOT EXISTS (
          SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.role = 'tangbao'
        )
@@ -1034,7 +1044,8 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<numb
     const result = await env.DB.prepare(
       `UPDATE threads
        SET operator_id = ?, queued = 0
-       WHERE id = ? AND operator_id = ? AND awaiting = 1 AND auto_home = 1
+       WHERE id = ? AND awaiting = 1 AND auto_home = 1
+         AND (operator_id = ? OR queued = 1)
          AND NOT EXISTS (
            SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao'
          )
