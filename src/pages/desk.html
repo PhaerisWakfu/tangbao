@@ -100,6 +100,15 @@
           </div>
           <p class="page-sub">有人想进这笼。先看人，再看型号。</p>
         </header>
+        <label class="auto-approve">
+          <input type="checkbox" id="auto-approve">
+          <span class="auto-approve-track" aria-hidden="true"></span>
+          <span class="auto-approve-copy">
+            <b>自动通过新申请</b>
+            <small>打开后，新申请会直接通过并发放登录口令</small>
+          </span>
+        </label>
+        <p class="err auto-approve-err" id="auto-approve-err" role="alert"></p>
         <div class="papers" id="applications"></div>
       </div>
       <div class="pane" id="pane-audit" hidden>

@@ -84,6 +84,7 @@ const REPLY_TIMEOUT = 10 * 60_000;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
+const AUTO_APPROVE_KEY = "auto_approve";
 
 const encoder = new TextEncoder();
 
@@ -232,6 +233,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/pool" && method === "GET") return pool(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
+  if (path === "/api/admin/applications/auto-approve" && method === "POST") return setAutoApprove(request, env);
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
   if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
@@ -813,6 +815,11 @@ async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext):
   )
     .bind(id, suffix, email, blurb, visitor, Date.now())
     .run();
+  if (await autoApproveEnabled(env)) {
+    const approved = await approveModelApplication(env, id);
+    noteApply(ctx, env, request, modelId, blurb);
+    return json({ id, status: "approved", password: approved.password });
+  }
   noteApply(ctx, env, request, modelId, blurb);
   return json({ id, status: "pending" });
 }
@@ -868,12 +875,32 @@ function tally(row: { n: number } | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+async function autoApproveEnabled(env: AppEnv): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
+    .bind(AUTO_APPROVE_KEY)
+    .first<{ value: string }>();
+  return row?.value === "1";
+}
+
+async function setAutoApprove(request: Request, env: AppEnv): Promise<Response> {
+  await requireSuper(request, env);
+  const payload = await readJson(request);
+  const enabled = (payload as { enabled?: unknown }).enabled === true;
+  await env.DB.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  )
+    .bind(AUTO_APPROVE_KEY, enabled ? "1" : "0")
+    .run();
+  return json({ enabled });
+}
+
 async function listApplications(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const asked = listPage(request);
-  const [countRow, pendingRow] = await Promise.all([
+  const [countRow, pendingRow, autoApprove] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) AS n FROM applications").first<{ n: number }>(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>(),
+    autoApproveEnabled(env),
   ]);
   const total = tally(countRow);
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
@@ -900,11 +927,11 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
     page,
     pageSize: LIST_SIZE,
     pending: tally(pendingRow),
+    autoApprove,
   });
 }
 
-async function approveApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
-  await requireSuper(request, env);
+async function approveModelApplication(env: AppEnv, id: string): Promise<{ modelId: string; password: string }> {
   const row = await env.DB.prepare("SELECT suffix, blurb, status FROM applications WHERE id = ?")
     .bind(id)
     .first<{ suffix: string; blurb: string | null; status: string }>();
@@ -923,7 +950,13 @@ async function approveApplication(request: Request, env: AppEnv, id: string): Pr
       id,
     ),
   ]);
-  return json({ ok: true, modelId, password });
+  return { modelId, password };
+}
+
+async function approveApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
+  await requireSuper(request, env);
+  const approved = await approveModelApplication(env, id);
+  return json({ ok: true, modelId: approved.modelId, password: approved.password });
 }
 
 async function rejectApplication(request: Request, env: AppEnv, id: string): Promise<Response> {

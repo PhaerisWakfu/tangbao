@@ -300,6 +300,13 @@ function paint(list) {
   stage.scrollTop = stage.scrollHeight;
 }
 
+function historyModel(thread) {
+  if (thread.queued || thread.operator === "tangbao-pool") return "Auto";
+  if (!thread.operator) return "";
+  if (thread.operator === "tangbao-vme50-flash") return "糖包";
+  return thread.operator.replace(/^tangbao-/, "");
+}
+
 function renderHistory() {
   history.replaceChildren();
   if (!store.threads.length) {
@@ -354,7 +361,16 @@ function renderHistory() {
         }
         void removeThread(thread);
       });
-      row.append(link, remove);
+      const model = historyModel(thread);
+      if (model) {
+        const badge = document.createElement("span");
+        badge.className = "hist-model";
+        badge.textContent = model;
+        badge.title = thread.queued ? "等待模型接手" : thread.operator;
+        row.append(link, badge, remove);
+      } else {
+        row.append(link, remove);
+      }
       history.append(row);
     }
   }
@@ -413,8 +429,12 @@ async function refresh() {
     applyStatus(data.operatorStatus || data.status || statusFromModel(null));
     openAwaiting = data.awaiting !== false && data.awaiting !== 0;
     applyBlocked(Boolean(data.blocked));
-    if (data.title && data.title !== current.title) {
-      current.title = data.title;
+    const previousOperator = current.operator;
+    const previousQueued = Boolean(current.queued);
+    current.operator = data.operator || "";
+    current.queued = Boolean(data.queued);
+    if (previousOperator !== current.operator || previousQueued !== current.queued || (data.title && data.title !== current.title)) {
+      if (data.title) current.title = data.title;
       saveStore();
       renderHistory();
     }
@@ -676,7 +696,14 @@ async function sendText(text) {
   if (!current || !validId(current.id)) {
     const created = await api("/api/threads", { method: "POST", body: withOperator(payload) });
     if (!validId(created.id) || !created.token) throw new ApiError("消息没送出去。糖包那边暂时没应。", 500);
-    current = { id: created.id, token: created.token, title: created.title, updatedAt: Date.now() };
+    current = {
+      id: created.id,
+      token: created.token,
+      title: created.title,
+      updatedAt: Date.now(),
+      operator: created.operator || "",
+      queued: Boolean(created.queued),
+    };
     if (created.queued) {
       threadQueued = true;
       threadModel = "";

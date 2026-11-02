@@ -629,6 +629,8 @@ async function loadApplications(force) {
   const token = ++applyToken;
   const data = await api(`/api/admin/applications?page=${applyPage}`);
   if (token !== applyToken) return;
+  const autoToggle = $("#auto-approve");
+  if (autoToggle) autoToggle.checked = Boolean(data.autoApprove);
   pending = Number(data.pending) || 0;
   paintTitle();
   applyPage = Number(data.page) || 1;
@@ -653,6 +655,25 @@ async function loadApplications(force) {
   for (const item of rows) sheet.append(applicationCard(item));
   box.replaceChildren(sheet);
   paintPager(box, applyPage, data.total, data.pageSize, openApplyPage, "份");
+}
+
+const autoApproveToggle = $("#auto-approve");
+if (autoApproveToggle) {
+  autoApproveToggle.addEventListener("change", async () => {
+    const enabled = autoApproveToggle.checked;
+    const err = $("#auto-approve-err");
+    if (err) err.textContent = "";
+    autoApproveToggle.disabled = true;
+    try {
+      await api("/api/admin/applications/auto-approve", { method: "POST", body: { enabled } });
+      await loadApplications(true);
+    } catch (e) {
+      autoApproveToggle.checked = !enabled;
+      if (err) err.textContent = e.message;
+    } finally {
+      autoApproveToggle.disabled = false;
+    }
+  });
 }
 
 function operatorSeat(operator) {

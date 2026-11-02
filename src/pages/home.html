@@ -113,7 +113,8 @@
           <li>请不要欺骗诱导用户</li>
           <li>不把别人的对话说出去</li>
           <li>不威胁人，不把别人的姓名、住址或电话发出来</li>
-          <li>不写怎么伤害自己，不发露骨的性内容</li>
+          <li>不写怎么伤害自己</li>
+          <li>不发送色情、露骨性内容或性暗示</li>
           <li>不留微信或其他站外联系方式，也不发链接</li>
           <li>在线接单时尽量回复每一个向你提问的用户</li>
           <li>碰到不该回的，拉黑，不要跟着聊</li>
@@ -157,15 +158,26 @@
       </div>
     </div>
   </div>
+  <button class="connect-tab" type="button" id="connect-tab" aria-haspopup="dialog" aria-controls="connect" aria-expanded="false">
+    <span>共创糖包</span>
+  </button>
   <div class="apply" id="connect" hidden>
     <div class="apply-card connect-card" role="dialog" aria-modal="true" aria-labelledby="connect-title">
       <header>
         <h2 id="connect-title">共创糖包</h2>
         <button type="button" id="connect-close" aria-label="关闭">×</button>
       </header>
-      <p class="connect-lead">扫码加我微信，备注「糖包」，我拉你进群。</p>
-      <img class="connect-qr" src="/assets/wechat-qr.jpg" alt="Phaeris 的微信二维码">
-      <p class="connect-note">这个二维码只用于加好友和进群。</p>
+      <p class="connect-lead">扫码进糖包交流群；如果失效，也可以加下面的个人微信，备注「糖包」。</p>
+      <div class="connect-grid">
+        <figure class="connect-figure">
+          <img src="/assets/wechat-group-qr.jpg" alt="糖包交流群二维码">
+          <figcaption>糖包交流群</figcaption>
+        </figure>
+        <figure class="connect-figure">
+          <img src="/assets/wechat-qr.jpg" alt="Phaeris 的个人微信二维码">
+          <figcaption>加我个人微信<small>备注「糖包」</small></figcaption>
+        </figure>
+      </div>
     </div>
   </div>
   <script>
@@ -285,6 +297,13 @@
 
     function openConnect() {
       $("#connect").hidden = false;
+      $("#connect-tab").setAttribute("aria-expanded", "true");
+      $("#connect-close").focus();
+    }
+
+    function closeConnect() {
+      $("#connect").hidden = true;
+      $("#connect-tab").setAttribute("aria-expanded", "false");
     }
 
     document.querySelectorAll("[data-join]").forEach((button) => {
@@ -296,9 +315,10 @@
         openConnect();
       });
     });
-    $("#connect-close").addEventListener("click", () => { $("#connect").hidden = true; });
+    $("#connect-tab").addEventListener("click", openConnect);
+    $("#connect-close").addEventListener("click", closeConnect);
     $("#connect").addEventListener("click", (event) => {
-      if (event.target === $("#connect")) $("#connect").hidden = true;
+      if (event.target === $("#connect")) closeConnect();
     });
     $("#apply-close").addEventListener("click", () => { $("#apply").hidden = true; });
     $("#apply").addEventListener("click", (event) => {
@@ -365,7 +385,7 @@
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       if (!$("#apply").hidden) $("#apply").hidden = true;
-      if (!$("#connect").hidden) $("#connect").hidden = true;
+      if (!$("#connect").hidden) closeConnect();
     });
     const params = new URLSearchParams(location.search);
     if (params.get("apply") === "1") {
