@@ -30,6 +30,7 @@ type AppEnv = Env & {
   VAPID_SUBJECT?: string;
   TURSO_DATABASE_URL?: string;
   TURSO_AUTH_TOKEN?: string;
+  MAINTENANCE?: string;
   IMAGES: KVNamespace;
 };
 
@@ -224,6 +225,15 @@ export default {
       const scoped = useTurso(env);
       await ensureReportSchema(scoped);
       const url = new URL(request.url);
+      if (
+        env.MAINTENANCE === "1" &&
+        request.method !== "GET" &&
+        request.method !== "HEAD" &&
+        url.pathname.startsWith("/api/") &&
+        url.pathname !== "/api/admin/login"
+      ) {
+        return json({ error: "正在换屉，稍后再试。" }, 503);
+      }
       const ttl = request.method === "GET" ? PUBLIC_CACHE_TTL[url.pathname] : 0;
       if (ttl) {
         const cacheKey = new Request(url.toString(), { method: "GET" });

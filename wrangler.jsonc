@@ -24,8 +24,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "tangbao",
-      "database_id": "95a34db7-95ac-464c-a3b4-5d0acb58d900",
+      "database_name": "tangbao261102",
+      "database_id": "40a8c0a3-0aef-473f-9708-6ef90a2f40c0",
       "migrations_dir": "migrations"
     }
   ],
