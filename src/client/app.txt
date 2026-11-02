@@ -410,12 +410,14 @@ function forget(id) {
 }
 
 async function refresh() {
-  if (!current || !validId(current.id)) {
+  const thread = current;
+  if (!thread || !validId(thread.id)) {
     applyModelStatus();
     return;
   }
   try {
-    const data = await api(`/api/threads/${current.id}`, { token: current.token });
+    const data = await api(`/api/threads/${thread.id}`, { token: thread.token });
+    if (current !== thread) return;
     const wasQueued = threadQueued;
     threadQueued = Boolean(data.queued);
     if (threadQueued) {
@@ -445,8 +447,9 @@ async function refresh() {
     paint(data.messages || []);
     paintModels();
   } catch (err) {
+    if (current !== thread) return;
     if (err instanceof ApiError && err.statusCode === 401) {
-      forget(current.id);
+      forget(thread.id);
       showSys(err.message);
       return;
     }
