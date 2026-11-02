@@ -89,9 +89,9 @@ const AUTO_APPROVE_KEY = "auto_approve";
 const encoder = new TextEncoder();
 
 const PUBLIC_CACHE_TTL: Record<string, number> = {
-  "/api/status": 15,
-  "/api/models": 15,
-  "/api/presence": 60,
+  "/api/status": 60,
+  "/api/models": 60,
+  "/api/presence": 300,
 };
 
 function d1Meta(result: { rowsAffected?: number; lastInsertRowid?: bigint | number }) {
@@ -470,21 +470,49 @@ async function loadPresence(env: AppEnv, now = Date.now()): Promise<{ home: Pres
   return { home, operators };
 }
 
-async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now()): Promise<Presence> {
-  if (operatorId === HOME_MODEL) return homePresence(env, now);
-  const all = await loadPresence(env, now);
-  return all.operators.find((row) => row.id === operatorId) || {
-    id: operatorId,
-    active: 0,
-    blurb: "",
-    lastSeenAt: 0,
-    lastReplyAt: 0,
-    lastAssignedAt: 0,
-    pending: 0,
-    oldestPendingAt: 0,
-    status: "away",
+function presenceFromRow(row: PresenceRow, now: number): Presence {
+  const pending = Number(row.pending) || 0;
+  const oldestPendingAt = Number(row.oldest_pending_at) || 0;
+  return {
+    id: row.id,
+    active: row.active,
+    blurb: row.blurb || "",
+    lastSeenAt: Number(row.last_seen_at) || 0,
+    lastReplyAt: Number(row.last_reply_at) || 0,
+    lastAssignedAt: Number(row.last_assigned_at) || 0,
+    pending,
+    oldestPendingAt,
+    status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now),
     home: false,
   };
+}
+
+async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now()): Promise<Presence> {
+  if (operatorId === HOME_MODEL) return homePresence(env, now);
+  const row = await env.DB.prepare(
+    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+       (SELECT COUNT(*) FROM threads t WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0) AS pending,
+       (SELECT MIN(updated_at) FROM threads t WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0) AS oldest_pending_at
+     FROM operators o
+     WHERE o.id = ?`,
+  )
+    .bind(operatorId)
+    .first<PresenceRow>();
+  if (!row) {
+    return {
+      id: operatorId,
+      active: 0,
+      blurb: "",
+      lastSeenAt: 0,
+      lastReplyAt: 0,
+      lastAssignedAt: 0,
+      pending: 0,
+      oldestPendingAt: 0,
+      status: "away",
+      home: false,
+    };
+  }
+  return presenceFromRow(row, now);
 }
 
 async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean> {
@@ -628,9 +656,11 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request));
   const seen = await attachIdentity(env, thread, request);
-  const messages = await listMessages(env, id);
-  const status = await publicStatus(env);
-  const operator = await operatorPresence(env, thread.operator_id);
+  const [messages, operator] = await Promise.all([
+    listMessages(env, id),
+    operatorPresence(env, thread.operator_id),
+  ]);
+  const status = statusPayload(publicPresence(operator.status));
   return json({
     title: thread.title,
     operator: thread.operator_id,
@@ -640,7 +670,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     blocked: seen.blocked,
     messages,
     status,
-    operatorStatus: statusPayload(publicPresence(operator.status)),
+    operatorStatus: status,
   });
 }
 
@@ -1218,13 +1248,12 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
     )
       .bind(own)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
-    loadPresence(env, now),
+    seat.super ? homePresence(env, now) : operatorPresence(env, own, now),
     seat.super
       ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
       : Promise.resolve(null),
   ]);
-  const self = seat.super ? presence.home : presence.operators.find((row) => row.id === own);
-  const status = statusPayload(self?.status || "away");
+  const status = statusPayload(publicPresence(presence.status));
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
      WHERE operator_id = ? AND (
