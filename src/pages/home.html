@@ -186,7 +186,6 @@
     const $ = (selector) => document.querySelector(selector);
     const APPLY_KEY = "tangbao.apply";
     const VISITOR_KEY = "tangbao.visitor";
-    let foldedOpen = false;
 
     function visitorId() {
       try {
@@ -411,7 +410,7 @@
       if (localStorage.getItem("tangbao.presence") === "asleep") setPresence({ awake: false });
     } catch {}
 
-    function paintModels(models) {
+    function paintModels(models, hiddenCount) {
       const lineup = $("#lineup");
       lineup.replaceChildren();
       const online = models.filter((model) => model.status === "online");
@@ -419,58 +418,45 @@
         ? online
         : models.filter((model) => model.home).slice(0, 1);
       if (!lead.length && models.length) lead.push(models[0]);
-      const folded = models.filter((model) => !lead.includes(model));
 
-      const addLine = (model, compact) => {
-        const online = model.status === "online";
+      const addLine = (model) => {
+        const isOnline = model.status === "online";
         const button = document.createElement("button");
         button.type = "button";
-        button.className = compact ? "line compact" : "line";
-        button.dataset.state = model.status || (online ? "online" : "away");
-        button.disabled = !online;
-        button.setAttribute("aria-disabled", String(!online));
+        button.className = "line";
+        button.dataset.state = model.status || (isOnline ? "online" : "away");
+        button.disabled = !isOnline;
+        button.setAttribute("aria-disabled", String(!isOnline));
         const dot = document.createElement("i");
-        dot.dataset.on = online ? "1" : "0";
+        dot.dataset.on = isOnline ? "1" : "0";
         const who = document.createElement("span");
         who.className = "who";
         const name = document.createElement("b");
         name.textContent = model.id;
         who.append(name);
-        if (!compact) {
-          const blurb = document.createElement("small");
-          blurb.textContent = model.blurb || "";
-          who.append(blurb);
-        }
+        const blurb = document.createElement("small");
+        blurb.textContent = model.blurb || "";
+        who.append(blurb);
         const state = document.createElement("small");
         state.className = "state";
         state.textContent = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
         button.append(dot, who, state);
         button.addEventListener("click", () => {
-          if (!online) return;
+          if (!isOnline) return;
           try { localStorage.setItem("tangbao.model", model.id); } catch {}
           location.href = "/chat";
         });
         lineup.append(button);
       };
 
-      lead.forEach((model) => addLine(model, false));
-      if (folded.length) {
-        const more = document.createElement("button");
-        more.type = "button";
+      lead.forEach(addLine);
+      if (hiddenCount > 0) {
+        const more = document.createElement("p");
         more.className = "line-more";
-        more.setAttribute("aria-expanded", String(foldedOpen));
-        const text = foldedOpen
-          ? `收起 ${folded.length} 个暂不可选的型号`
-          : `还有 ${folded.length} 个型号暂不可选`;
-        more.innerHTML = `<span>${text}</span><svg class="i"><use href="#i-chev"/></svg>`;
-        more.addEventListener("click", () => {
-          foldedOpen = !foldedOpen;
-          paintModels(models);
-        });
+        more.textContent = `还有 ${hiddenCount} 个型号暂不可选`;
         lineup.append(more);
-        if (foldedOpen) folded.forEach((model) => addLine(model, true));
       }
-      $("#cage").hidden = models.length === 0;
+      $("#cage").hidden = models.length === 0 && hiddenCount === 0;
     }
 
     fetch("/api/status")
@@ -479,7 +465,7 @@
       .catch(() => {});
     fetch("/api/models")
       .then((response) => response.json())
-      .then((data) => paintModels(data.models || []))
+      .then((data) => paintModels(data.models || [], Number(data.hidden) || 0))
       .catch(() => {});
   </script>
 </body>

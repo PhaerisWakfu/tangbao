@@ -67,7 +67,11 @@ type Presence = {
 };
 
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
+const MODEL_RECENT_MS = 30 * DAY;
+const MODEL_PAGE_SIZE = 30;
+const MODEL_SEARCH_MAX = 40;
 const QUEUE_CAP = 400;
 const BODY_LIMIT = 2000;
 const REQUEST_LIMIT = 20_000;
@@ -234,7 +238,9 @@ export default {
       ) {
         return json({ error: "正在换屉，稍后再试。" }, 503);
       }
-      const ttl = request.method === "GET" ? PUBLIC_CACHE_TTL[url.pathname] : 0;
+      const pagedModels =
+        url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
+      const ttl = request.method === "GET" ? (pagedModels ? 30 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
       if (ttl) {
         const cacheKey = new Request(url.toString(), { method: "GET" });
         let hit: Response | undefined;
@@ -277,7 +283,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const method = request.method;
 
   if (path === "/api/status" && method === "GET") return json(await siteStatus(env));
-  if (path === "/api/models" && method === "GET") return listModels(env);
+  if (path === "/api/models" && method === "GET") return listModels(env, url);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
   if (path === "/api/applications" && method === "POST") return applyModel(request, env, ctx);
@@ -870,9 +876,8 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
   return json({ ok: true, id: newId, suffix, blurb }, 200, cookie ? { "set-cookie": cookie } : undefined);
 }
 
-async function listModels(env: AppEnv): Promise<Response> {
-  const { home, operators } = await loadPresence(env, Date.now(), true);
-  const models = [home, ...operators.filter((row) => row.active === 1)].map((row) => ({
+function modelJson(row: Presence) {
+  return {
     id: row.id,
     home: row.home,
     blurb: row.blurb,
@@ -882,9 +887,93 @@ async function listModels(env: AppEnv): Promise<Response> {
     pending: row.pending,
     lastSeenAt: row.lastSeenAt,
     lastReplyAt: row.lastReplyAt,
-  }));
-  const auto = autoChoice(home, operators);
-  return json({ models, auto: auto.id });
+  };
+}
+
+async function listModels(env: AppEnv, url: URL): Promise<Response> {
+  const now = Date.now();
+  const q = (url.searchParams.get("q") || "").trim().slice(0, MODEL_SEARCH_MAX);
+  const pageValue = Number(url.searchParams.get("page") || "1");
+  const page = Number.isFinite(pageValue) ? Math.max(1, Math.min(1000, Math.floor(pageValue))) : 1;
+  const browse = Boolean(q) || url.searchParams.has("page");
+  const auto = await autoModelId(env, now);
+
+  if (!browse) {
+    const home = await homePresence(env, now);
+    const rows = await env.DB.prepare(
+      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+        COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
+       FROM operators o
+       LEFT JOIN (
+         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+         FROM threads
+         WHERE awaiting = 1 AND queued = 0
+         GROUP BY operator_id
+       ) p ON p.operator_id = o.id
+       WHERE o.active = 1
+         AND o.last_seen_at >= ?
+         AND COALESCE(p.n, 0) < ?
+         AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
+       ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
+    )
+      .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT)
+      .all<PresenceRow>();
+    const operators = rows.results.map((row) => presenceFromRow(row, now));
+    const totalRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM operators WHERE active = 1 AND last_seen_at >= ?",
+    )
+      .bind(now - MODEL_RECENT_MS)
+      .first<{ n: number }>();
+    const total = Number(totalRow?.n) || 0;
+    return json({
+      models: [home, ...operators].map(modelJson),
+      auto,
+      hidden: Math.max(0, total - operators.length),
+      total,
+      page: 1,
+      pageSize: 0,
+      hasMore: false,
+    });
+  }
+
+  const where = ["o.active = 1", "o.last_seen_at >= ?"];
+  const bindings: unknown[] = [now - MODEL_RECENT_MS];
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+    where.push("(o.id LIKE ? ESCAPE '\\' OR o.blurb LIKE ? ESCAPE '\\')");
+    bindings.push(like, like);
+  }
+  const rows = await env.DB.prepare(
+    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+      COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
+     FROM operators o
+     LEFT JOIN (
+       SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+       FROM threads
+       WHERE awaiting = 1 AND queued = 0
+       GROUP BY operator_id
+     ) p ON p.operator_id = o.id
+     WHERE ${where.join(" AND ")}
+     ORDER BY o.last_seen_at DESC, o.id ASC
+     LIMIT ? OFFSET ?`,
+  )
+    .bind(...bindings, MODEL_PAGE_SIZE, (page - 1) * MODEL_PAGE_SIZE)
+    .all<PresenceRow>();
+  const totalRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM operators o WHERE ${where.join(" AND ")}`,
+  )
+    .bind(...bindings)
+    .first<{ n: number }>();
+  const total = Number(totalRow?.n) || 0;
+  return json({
+    models: rows.results.map((row) => modelJson(presenceFromRow(row, now))),
+    auto,
+    hidden: 0,
+    total,
+    page,
+    pageSize: MODEL_PAGE_SIZE,
+    hasMore: page * MODEL_PAGE_SIZE < total,
+  });
 }
 
 function modelSuffix(value: unknown): string {
@@ -918,16 +1007,26 @@ function reasonOf(value: unknown): string {
 
 type Assignment = { id: string; requested: string; fallback: boolean; queued: boolean };
 
-function autoChoice(home: Presence, operators: Presence[]): Presence {
-  const candidates = operators
-    .filter((row) => row.active === 1 && row.status === "online")
-    .sort(
-      (a, b) =>
-        a.pending - b.pending ||
-        a.lastAssignedAt - b.lastAssignedAt ||
-        a.id.localeCompare(b.id),
-    );
-  return candidates[0] || home;
+async function autoModelId(env: AppEnv, now = Date.now()): Promise<string> {
+  const row = await env.DB.prepare(
+    `SELECT o.id
+     FROM operators o
+     LEFT JOIN (
+       SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+       FROM threads
+       WHERE awaiting = 1 AND queued = 0
+       GROUP BY operator_id
+     ) p ON p.operator_id = o.id
+     WHERE o.active = 1
+       AND o.last_seen_at >= ?
+       AND COALESCE(p.n, 0) < ?
+       AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
+     ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
+     LIMIT 1`,
+  )
+    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT)
+    .first<{ id: string }>();
+  return row?.id || HOME_MODEL;
 }
 
 async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
@@ -935,15 +1034,16 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
   if (requested === HOME_MODEL) {
     return { id: HOME_MODEL, requested, fallback: false, queued: false };
   }
-  const { home, operators } = await loadPresence(env, Date.now(), true);
   if (requested) {
-    const explicit = operators.find((row) => row.id === requested);
-    if (explicit && explicit.active === 1) {
+    const explicit = await env.DB.prepare("SELECT id FROM operators WHERE id = ? AND active = 1")
+      .bind(requested)
+      .first<{ id: string }>();
+    if (explicit) {
       return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }
-  const chosen = autoChoice(home, operators);
-  if (chosen.id === HOME_MODEL) {
+  const chosen = await autoModelId(env);
+  if (chosen === HOME_MODEL) {
     return {
       id: POOL_MODEL,
       requested,
@@ -952,9 +1052,9 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
     };
   }
   return {
-    id: chosen.id,
+    id: chosen,
     requested,
-    fallback: Boolean(requested && requested !== chosen.id),
+    fallback: Boolean(requested && requested !== chosen),
     queued: false,
   };
 }
@@ -1495,13 +1595,44 @@ async function publicStatus(env: AppEnv): Promise<StatusPayload> {
 }
 
 async function siteStatus(env: AppEnv): Promise<StatusPayload> {
-  const { home, operators } = await loadPresence(env, Date.now(), true);
-  const active = [home, ...operators].filter((row) => row.active === 1);
-  const state: PresenceState = active.some((row) => row.status === "online")
-    ? "online"
-    : active.some((row) => row.status === "busy")
-      ? "busy"
-      : "away";
+  const now = Date.now();
+  const [home, row] = await Promise.all([
+    homePresence(env, now),
+    env.DB.prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN o.active = 1
+           AND o.last_seen_at >= ?
+           AND COALESCE(p.n, 0) < ?
+           AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
+           THEN 1 ELSE 0 END), 0) AS online,
+         COALESCE(SUM(CASE WHEN o.active = 1
+           AND o.last_seen_at >= ?
+           AND (COALESCE(p.n, 0) >= ? OR (COALESCE(p.n, 0) > 0 AND p.oldest < ?))
+           THEN 1 ELSE 0 END), 0) AS busy
+       FROM operators o
+       LEFT JOIN (
+         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+         FROM threads
+         WHERE awaiting = 1 AND queued = 0
+         GROUP BY operator_id
+       ) p ON p.operator_id = o.id`,
+    )
+      .bind(
+        now - ONLINE_TTL,
+        PENDING_CAP,
+        now - REPLY_TIMEOUT,
+        now - ONLINE_TTL,
+        PENDING_CAP,
+        now - REPLY_TIMEOUT,
+      )
+      .first<{ online: number | null; busy: number | null }>(),
+  ]);
+  const state: PresenceState =
+    Number(row?.online) > 0 || home.status === "online"
+      ? "online"
+      : Number(row?.busy) > 0 || home.status === "busy"
+        ? "busy"
+        : "away";
   const payload = statusPayload(state);
   if (state === "online") payload.note = "有人在";
   return payload;

@@ -20,6 +20,7 @@ const composer = $("#composer");
 const sys = $("#sys");
 const card = $("#card");
 const modelBtn = $("#model");
+const modelSearch = $("#model-search");
 const history = $("#history");
 const titleEl = $("#title");
 
@@ -42,7 +43,13 @@ let chosen = AUTO;
 let threadModel = "";
 let threadQueued = false;
 let modelsAt = 0;
-let offlineOpen = false;
+let modelSearchMode = false;
+let modelSearchQuery = "";
+let modelSearchPage = 1;
+let modelSearchHasMore = false;
+let modelSearchHidden = 0;
+let modelSearchSeq = 0;
+let modelSearchTimer = 0;
 let making = false;
 let blocked = false;
 const MAX_IMAGES = 6;
@@ -1005,77 +1012,75 @@ function paintModels() {
   });
   list.append(auto);
 
-  const visible = [];
-  const hidden = [];
-  for (const model of models) {
-    const online = model.status === "online" || model.online === true;
-    if (online || model.id === id) visible.push(model);
-    else hidden.push(model);
-  }
+  const visible = modelSearchMode
+    ? models.slice()
+    : models.filter((model) => model.id === id || model.status === "online" || model.online === true);
 
-  const addRow = (model, compact) => {
+  const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
     const button = document.createElement("button");
     button.type = "button";
-    button.className = compact ? "model-row compact" : "model-row";
+    button.className = "model-row";
     button.dataset.state = state;
     button.disabled = !online;
     button.setAttribute("aria-disabled", String(!online));
     button.setAttribute("aria-pressed", String(model.id === id));
-    if (compact) {
-      button.innerHTML =
-        `<i data-on="0"></i><span class="who"><b></b></span><small class="model-state"></small>`;
-      button.querySelector("b").textContent = model.id;
-      button.querySelector(".model-state").textContent =
-        state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
-    } else {
-      button.innerHTML =
-        `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
-      button.querySelector("b").textContent = model.id;
-      button.querySelector(".who small").textContent = model.blurb || "";
-      button.querySelector(".model-state").textContent =
-        state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
-      if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
-      button.addEventListener("click", () => {
-        if (!online) return;
-        if (current) {
-          newChat(model.id);
-          return;
-        }
-        chosen = model.id;
-        paintModels();
-      });
-    }
+    button.innerHTML =
+      `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
+    button.querySelector("b").textContent = model.id;
+    button.querySelector(".who small").textContent = model.blurb || "";
+    button.querySelector(".model-state").textContent =
+      state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
+    if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
+    button.addEventListener("click", () => {
+      if (!online) return;
+      if (current) {
+        newChat(model.id);
+        return;
+      }
+      chosen = model.id;
+      paintModels();
+    });
     list.append(button);
   };
 
-  visible.forEach((model) => addRow(model, false));
-  if (hidden.length) {
+  visible.forEach(addRow);
+  if (modelSearchMode && !visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "quiet";
+    empty.textContent = "没有找到这个型号。";
+    list.append(empty);
+  }
+  if (!modelSearchMode && modelSearchHidden > 0) {
+    const more = document.createElement("p");
+    more.className = "model-more static";
+    more.textContent = `还有 ${modelSearchHidden} 个型号，搜索查看`;
+    list.append(more);
+  }
+  if (modelSearchMode && modelSearchHasMore) {
     const more = document.createElement("button");
     more.type = "button";
     more.className = "model-more";
-    more.setAttribute("aria-expanded", String(offlineOpen));
-    const moreText = offlineOpen
-      ? `收起 ${hidden.length} 个暂不可选的型号`
-      : `还有 ${hidden.length} 个型号暂不可选`;
-    more.innerHTML = `<span>${moreText}</span><svg class="i"><use href="#i-chev"/></svg>`;
-    more.addEventListener("click", () => {
-      offlineOpen = !offlineOpen;
-      paintModels();
-    });
+    more.textContent = "加载更多";
+    more.addEventListener("click", () => void loadMoreModels());
     list.append(more);
-    if (offlineOpen) hidden.forEach((model) => addRow(model, true));
   }
   if (!current) applyModelStatus();
 }
 
 async function loadModels(pick) {
-  if (!pick && Date.now() - modelsAt < 60000) return;
+  if (!pick && (modelSearchMode || Date.now() - modelsAt < 60000)) return;
   try {
     const data = await api("/api/models");
     models = data.models || [];
     autoModel = typeof data.auto === "string" ? data.auto : "";
+    modelSearchMode = false;
+    modelSearchQuery = "";
+    modelSearch.value = "";
+    modelSearchHidden = Number(data.hidden) || 0;
+    modelSearchHasMore = false;
+    modelSearchPage = 1;
     modelsAt = Date.now();
   } catch {
     return;
@@ -1095,6 +1100,59 @@ async function loadModels(pick) {
   }
   paintModels();
 }
+
+async function searchModels() {
+  const q = modelSearch.value.trim();
+  if (!q) {
+    modelSearchMode = false;
+    modelSearchQuery = "";
+    modelSearchSeq++;
+    await loadModels(true);
+    return;
+  }
+  modelSearchMode = true;
+  modelSearchQuery = q;
+  modelSearchPage = 1;
+  const seq = ++modelSearchSeq;
+  try {
+    const data = await api(`/api/models?q=${encodeURIComponent(q)}&page=1`);
+    if (seq !== modelSearchSeq) return;
+    models = data.models || [];
+    autoModel = typeof data.auto === "string" ? data.auto : "";
+    modelSearchHasMore = Boolean(data.hasMore);
+    modelSearchHidden = 0;
+    modelsAt = Date.now();
+    paintModels();
+  } catch (err) {
+    if (seq === modelSearchSeq) showSys(err.message);
+  }
+}
+
+async function loadMoreModels() {
+  if (!modelSearchMode || !modelSearchHasMore) return;
+  const seq = modelSearchSeq;
+  const page = modelSearchPage + 1;
+  try {
+    const data = await api(
+      `/api/models?q=${encodeURIComponent(modelSearchQuery)}&page=${page}`,
+    );
+    if (seq !== modelSearchSeq) return;
+    models = models.concat(data.models || []);
+    autoModel = typeof data.auto === "string" ? data.auto : autoModel;
+    modelSearchPage = page;
+    modelSearchHasMore = Boolean(data.hasMore);
+    paintModels();
+  } catch (err) {
+    showSys(err.message);
+  }
+}
+
+modelSearch.addEventListener("input", () => {
+  clearTimeout(modelSearchTimer);
+  modelSearchTimer = setTimeout(() => {
+    void searchModels();
+  }, 250);
+});
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) clearTimeout(timer);
