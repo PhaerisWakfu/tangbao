@@ -232,19 +232,25 @@ function useTurso(env: AppEnv): AppEnv {
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    if (env.MAINTENANCE === "1") {
+      const api = new URL(request.url).pathname.startsWith("/api/");
+      const message = "站点正在维护，请稍后再试。";
+      return new Response(
+        request.method === "HEAD" ? null : api ? JSON.stringify({ error: message, code: "MAINTENANCE" }) : message,
+        {
+          status: 503,
+          headers: {
+            "content-type": api ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
+            "cache-control": "no-store",
+            "retry-after": "60",
+          },
+        },
+      );
+    }
     try {
       const scoped = useTurso(env);
       await ensureReportSchema(scoped);
       const url = new URL(request.url);
-      if (
-        env.MAINTENANCE === "1" &&
-        request.method !== "GET" &&
-        request.method !== "HEAD" &&
-        url.pathname.startsWith("/api/") &&
-        url.pathname !== "/api/admin/login"
-      ) {
-        return json({ error: "正在换屉，稍后再试。" }, 503);
-      }
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
       const ttl = request.method === "GET" ? (pagedModels ? 30 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
@@ -281,10 +287,15 @@ export default {
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
+    if (env.MAINTENANCE === "1") return;
     ctx.waitUntil(refreshHomePresence(useTurso(env)));
     ctx.waitUntil(processMailOutbox(useTurso(env)));
   },
   async queue(batch, env): Promise<void> {
+    if (env.MAINTENANCE === "1") {
+      batch.retryAll({ delaySeconds: 60 });
+      return;
+    }
     await consumeMailEvents(batch, useTurso(env));
   },
 } satisfies ExportedHandler<AppEnv>;
