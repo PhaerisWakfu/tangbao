@@ -25,7 +25,10 @@
 .account-notice { color: var(--ink-2); }
 .account-error { color: #a32323; }
 body[data-presence="asleep"] .account-error { color: #ffb3a8; }
-.account-claim-preview { margin: 0; padding: 14px; background: var(--side); border: 1px solid var(--line); border-radius: 9px; }
+.account-claim-preview { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 14px; background: var(--side); border: 1px solid var(--line); border-radius: 9px; }
+.account-claim-preview > div { display: grid; gap: 4px; min-width: 0; }
+.account-claim-preview dt { color: var(--ink-2); font-size: 12px; }
+.account-claim-preview dd { min-width: 0; margin: 0; overflow-wrap: anywhere; word-break: normal; }
 .account-gate-actions { display: grid; gap: 10px; margin-top: 18px; }
 .account-gate-actions button, .account-gate-actions a { display: block; width: 100%; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); color: var(--ink); text-decoration: none; text-align: center; }
 .account-gate-actions .account-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
