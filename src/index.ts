@@ -670,6 +670,12 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   const assignment = await assignOperator(env, incoming.operator);
+  if (
+    assignment.id !== POOL_MODEL &&
+    (await isBlocked(env, [visitor, ip], assignment.id))
+  ) {
+    throw new HttpError(403, "这个模型暂时不接你的话。");
+  }
   const operator = assignment.id;
   const now = Date.now();
   const queued = assignment.queued ? 1 : 0;
@@ -707,7 +713,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
 
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request));
-  const seen = await attachIdentity(env, thread, request);
+  const seen = await attachIdentity(env, thread, request, thread.operator_id);
   const [messages, operator] = await Promise.all([
     listMessages(env, id),
     operatorPresence(env, thread.operator_id),
@@ -751,7 +757,7 @@ function reportReasonOf(value: unknown): string {
 
 async function reportThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request));
-  const seen = await attachIdentity(env, thread, request);
+  const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
   if (thread.queued === 1 || thread.operator_id === POOL_MODEL) {
     throw new HttpError(400, "这条还没有模型接手。");
@@ -773,7 +779,7 @@ async function reportThread(request: Request, env: AppEnv, id: string): Promise<
 async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const token = bearer(request);
   const thread = await loadOwned(env, id, token);
-  const seen = await attachIdentity(env, thread, request);
+  const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
   if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
     throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
@@ -1486,16 +1492,17 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
       : Promise.resolve(null),
   ]);
   const status = statusPayload(publicPresence(presence.status));
+  const scope = blockScope(own);
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
      WHERE operator_id = ? AND (
-       token_hash IN (SELECT id FROM blocks)
-       OR visitor_hash IN (SELECT id FROM blocks)
-       OR ip_hash IN (SELECT id FROM blocks)
+       token_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
+       OR visitor_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
+       OR ip_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
      )
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(own)
+    .bind(own, scope, scope, scope)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
@@ -1527,7 +1534,11 @@ async function blockThread(request: Request, env: AppEnv, id: string): Promise<R
   if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
     throw new HttpError(404, "这屉不在笼里。");
   }
-  await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  await rememberBlock(
+    env,
+    [thread.token_hash, thread.visitor_hash, thread.ip_hash],
+    seat.super ? GLOBAL_BLOCK : thread.operator_id,
+  );
   await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
   return json({ ok: true });
 }
@@ -1548,7 +1559,11 @@ async function unblockThread(request: Request, env: AppEnv, id: string): Promise
   if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
     throw new HttpError(404, "这屉不在笼里。");
   }
-  await forgetBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  await forgetBlock(
+    env,
+    [thread.token_hash, thread.visitor_hash, thread.ip_hash],
+    seat.super ? [GLOBAL_BLOCK, thread.operator_id] : [thread.operator_id],
+  );
   return json({ ok: true });
 }
 
@@ -1694,7 +1709,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
   const seat = await requireSeat(request, env);
   if (!seat.super && thread.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
-  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash]);
+  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash], thread.operator_id);
   return json({
     thread: {
       id: thread.id,
@@ -1882,32 +1897,66 @@ function presentIds(...ids: Array<string | null | undefined>): string[] {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-async function isBlocked(env: AppEnv, ids: Array<string | null | undefined>): Promise<boolean> {
+const GLOBAL_BLOCK = "*";
+
+function blockScope(operatorId: string): string {
+  return operatorId === HOME_MODEL || operatorId === POOL_MODEL ? GLOBAL_BLOCK : operatorId;
+}
+
+async function isBlocked(
+  env: AppEnv,
+  ids: Array<string | null | undefined>,
+  operatorId?: string,
+): Promise<boolean> {
   const fresh = presentIds(...ids);
   if (!fresh.length) return false;
   const marks = fresh.map(() => "?").join(", ");
-  const row = await env.DB.prepare(`SELECT id FROM blocks WHERE id IN (${marks}) LIMIT 1`)
-    .bind(...fresh)
+  const scope = operatorId ? blockScope(operatorId) : "";
+  const scopeWhere = scope
+    ? "AND (operator_id = ? OR operator_id = '*')"
+    : "AND operator_id = '*'";
+  const bindings = scope ? [...fresh, scope] : fresh;
+  const row = await env.DB.prepare(
+    `SELECT id FROM blocks WHERE id IN (${marks}) ${scopeWhere} LIMIT 1`,
+  )
+    .bind(...bindings)
     .first();
   return Boolean(row);
 }
 
-async function rememberBlock(env: AppEnv, ids: Array<string | null | undefined>): Promise<void> {
+async function rememberBlock(
+  env: AppEnv,
+  ids: Array<string | null | undefined>,
+  operatorId = GLOBAL_BLOCK,
+): Promise<void> {
   const fresh = presentIds(...ids);
   if (!fresh.length) return;
+  const scope = blockScope(operatorId);
   const now = Date.now();
   await env.DB.batch(
     fresh.map((id) =>
-      env.DB.prepare("INSERT INTO blocks (id, created_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING").bind(id, now),
+      env.DB.prepare(
+        "INSERT INTO blocks (id, operator_id, created_at) VALUES (?, ?, ?) ON CONFLICT(id, operator_id) DO NOTHING",
+      ).bind(id, scope, now),
     ),
   );
 }
 
-async function forgetBlock(env: AppEnv, ids: Array<string | null | undefined>): Promise<void> {
+async function forgetBlock(
+  env: AppEnv,
+  ids: Array<string | null | undefined>,
+  operatorIds: string[],
+): Promise<void> {
   const fresh = presentIds(...ids);
-  if (!fresh.length) return;
+  const scopes = [...new Set(operatorIds.map(blockScope))];
+  if (!fresh.length || !scopes.length) return;
   const marks = fresh.map(() => "?").join(", ");
-  await env.DB.prepare(`DELETE FROM blocks WHERE id IN (${marks})`).bind(...fresh).run();
+  const scopeMarks = scopes.map(() => "?").join(", ");
+  await env.DB.prepare(
+    `DELETE FROM blocks WHERE id IN (${marks}) AND operator_id IN (${scopeMarks})`,
+  )
+    .bind(...fresh, ...scopes)
+    .run();
 }
 
 async function visitorHash(request: Request): Promise<string> {
@@ -1920,11 +1969,18 @@ async function attachIdentity(
   env: AppEnv,
   thread: { id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null },
   request: Request,
+  operatorId: string,
 ): Promise<{ blocked: boolean }> {
   const visitor = await visitorHash(request);
   const ip = await clientHash(request);
-  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]);
-  if (blocked) await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]);
+  const blocked = await isBlocked(
+    env,
+    [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip],
+    operatorId,
+  );
+  if (blocked) {
+    await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip], operatorId);
+  }
   if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
     await env.DB.prepare(
       "UPDATE threads SET visitor_hash = COALESCE(visitor_hash, ?), ip_hash = COALESCE(ip_hash, ?) WHERE id = ?",
