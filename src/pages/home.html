@@ -186,6 +186,7 @@
     const $ = (selector) => document.querySelector(selector);
     const APPLY_KEY = "tangbao.apply";
     const VISITOR_KEY = "tangbao.visitor";
+    let onlineOpen = false;
 
     function visitorId() {
       try {
@@ -415,7 +416,7 @@
       lineup.replaceChildren();
       const online = models.filter((model) => model.status === "online");
       const lead = online.length
-        ? online
+        ? (onlineOpen ? online : online.slice(0, 10))
         : models.filter((model) => model.home).slice(0, 1);
       if (!lead.length && models.length) lead.push(models[0]);
 
@@ -450,9 +451,23 @@
       };
 
       lead.forEach(addLine);
+      if (online.length > 10) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "line-more";
+        more.setAttribute("aria-expanded", String(onlineOpen));
+        more.textContent = onlineOpen
+          ? "收起在线型号"
+          : `还有 ${online.length - 10} 个在线型号，查看全部`;
+        more.addEventListener("click", () => {
+          onlineOpen = !onlineOpen;
+          paintModels(models, hiddenCount);
+        });
+        lineup.append(more);
+      }
       if (hiddenCount > 0) {
         const more = document.createElement("p");
-        more.className = "line-more";
+        more.className = "line-more static";
         more.textContent = `还有 ${hiddenCount} 个型号暂不可选`;
         lineup.append(more);
       }

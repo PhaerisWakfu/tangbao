@@ -1538,4 +1538,17 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   .front-top { padding-top: 14px; }
   .github-link { height: 28px; font-size: 11.5px; }
   .github-link svg { width: 13px; height: 13px; }
+
+  .card {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top));
+    z-index: 55;
+  }
+  .card .model-list {
+    max-height: min(46dvh, 360px);
+  }
 }
