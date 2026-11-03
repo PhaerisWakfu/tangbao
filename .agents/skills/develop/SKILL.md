@@ -1,6 +1,6 @@
 ---
 name: develop
-description: 根据糖包项目已确认的 GitHub Issue 实现功能或工程任务，完成 Epic 分支管理、本地验证及提交验收回填。用于开始或继续实现、功能交付；仅整理需求使用 requirement，缺陷调查修复使用 bugfix。
+description: 根据糖包项目已确认的 GitHub Issue 实现功能或工程任务，通过 GitHub CLI（gh）维护需求和交付记录，完成 Epic 分支管理与本地验证。用于开始或继续实现、功能交付；仅整理需求使用 requirement，缺陷调查修复使用 bugfix。
 metadata:
   short-description: "根据糖包项目 GitHub Issue 实现功能或工程任务，完成分支管理、本地验证与交付回填"
 ---
@@ -10,6 +10,8 @@ metadata:
 输入为已明确的 Issue 和本次实施范围；输出为可审阅的改动、有效验证及 Issue 交付记录。
 
 调用示例：使用 `$develop` 执行指定 GitHub Issue，按项目分支规范完成实现、验证和交付记录。
+
+Issue 读取、阶段更新、关系维护和交付回填统一优先用 `gh issue`，缺少子命令的能力用 `gh api`；认证、长正文写入和写后回读遵循 [CLI 操作规则](../../../docs/issue-workflow.md#github-cli-操作)。GitHub 日常操作不打开浏览器；业务页面验证按测试范围另行进行。
 
 ## 进入实施
 

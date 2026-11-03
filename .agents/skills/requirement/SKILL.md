@@ -1,6 +1,6 @@
 ---
 name: requirement
-description: 整理糖包项目的新需求、用户反馈及范围变更，在 GitHub Issues 查重、澄清场景与验收、拆分 Epic 和子项。用于需求录入、补方案或调整范围；代码实现使用 develop，缺陷调查修复使用 bugfix。
+description: 整理糖包项目的新需求、用户反馈及范围变更，通过 GitHub CLI（gh）维护 Issues、澄清场景与验收、拆分 Epic 和子项。用于需求录入、补方案或调整范围；代码实现使用 develop，缺陷调查修复使用 bugfix。
 metadata:
   short-description: "将糖包项目反馈整理为可开发的 GitHub Issues，完成查重、澄清、层级拆分和验收定义"
 ---
@@ -17,13 +17,15 @@ metadata:
 
 以 checkout 根目录解析项目文档。本地有 AGENTS.md 时读取其适用规则；前端方案按需读 docs/frontend.md，账号需求按需读 docs/accounts.md。设计建议、产品确认和现有实现必须分别识别。
 
+Issue 查重、创建、更新、标签、指派和原生父子关系统一优先用 `gh issue`，缺少子命令的能力用 `gh api`；认证、长正文写入和写后回读遵循 [CLI 操作规则](../../../docs/issue-workflow.md#github-cli-操作)。正常需求整理不打开 GitHub 页面，CLI 故障先诊断并说明原因。
+
 ## 整理并维护 Issue
 
 1. 搜索本仓库相关 Open/Closed Issue，读取命中的主描述及决策。已有工作更新原 Issue，保留范围变化的简短记录；不只凭标题创建重复任务。
 2. 提炼“谁在什么场景遇到什么问题、希望得到什么结果”。列出已确认规则、本次范围与不做项、实施建议和未决问题。只有影响方案且无法从现有证据得到的事项才请求澄清；等待时继续独立工作。
 3. 写可观察的验收标准，包含正常、异常、权限及适用的数据/兼容边界；区分当前实现和未来能力。跨模块需求评估前端、后端、存储、外部服务、运营与费用影响。
 4. 对较大的主题建立 Epic，按独立交付结果拆分子项，注明顺序及依赖；建立并核验 GitHub 原生父子关系。依赖与归属分别记录，避免同义父子任务。
-5. 按工作流程设置实际 labels 和默认 assignee，读取返回元数据或页面确认。需求用 Requirement，技术任务用 Task；汇总加 Epic。Issue 模板不可用时仍可填写结构化正文并补设元数据，不能把正文描述当作已设置成功。
+5. 按工作流程设置实际 labels 和默认 assignee，通过 CLI 回读 JSON 确认。需求用 Requirement，技术任务用 Task；汇总加 Epic。Issue 模板不可用时仍可用 --body-file 写入结构化正文并补设元数据，不能把正文描述当作已设置成功。
 6. 用 [Issue 记录格式](../../../docs/issue-records.md) 按需填写范围、方案、依赖和验证计划。关键条件未定时标为待澄清；已足够实施时标为待开发。用户只要求整理时，交付到需求阶段；同时要求实施时再按 develop 或 bugfix 的对应流程继续。
 
 ## 交付
