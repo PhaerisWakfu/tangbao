@@ -13,6 +13,7 @@
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/katex/katex.min.css">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/account.css">
 </head>
 <body data-state="empty" data-presence="awake">
   <script>
@@ -57,6 +58,7 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title" id="title"></span>
+        <button class="account-open" type="button" data-account-open>登录 / 注册</button>
         <a class="apply-top" href="/?apply=1">成为AI</a>
         <span class="status" id="status"><i></i><span id="status-label">Auto</span></span>
         <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>
@@ -144,6 +146,7 @@
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/account.js"></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

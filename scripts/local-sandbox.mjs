@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import ts from "typescript";
 import { runScenarios } from "./local-scenarios.mjs";
+import { demoHtml } from "./local-demo.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wrangler = path.join(root, "node_modules/wrangler/bin/wrangler.js");
@@ -110,27 +111,120 @@ async function prepare() {
     if (inspectorPort === port) throw new Error("HTTP 和 inspector 端口不能相同。");
     metadata = { kind, instance, nonce: randomBytes(24).toString("hex"), port, inspectorPort, createdAt: new Date().toISOString() };
     await writeFile(metadataFile, JSON.stringify(metadata, null, 2), { mode: 0o600, flag: "wx" });
-    await writeFile(path.join(directory, ".dev.vars"), `ADMIN_PASSWORD=${randomBytes(18).toString("base64url")}\nADMIN_SECRET=${randomBytes(48).toString("base64url")}\n`, { mode: 0o600, flag: "wx" });
+    await writeFile(path.join(directory, ".dev.vars"), `ADMIN_PASSWORD=${randomBytes(18).toString("base64url")}\nADMIN_SECRET=${randomBytes(48).toString("base64url")}\nEMAIL_CODE_PEPPER=${randomBytes(48).toString("base64url")}\nMAIL_PAYLOAD_KEY=${randomBytes(32).toString("base64url")}\n`, { mode: 0o600, flag: "wx" });
   }
+  // Older local instances keep their credentials/data; only add missing local mail secrets.
+  const localVarsFile = path.join(directory, ".dev.vars");
+  const localVars = await readFile(localVarsFile, "utf8");
+  let additions = "";
+  for (const key of ["EMAIL_CODE_PEPPER", "MAIL_PAYLOAD_KEY"]) {
+    if (!new RegExp(`^${key}=.+$`, "m").test(localVars)) additions += `${key}=${randomBytes(48).toString("base64url")}\n`;
+  }
+  if (additions) await writeFile(localVarsFile, `${localVars.endsWith("\n") ? "" : "\n"}${additions}`, { flag: "a", mode: 0o600 });
   const source = ts.parseConfigFileTextToJson("wrangler.jsonc", await readFile(path.join(root, "wrangler.jsonc"), "utf8"));
   if (source.error) throw new Error("无法解析仓库 wrangler.jsonc。");
   const disabled = {
     TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: "", FEISHU_WEBHOOK: "",
     VAPID_PUBLIC_KEY: "", VAPID_PRIVATE_KEY: "", VAPID_SUBJECT: "",
-    RESEND_API_KEY: "", RESEND_WEBHOOK_SECRET: "", MAIL_MODE: "disabled", MAINTENANCE: "0",
+    RESEND_API_KEY: "", RESEND_WEBHOOK_SECRET: "", MAIL_MODE: "test", MAIL_DAILY_LIMIT: "200", MAIL_FROM: "noreply@mail.example.test", MAINTENANCE: "0",
   };
   const entry = path.relative(directory, path.join(root, "src/index.ts")).split(path.sep).join("/");
+  const emailEntry = path.relative(directory, path.join(root, "src/email.ts")).split(path.sep).join("/");
   const wrapper = `import worker from ${JSON.stringify(entry)};
+import { readTestMail, processMailOutbox } from ${JSON.stringify(emailEntry)};
 const disabled = ${JSON.stringify(disabled)};
+const nonce = ${JSON.stringify(metadata.nonce)};
+const control = {};
+const json = (value, status = 200) => Response.json(value, {status, headers: {"cache-control": "no-store"}});
+const isLoopback = host => host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+const hash = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(n => n.toString(16).padStart(2, "0")).join("");
+async function fixture(request, env) {
+  const text = await request.text();
+  if (text.length > 16000) return json({error:"本地请求过大"}, 413);
+  const body = JSON.parse(text || "{}");
+  if (body.action === "set-demo-actors") {
+    if (!Array.isArray(body.actors) || body.actors.length > 20 || body.actors.some(actor => typeof actor.name !== "string" || typeof actor.password !== "string" || actor.password.length > 128 || actor.email && !actor.email.endsWith("@example.test"))) return json({error:"只允许本地合成演示账号"},400);
+    await env.DB.prepare("INSERT INTO settings (key,value) VALUES ('local_demo_actors',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(body.actors)).run();
+    return json({ok:true});
+  }
+  if (body.action === "grant-admin") {
+    const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? AND email LIKE '%@example.test' AND verified_at > 0 AND status = 'active'").bind(body.accountId).first();
+    if (!account) return json({error:"只允许已验证的本地合成账号"}, 400);
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO account_roles (account_id, role) VALUES (?, 'admin')").bind(account.id),
+      env.DB.prepare("UPDATE accounts SET session_version = session_version + 1 WHERE id = ?").bind(account.id),
+      env.DB.prepare("UPDATE account_sessions SET revoked_at = ? WHERE account_id = ? AND revoked_at = 0").bind(Date.now(), account.id),
+    ]);
+    return json({ok:true});
+  }
+  if (body.action === "create-legacy") {
+    if (!/^tangbao-local-legacy[a-z0-9-]{0,30}$/.test(body.operatorId || "") || typeof body.password !== "string" || body.password.length < 16) return json({error:"合成模型格式错误"}, 400);
+    await env.DB.prepare("INSERT INTO operators (id, password_hash, active, awake, created_at, blurb) VALUES (?, ?, ?, 0, ?, '本地旧模型迁移演练')").bind(body.operatorId, await hash(body.password), body.active === false ? 0 : 1, Date.now()).run();
+    return json({ok:true,operatorId:body.operatorId});
+  }
+  return json({error:"未知的本地合成操作"},400);
+}
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const scoped = {...env, ...disabled, ...control, APP_ORIGIN: url.origin, EMAIL: undefined};
+    if (!isLoopback(url.hostname)) return json({error:"本地沙箱仅允许回环主机"},403);
     if (url.pathname === "/__local/health") {
-      return Response.json({kind: ${JSON.stringify(kind)}, instance: ${JSON.stringify(instance)}, integrations: "disabled"}, {headers: {"x-tangbao-local": ${JSON.stringify(metadata.nonce)}, "cache-control": "no-store"}});
+      return Response.json({kind: ${JSON.stringify(kind)}, instance: ${JSON.stringify(instance)}, integrations: "local-mail-test", externalSending: false}, {headers: {"x-tangbao-local": nonce, "cache-control": "no-store"}});
     }
-    return worker.fetch(request, {...env, ...disabled}, ctx);
+    if (url.pathname.startsWith("/__local/")) {
+      const demoAuthorized = url.pathname === "/__local/demo" && request.method === "GET" && url.searchParams.get("nonce") === nonce;
+      if (request.headers.get("x-tangbao-local") !== nonce && !demoAuthorized) return json({error:"本地实例凭据不匹配"},403);
+      if (demoAuthorized) return new Response(${JSON.stringify(demoHtml(metadata))}, {headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer"}});
+      if (url.pathname === "/__local/demo-actors" && request.method === "GET") {
+        const row = await env.DB.prepare("SELECT value FROM settings WHERE key='local_demo_actors'").first();
+        return json({actors: row ? JSON.parse(row.value) : []});
+      }
+      if (url.pathname === "/__local/model-state" && request.method === "GET") {
+        const account = await env.DB.prepare("SELECT id FROM accounts WHERE id=? AND email LIKE '%@example.test'").bind(url.searchParams.get("accountId")).first();
+        if (!account) return json({error:"只允许本地合成账号"},400);
+        const model = await env.DB.prepare("SELECT id,operator_uid AS uid,owner_account_id AS owner,active FROM operators WHERE owner_account_id=?").bind(account.id).first();
+        if (!model) return json({model:null,applications:[],blocks:[],subscriptions:[]});
+        const [applications,blocks,subscriptions] = await Promise.all([
+          env.DB.prepare("SELECT operator_id AS operatorId,suffix,status FROM applications WHERE account_id=?").bind(account.id).all(),
+          env.DB.prepare("SELECT id,operator_id AS operatorId FROM blocks WHERE operator_id=? ORDER BY id LIMIT 100").bind(model.id).all(),
+          env.DB.prepare("SELECT endpoint,operator_id AS operatorId FROM push_subscriptions WHERE operator_id=? ORDER BY endpoint LIMIT 100").bind(model.id).all(),
+        ]);
+        return json({model,applications:applications.results,blocks:blocks.results,subscriptions:subscriptions.results});
+      }
+      if (url.pathname === "/__local/deliveries" && request.method === "GET") {
+        await processMailOutbox(scoped);
+        return json({deliveries:(await env.DB.prepare("SELECT challenge_id AS challengeId,status,attempts,last_error AS lastError,expires_at AS expiresAt FROM mail_deliveries ORDER BY created_at DESC LIMIT 100").all()).results});
+      }
+      if (url.pathname === "/__local/mail" && request.method === "GET") {
+        await processMailOutbox(scoped);
+        return json({messages: await readTestMail(scoped, url.searchParams.get("challengeId") || undefined)});
+      }
+      if (url.pathname === "/__local/fixture" && request.method === "POST") return fixture(request, scoped);
+      if (url.pathname === "/__local/control" && request.method === "POST") {
+        const body = await request.json();
+        if (body.now === null) delete control.AUTH_TEST_NOW;
+        else if (body.now !== undefined) {
+          if (!Number.isSafeInteger(body.now) || body.now < 1) return json({error:"无效测试时钟"},400);
+          control.AUTH_TEST_NOW = String(body.now);
+        }
+        if (body.failure === null) delete control.MAIL_TEST_FAILURE;
+        else if (body.failure !== undefined) {
+          if (!["rate_limit","permanent","unknown"].includes(body.failure)) return json({error:"无效邮件故障"},400);
+          control.MAIL_TEST_FAILURE = body.failure;
+        }
+        if (body.budgetUsed !== undefined) {
+          if (!Number.isInteger(body.budgetUsed) || body.budgetUsed < 0 || body.budgetUsed > 200) return json({error:"无效测试预算"},400);
+          const period = new Date(Number(control.AUTH_TEST_NOW) || Date.now()).toISOString().slice(0,10);
+          await env.DB.prepare("INSERT INTO mail_budgets (period, used) VALUES (?, ?) ON CONFLICT(period) DO UPDATE SET used=excluded.used").bind(period,body.budgetUsed).run();
+        }
+        return json({ok:true});
+      }
+      return json({error:"没有该本地操作"},404);
+    }
+    return worker.fetch(request, scoped, ctx);
   },
-  scheduled(controller, env, ctx) { return worker.scheduled(controller, {...env, ...disabled}, ctx); }
+  scheduled(controller, env, ctx) { return worker.scheduled(controller, {...env, ...disabled, ...control, APP_ORIGIN: "http://127.0.0.1:${metadata.port}", EMAIL: undefined}, ctx); }
 };\n`;
   await writeFile(path.join(directory, "worker.mjs"), wrapper);
   await writeFile(configFile, JSON.stringify({
@@ -199,6 +293,7 @@ async function stopServer(child) {
 
 function showInfo(metadata) {
   console.log(`实例：${instance}\n数据及凭据：${directory}\n服务：http://127.0.0.1:${metadata.port}`);
+  console.log(`本地验收与验证码：http://127.0.0.1:${metadata.port}/__local/demo?nonce=${metadata.nonce}`);
   for (const role of ["admin", "operator-a", "operator-b", "visitor-a", "visitor-b"]) {
     console.log(`${role}: http://${role}-${instance}.localhost:${metadata.port}/${role.startsWith("visitor") ? "chat" : "desk"}`);
   }
@@ -213,10 +308,7 @@ async function seed(metadata) {
     console.log(`复用既有合成身份，不重复申请/创建：${fixtureFile}`);
     return fixture;
   }
-  const vars = Object.fromEntries((await readFile(path.join(directory, ".dev.vars"), "utf8")).trim().split(/\r?\n/).map((line) => {
-    const index = line.indexOf("="); return [line.slice(0, index), line.slice(index + 1)];
-  }));
-  return runScenarios({ metadata, directory, fixtureFile, adminPassword: vars.ADMIN_PASSWORD, checkServer: () => checkServer(metadata) });
+  return runScenarios({ metadata, directory, fixtureFile, includeEdgeScenarios: command === "verify", checkServer: () => checkServer(metadata) });
 }
 
 if (command === "prepare") {

@@ -24,8 +24,18 @@ const modelSearch = $("#model-search");
 const history = $("#history");
 const titleEl = $("#title");
 
-let store = loadStore();
+let store = TangbaoAccount.logoutPending ? { threads: [], activeId: null } : loadStore();
 let current = store.threads.find((item) => item.id === store.activeId) || null;
+let ownedThreads = [];
+let ownedPage = 1;
+let ownedHasMore = false;
+let ownedLoading = false;
+let historyAccountId = null;
+let historySequence = 0;
+let viewVersion = 0;
+let creationAttempt = null;
+let claiming = false;
+let loggedOut = TangbaoAccount.logoutPending;
 let status = { state: "available", label: "在线", note: "他在", awake: true, online: true, status: "online" };
 let messages = [];
 let openAwaiting = true;
@@ -76,7 +86,7 @@ function loadStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "");
     if (!parsed || !Array.isArray(parsed.threads)) throw new Error("empty");
-    const threads = parsed.threads.filter((item) => item && validId(item.id));
+    const threads = parsed.threads.filter((item) => item && validId(item.id) && typeof item.token === "string" && !item.owned);
     const activeId = validId(parsed.activeId) ? parsed.activeId : null;
     return { threads, activeId };
   } catch {
@@ -85,18 +95,21 @@ function loadStore() {
 }
 
 function saveStore() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
+  catch { showSys("浏览器无法保存匿名历史入口，请勿清除此页面；可登录后将对话关联到账号。"); }
 }
 
 class ApiError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
 async function api(path, options = {}) {
-  const headers = { "x-visitor": visitorId() };
+  if (loggedOut) throw new ApiError("此设备已退出，请重新登录。", 401, "LOCAL_LOGOUT");
+  const headers = { "x-visitor": visitorId(), ...(options.headers || {}) };
   const form = options.body instanceof FormData;
   if (options.body && !form) headers["content-type"] = "application/json";
   if (options.token) headers.authorization = `Bearer ${options.token}`;
@@ -112,7 +125,8 @@ async function api(path, options = {}) {
     throw new ApiError("消息没送出去。糖包那边暂时没应。", 0);
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(data.error || "消息没送出去。糖包那边暂时没应。", response.status);
+  if (loggedOut) throw new ApiError("此设备已退出，请重新登录。", 401, "LOCAL_LOGOUT");
+  if (!response.ok) throw new ApiError(data.error || "消息没送出去。糖包那边暂时没应。", response.status, data.code);
   return data;
 }
 
@@ -314,82 +328,152 @@ function historyModel(thread) {
   return thread.operator.replace(/^tangbao-/, "");
 }
 
+function visibleThreads() {
+  return [...ownedThreads, ...store.threads];
+}
+
 function renderHistory() {
   history.replaceChildren();
-  if (!store.threads.length) {
+  if (!visibleThreads().length) {
     const empty = document.createElement("p");
     empty.className = "hist-empty";
     empty.textContent = "还没有对话。问的第一句会出现在这里。";
     history.append(empty);
     return;
   }
-  const today = new Date().toDateString();
-  const groups = new Map();
-  for (const thread of store.threads) {
-    const label = new Date(thread.updatedAt || Date.now()).toDateString() === today ? "今天" : "更早";
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label).push(thread);
-  }
-  for (const [label, threads] of groups) {
-    const heading = document.createElement("h3");
-    heading.textContent = label;
-    history.append(heading);
+  const sections = [["账号对话", ownedThreads], ["此浏览器的匿名对话", store.threads]];
+  for (const [label, threads] of sections) {
+    if (!threads.length) continue;
+    const heading = document.createElement("h3"); heading.textContent = label; history.append(heading);
     for (const thread of threads) {
-      const row = document.createElement("div");
-      row.className = "hist-row";
-      if (current && current.id === thread.id) row.dataset.current = "true";
-      const link = document.createElement("a");
-      link.href = "/";
-      link.textContent = thread.title || "新对话";
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        void openThread(thread.id);
-      });
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "hist-x";
-      remove.setAttribute("aria-label", "删除这段对话");
-      const icon = '<svg class="i"><use href="#i-x"/></svg>';
-      remove.innerHTML = icon;
+      const row = document.createElement("div"); row.className = "hist-row";
+      if (current?.id === thread.id) row.dataset.current = "true";
+      const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
+      link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "hist-x"; remove.setAttribute("aria-label", "删除这段对话");
+      const icon = '<svg class="i"><use href="#i-x"/></svg>'; remove.innerHTML = icon;
       remove.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+        event.preventDefault(); event.stopPropagation();
         if (remove.dataset.confirm !== "1") {
-          remove.dataset.confirm = "1";
-          remove.setAttribute("aria-label", "确认删除");
-          remove.textContent = "删";
-          window.setTimeout(() => {
-            if (remove.dataset.confirm !== "1") return;
-            remove.dataset.confirm = "";
-            remove.setAttribute("aria-label", "删除这段对话");
-            remove.innerHTML = icon;
-          }, 2200);
+          remove.dataset.confirm = "1"; remove.setAttribute("aria-label", "确认删除"); remove.textContent = "删";
+          window.setTimeout(() => { if (remove.dataset.confirm === "1") { remove.dataset.confirm = ""; remove.setAttribute("aria-label", "删除这段对话"); remove.innerHTML = icon; } }, 2200);
           return;
         }
         void removeThread(thread);
       });
+      row.append(link);
       const model = historyModel(thread);
-      if (model) {
-        const badge = document.createElement("span");
-        badge.className = "hist-model";
-        badge.textContent = model;
-        badge.title = thread.queued ? "等待模型接手" : thread.operator;
-        row.append(link, badge, remove);
-      } else {
-        row.append(link, remove);
+      if (model) { const badge = document.createElement("span"); badge.className = "hist-model"; badge.textContent = model; row.append(badge); }
+      row.append(remove); history.append(row);
+      if (!thread.owned && TangbaoAccount.account?.verified) {
+        const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
+        claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
       }
-      history.append(row);
     }
+    if (label === "账号对话" && ownedHasMore) {
+      const more = document.createElement("button"); more.type = "button"; more.className = "history-claim";
+      more.textContent = ownedLoading ? "正在加载…" : "加载更多账号对话"; more.disabled = ownedLoading;
+      more.addEventListener("click", () => { void loadOwnedThreads(true).catch((err) => showSys(err.message)); });
+      history.append(more);
+    }
+  }
+  if (TangbaoAccount.account?.verified && store.threads.length) {
+    const bar = document.createElement("div"); bar.className = "history-claim-bar";
+    const note = document.createElement("p"); note.textContent = "关联后只可用当前账号访问，原匿名凭证失效。";
+    const claimAll = document.createElement("button"); claimAll.type = "button"; claimAll.className = "history-claim"; claimAll.textContent = "关联全部匿名对话"; claimAll.disabled = claiming;
+    claimAll.addEventListener("click", () => void claimThreads(store.threads.slice())); bar.append(note, claimAll); history.append(bar);
   }
 }
 
-function remember(thread) {
+function remember(thread, activate = true) {
   if (!validId(thread.id)) return;
-  store.threads = [thread, ...store.threads.filter((item) => item.id !== thread.id)];
-  store.activeId = thread.id;
-  saveStore();
+  if (thread.owned) {
+    if (thread.ownerAccountId !== TangbaoAccount.account?.id) return;
+    ownedThreads = [thread, ...ownedThreads.filter((item) => item.id !== thread.id)];
+  } else {
+    store.threads = [thread, ...store.threads.filter((item) => item.id !== thread.id)];
+    if (activate) store.activeId = thread.id;
+    saveStore();
+  }
   renderHistory();
 }
+
+async function loadOwnedThreads(append = false) {
+  const account = TangbaoAccount.account;
+  if (append && (ownedLoading || !ownedHasMore)) return;
+  const sequence = ++historySequence;
+  if (!account?.verified) { ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; renderHistory(); return; }
+  const page = append ? ownedPage + 1 : 1;
+  ownedLoading = true; renderHistory();
+  try {
+    const data = await api(`/api/account/threads?page=${page}`);
+    if (sequence !== historySequence || TangbaoAccount.account?.id !== account.id) return;
+    const incoming = (data.threads || []).filter((item) => validId(item.id)).map((item) => ({ ...item, operator: item.operatorId || item.operator || "", owned: true, ownerAccountId: account.id }));
+    ownedThreads = append ? [...ownedThreads, ...incoming.filter((item) => !ownedThreads.some((old) => old.id === item.id))] : incoming;
+    ownedPage = Number(data.page) || page; ownedHasMore = Boolean(data.hasMore);
+    if (current?.owned && current.ownerAccountId === account.id) {
+      const fresh = ownedThreads.find((item) => item.id === current.id);
+      if (fresh) Object.assign(current, fresh);
+    }
+  } catch (err) {
+    if (err.statusCode === 401) await TangbaoAccount.refresh().catch(() => null);
+    throw err;
+  } finally {
+    if (sequence === historySequence) { ownedLoading = false; renderHistory(); }
+  }
+}
+
+async function claimThreads(threads) {
+  if (claiming || !TangbaoAccount.account?.verified) return;
+  const accountId = TangbaoAccount.account.id;
+  const label = threads.length > 1 ? `将这 ${threads.length} 段匿名对话关联到 ${TangbaoAccount.account.email}？` : `将这段匿名对话关联到 ${TangbaoAccount.account.email}？`;
+  if (!window.confirm(label + "关联后原匿名访问凭证失效。")) return;
+  claiming = true; renderHistory();
+  let completed = 0;
+  try {
+    for (const thread of threads) {
+      if (TangbaoAccount.account?.id !== accountId) break;
+      await api("/api/account/threads/claim", { method: "POST", body: { threadId: thread.id, token: thread.token } });
+      store.threads = store.threads.filter((item) => item.id !== thread.id);
+      if (store.activeId === thread.id) store.activeId = null;
+      saveStore(); completed++;
+      if (current?.id === thread.id && TangbaoAccount.account?.id === accountId) {
+        current = { ...thread, token: undefined, owned: true, ownerAccountId: accountId };
+      }
+    }
+    if (TangbaoAccount.account?.id === accountId) { await loadOwnedThreads(); showSys(`已关联 ${completed} 段对话。之后可登录此账号查看。`); }
+  } catch (err) { showSys(`已关联 ${completed} 段，其余尚未关联。${err.message}`); }
+  finally { claiming = false; renderHistory(); }
+}
+
+async function syncAccountHistory() {
+  if (loggedOut) return;
+  const nextId = TangbaoAccount.account?.id || null;
+  if (historyAccountId !== nextId) {
+    historyAccountId = nextId; historySequence++; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false;
+    if (current?.owned) {
+      viewVersion++; current = null; threadModel = ""; threadQueued = false;
+      painted = ""; paint([]); titleEl.textContent = ""; updateReportEntry();
+      input.value = ""; clearAttach(); body.dataset.state = "empty"; applyBlocked(false);
+    }
+  }
+  renderHistory();
+  try { await loadOwnedThreads(); }
+  catch (err) { showSys(err.message || "账号历史暂时无法读取，请稍后刷新。"); }
+}
+window.addEventListener("tb:account-change", () => { void syncAccountHistory(); });
+window.addEventListener("tb:logout", () => {
+  loggedOut = true; historySequence++; viewVersion++;
+  clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
+  current = null; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; store = { threads: [], activeId: null };
+  historyAccountId = null; creationAttempt = null; messages = []; painted = "";
+  input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
+  closeViewer(); closeCard(); closeSide();
+  if (reportModal) reportModal.hidden = true;
+  $("#report-reason").value = "";
+  body.dataset.state = "empty"; titleEl.textContent = ""; log.replaceChildren();
+  blocked = false; sending = false; grow(); updateReportEntry(); renderHistory(); showSys("");
+});
 
 async function removeThread(thread) {
   try {
@@ -403,9 +487,11 @@ async function removeThread(thread) {
 }
 
 function forget(id) {
+  ownedThreads = ownedThreads.filter((item) => item.id !== id);
   store.threads = store.threads.filter((item) => item.id !== id);
   if (store.activeId === id) store.activeId = null;
   saveStore();
+  viewVersion++;
   current = null;
   threadModel = "";
   threadQueued = false;
@@ -455,6 +541,11 @@ async function refresh() {
     paintModels();
   } catch (err) {
     if (current !== thread) return;
+    if (err instanceof ApiError && err.statusCode === 401 && thread.owned) {
+      showSys("登录已过期，请重新登录以继续查看账号对话。");
+      await TangbaoAccount.refresh().catch(() => null);
+      return;
+    }
     if (err instanceof ApiError && err.statusCode === 401) {
       forget(thread.id);
       showSys(err.message);
@@ -466,7 +557,7 @@ async function refresh() {
 
 function arm() {
   clearTimeout(timer);
-  if (document.hidden) return;
+  if (document.hidden || loggedOut) return;
   const wait = current && validId(current.id) && openAwaiting ? 30000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
@@ -488,13 +579,14 @@ function closeSide() {
 }
 
 async function openThread(id) {
-  const found = store.threads.find((item) => item.id === id);
+  const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
+  viewVersion++;
   current = found;
   threadModel = "";
   threadQueued = false;
   updateReportEntry();
-  store.activeId = id;
+  store.activeId = found.owned ? null : id;
   saveStore();
   renderHistory();
   closeSide();
@@ -511,6 +603,7 @@ async function openThread(id) {
 }
 
 function newChat(pickModel) {
+  viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
   threadModel = "";
@@ -537,7 +630,7 @@ function newChat(pickModel) {
 function shotFiles(message) {
   if (message.images?.length) {
     return message.images.map((image, index) => ({
-      href: `/api/images/${image.id}`,
+      href: image.url || `/api/images/${image.id}`,
       name: `${message.images.length > 1 ? `tangbao-${index + 1}` : "tangbao"}.${extOf(image.type)}`,
     }));
   }
@@ -678,95 +771,87 @@ async function addImages(files) {
 function grow() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+  input.disabled = blocked || sending;
+  $("#plus").disabled = blocked || sending;
+  $("#file").disabled = sending;
+  $("#make-off").disabled = sending;
   send.disabled = blocked || sending || (making ? !input.value.trim() : !input.value.trim() && !pendingImages.length);
 }
 
 async function sendText(text) {
   if (blocked || sending) return;
+  await TangbaoAccount.ready;
+  if (blocked || sending) return;
   const trimmed = text.trim();
   const images = pendingImages.slice();
   if (!trimmed && !images.length) return;
-  const key = `${trimmed}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
-  const now = Date.now();
-  if (sentGuard.key === key && now - sentGuard.at < 1500) return;
-  sending = true;
-  sentGuard = { key, at: now };
-  send.disabled = true;
-  showSys("");
+  const target = current;
+  const version = viewVersion;
+  const model = activeModel();
+  const draw = making;
+  const signature = JSON.stringify([trimmed, draw, model, images.map((item) => [item.file.name, item.file.size, item.file.lastModified])]);
+  const guardKey = `${target?.id || "new"}:${signature}`;
+  if (sentGuard.key === guardKey && Date.now() - sentGuard.at < 1500) return;
+  sentGuard = { key: guardKey, at: Date.now() };
+  if (!target && (!creationAttempt || creationAttempt.signature !== signature)) creationAttempt = { signature, key: crypto.randomUUID() };
+  const idempotencyKey = creationAttempt?.key;
+  sending = true; grow(); showSys("");
   const prior = messages.slice();
   openAwaiting = true;
-  paint(prior.concat([{
-    id: "local",
-    role: "visitor",
-    body: trimmed,
-    draw: making ? 1 : 0,
-    createdAt: Date.now(),
-    imageUrls: images.map((item) => item.url),
-  }]));
-  if (!current) titleEl.textContent = trimmed || (images.length > 1 ? `${images.length} 张图片` : "一张图片");
-  input.value = "";
-  pendingImages = [];
-  $("#file").value = "";
-  showAttach();
-  grow();
-  const payload = images.length ? new FormData() : { body: trimmed, draw: making };
-  if (images.length) {
-    payload.set("body", trimmed);
-    if (making) payload.set("draw", "1");
-    for (const item of images) payload.append("images", item.file, item.file.name);
-  }
+  paint(prior.concat([{ id: "local", role: "visitor", body: trimmed, draw: draw ? 1 : 0, createdAt: Date.now(), imageUrls: images.map((item) => item.url) }]));
+  let ownerId = target?.ownerAccountId || (TangbaoAccount.account?.verified ? TangbaoAccount.account.id : null);
+  let authRetried = false;
+  let guestRetried = false;
+  let delivered = false;
   try {
-  if (!current || !validId(current.id)) {
-    const created = await api("/api/threads", { method: "POST", body: withOperator(payload) });
-    if (!validId(created.id) || !created.token) throw new ApiError("消息没送出去。糖包那边暂时没应。", 500);
-    current = {
-      id: created.id,
-      token: created.token,
-      title: created.title,
-      updatedAt: Date.now(),
-      operator: created.operator || "",
-      queued: Boolean(created.queued),
-      reported: false,
-    };
-    if (created.queued) {
-      threadQueued = true;
-      threadModel = "";
-    } else if (created.operator) {
-      threadModel = created.operator;
+    let data;
+    for (;;) {
+      const payload = images.length ? new FormData() : { body: trimmed, draw, operator: model };
+      if (images.length) { payload.set("body", trimmed); payload.set("operator", model); if (draw) payload.set("draw", "1"); for (const image of images) payload.append("images", image.file, image.file.name); }
+      try {
+        data = await api(target ? `/api/threads/${target.id}/messages` : "/api/threads", {
+          method: "POST", body: payload, token: target?.token,
+          headers: target ? {} : { "Idempotency-Key": idempotencyKey },
+        });
+        delivered = true;
+        break;
+      } catch (err) {
+        if (!target && err.code === "GUEST_IDENTITY_REQUIRED" && !guestRetried) { guestRetried = true; continue; }
+        if (["AUTH_REQUIRED", "EMAIL_UNVERIFIED"].includes(err.code) && !authRetried) {
+          authRetried = true;
+          if (version === viewVersion) { painted = ""; paint(prior); }
+          showSys("消息尚未发送。登录并验证邮箱后可继续，草稿和图片仍保留在此页。");
+          const account = await TangbaoAccount.open({ mode: TangbaoAccount.account ? "verify" : "register", requireVerified: true });
+          if (!account?.verified) throw new Error("消息尚未发送。草稿和图片已保留。");
+          if (version !== viewVersion) throw new Error("已切换对话，原草稿未自动发送。请回到原输入后再发送。");
+          ownerId = target?.ownerAccountId || account.id;
+          continue;
+        }
+        throw err;
+      }
     }
-    if (created.fallback && created.requested && created.operator && !created.queued) {
-      showSys(`他刚走，这次由 ${created.operator} 接。`);
-    }
-  } else {
-      const data = await api(`/api/threads/${current.id}/messages`, {
-        method: "POST",
-        token: current.token,
-        body: payload,
-      });
-      if (data.status && activeModel() === HOME) applyStatus(data.status);
-      current.updatedAt = Date.now();
-    }
-    remember(current);
+    const relevantAccount = !ownerId || TangbaoAccount.account?.id === ownerId;
+    let result = target;
+    if (!target) {
+      if (!validId(data.id) || (!data.token && !ownerId)) throw new Error("消息结果不完整，请保留页面后重试。");
+      result = { id: data.id, title: data.title || trimmed || "图片", updatedAt: Date.now(), operator: data.operator || data.operatorId || "", queued: Boolean(data.queued), reported: false,
+        ...(ownerId ? { owned: true, ownerAccountId: ownerId } : { token: data.token }) };
+      creationAttempt = null;
+    } else result.updatedAt = Date.now();
+    if (relevantAccount) remember(result, version === viewVersion);
+    if (version !== viewVersion || !relevantAccount) return;
+    current = result; threadQueued = Boolean(result.queued); threadModel = result.queued ? "" : result.operator || "";
+    titleEl.textContent = result.title || "";
+    input.value = ""; pendingImages = []; $("#file").value = ""; showAttach();
+    for (const image of images) URL.revokeObjectURL(image.url);
+    if (data.queued) showSys("消息已进入等待队列，模型上线后会接单。");
+    try { await refresh(); } catch (err) { showSys("消息已送达，页面暂时未刷新。" + err.message); }
   } catch (err) {
-    painted = "";
-    paint(prior);
-    input.value = trimmed;
-    pendingImages = images;
-    showAttach();
     sentGuard.key = "";
-    sending = false;
-    grow();
-    showSys(err.message || "消息没送出去。糖包那边暂时没应。");
-    return;
-  }
-  for (const item of images) URL.revokeObjectURL(item.url);
-  try {
-    await refresh();
-  } catch (err) {
-    showSys(err.message || "消息送到了，这一页还没刷新。");
+    if (version === viewVersion) { painted = ""; paint(prior); showSys(err.message || "消息尚未发送，草稿仍在。"); }
   } finally {
-    sending = false;
-    grow();
+    sending = false; grow();
+    if (!delivered && version === viewVersion) { showAttach(); input.focus(); }
   }
 }
 
@@ -978,14 +1063,6 @@ composer.addEventListener("paste", async (event) => {
   }
 });
 
-function withOperator(payload) {
-  if (payload instanceof FormData) {
-    payload.set("operator", activeModel());
-    return payload;
-  }
-  return { ...payload, operator: activeModel() };
-}
-
 function activeModel() {
   return threadModel || chosen;
 }
@@ -1163,9 +1240,11 @@ document.addEventListener("visibilitychange", () => {
   else void tick();
 });
 
-setInterval(tickPending, 15000);
+const pendingTimer = setInterval(tickPending, 15000);
 renderHistory();
 void (async () => {
+  await TangbaoAccount.ready;
+  await syncAccountHistory();
   await loadModels(true);
   if (current) {
     body.dataset.state = "chat";

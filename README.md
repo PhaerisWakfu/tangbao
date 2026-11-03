@@ -26,7 +26,8 @@ wrangler.jsonc        Cloudflare 配置
 - Cloudflare Workers 提供页面和 API
 - D1 保存对话、模型、申请、举报等数据
 - Workers KV 保存用户上传的图片
-- Cron 每 10 分钟刷新首页在线状态
+- Cloudflare Email Sending 发送邮箱验证和找回邮件，每日预算 200 封，无月度限制
+- Cron 每分钟刷新首页在线状态并补偿可重试的邮件任务
 - 可选：通过 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 使用 Turso
 
 图片文件不写入 D1，数据库只保存图片 key。
@@ -49,11 +50,12 @@ npm install
 copy .dev.vars.example .dev.vars
 ```
 
-在 `.dev.vars` 里至少填写：
+普通 Wrangler 配置需要独立的随机服务端密钥；账号/邮件验收优先使用上面的隔离入口：
 
 ```text
-ADMIN_PASSWORD=你的后台口令
 ADMIN_SECRET=一串足够长的随机字符串
+EMAIL_CODE_PEPPER=独立的至少32字节随机值
+MAIL_PAYLOAD_KEY=另一个独立的至少32字节随机值
 ```
 
 可选：
@@ -62,9 +64,11 @@ ADMIN_SECRET=一串足够长的随机字符串
 - `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：浏览器推送
 - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`：改用 Turso
 - 不填 Turso 变量时使用 D1
+- `ADMIN_PASSWORD` 仅用于识别旧管理员迁移，不是新账号登录密码；管理员资格通过受控引导授予已验证账号
+- 模板默认 `MAIL_MODE=disabled`；本地合成邮件箱由 `local:*` 沙箱提供，不会发送真实邮件
 
 ```bash
-npm run migrate:local
+npx wrangler d1 migrations apply DB --local
 npm run dev
 ```
 
@@ -91,15 +95,18 @@ npx wrangler kv namespace create IMAGES
 
    这些 ID 不是密钥，但每个部署者都应该换成自己的资源。
 
-4. 应用迁移并写入 secrets：
+4. 备份并核对目标数据库，再应用尚未执行的迁移，逐项添加服务端 secrets：
 
 ```bash
-npm run migrate:remote
-npx wrangler secret bulk .dev.vars
+npx wrangler d1 migrations list DB --remote
+npx wrangler d1 migrations apply DB --remote
+npx wrangler secret put ADMIN_SECRET
+npx wrangler secret put EMAIL_CODE_PEPPER
+npx wrangler secret put MAIL_PAYLOAD_KEY
 npm run deploy
 ```
 
-`.dev.vars` 只用于本地和上传 secrets，不要提交。
+不要提交 `.dev.vars`，也不要整份上传其中的本地禁用/测试配置。发信前确认 `mail.phaeris.cn` 已启用、DNS 已配置，以及 `wrangler.jsonc` 中 `APP_ORIGIN`、发件地址、`MAIL_MODE=cloudflare` 与真实站点一致。随后注册并验证管理员账号，由部署者运行受控引导，再用邮箱和密码登录。完整迁移、管理员引导和可选投递事件队列说明见 [上线与回退](docs/local-development.md#上线与回退) 及 [账号设计](docs/accounts.md)。生产发送、收件箱送达和退信需单独验收。
 
 ## 检查
 
@@ -120,7 +127,7 @@ npm run check
 - [参与开发](CONTRIBUTING.md)：分支、提交范围与检查入口
 - [前端规范](docs/frontend.md)：样式、交互、响应式、可访问性和验证要求
 - [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
-- [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧口令绑定和 Resend
+- [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending
 - [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
 
 后续需求与实现统一在 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；文档中的方案不代表功能已实现或部署。
