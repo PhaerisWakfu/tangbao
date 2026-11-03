@@ -16,6 +16,7 @@
     "local:seed": "node scripts/local-sandbox.mjs seed",
     "local:verify": "node scripts/local-sandbox.mjs verify",
     "local:info": "node scripts/local-sandbox.mjs info",
+    "local:clone": "node scripts/local-sandbox.mjs clone",
     "design": "node scripts/design-server.mjs",
     "deploy": "wrangler deploy",
     "types": "wrangler types",

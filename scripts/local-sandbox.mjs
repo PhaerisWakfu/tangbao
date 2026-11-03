@@ -9,15 +9,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import ts from "typescript";
 import { runScenarios } from "./local-scenarios.mjs";
 import { demoHtml } from "./local-demo.mjs";
+import { importSnapshot } from "./local-snapshot.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wrangler = path.join(root, "node_modules/wrangler/bin/wrangler.js");
 const kind = "tangbao-local-sandbox/v1";
-const commands = new Set(["prepare", "dev", "seed", "verify", "info"]);
+const commands = new Set(["prepare", "dev", "seed", "verify", "info", "clone"]);
 const [command, ...args] = process.argv.slice(2);
 const options = {};
 for (let i = 0; i < args.length; i += 2) {
-  if (!["--instance", "--port", "--inspector-port"].includes(args[i]) || !args[i + 1]) {
+  if (!["--instance", "--port", "--inspector-port", "--snapshot", "--baseline"].includes(args[i]) || !args[i + 1]) {
     throw new Error("只接受 --instance、--port、--inspector-port；不接受远程基址或 Wrangler 透传参数。");
   }
   if (options[args[i]]) throw new Error(`重复参数 ${args[i]}`);
@@ -26,7 +27,8 @@ for (let i = 0; i < args.length; i += 2) {
 if (!commands.has(command)) {
   throw new Error("用法：node scripts/local-sandbox.mjs prepare|dev|seed|verify|info [--instance demo] [--port 8790]");
 }
-if (!["prepare", "verify"].includes(command) && (options["--port"] || options["--inspector-port"])) {
+if (command !== "clone" && (options["--snapshot"] || options["--baseline"])) throw new Error("快照参数只供 clone 使用。");
+if (!["prepare", "verify", "clone"].includes(command) && (options["--port"] || options["--inspector-port"])) {
   throw new Error("端口只在 prepare/verify 时设置，dev/seed/info 使用实例已记录的端口。");
 }
 for (const key of ["--port", "--inspector-port"]) if (options[key]) portOf(options[key]);
@@ -86,20 +88,24 @@ function completed(child) {
   });
 }
 
-async function loadMetadata() {
+async function loadMetadata({ allowIncompleteClone = false } = {}) {
   const data = JSON.parse(await readFile(metadataFile, "utf8"));
   if (data.kind !== kind || data.instance !== instance || !/^[a-f0-9]{48}$/.test(data.nonce)) {
     throw new Error("实例标记不匹配，停止操作。");
   }
   portOf(data.port);
   portOf(data.inspectorPort);
+  if (data.snapshotImport && !allowIncompleteClone) {
+    const report = await readFile(path.join(directory, "clone-report.json"), "utf8").then(JSON.parse).catch(() => null);
+    if (report?.status !== "complete") throw new Error("数据库副本尚未完整导入/迁移，不允许启动或复用。保留现场并用新 instance 重试。");
+  }
   return data;
 }
 
-async function prepare() {
+async function prepare({ applyMigrations = true, allowIncompleteClone = false } = {}) {
   let metadata;
   if (existsSync(metadataFile)) {
-    metadata = await loadMetadata();
+    metadata = await loadMetadata({ allowIncompleteClone });
     for (const [option, key] of [["--port", "port"], ["--inspector-port", "inspectorPort"]]) {
       if (options[option] && portOf(options[option]) !== metadata[key]) throw new Error("已有实例端口不匹配，请使用新 instance。");
     }
@@ -109,7 +115,7 @@ async function prepare() {
     const port = options["--port"] ? portOf(options["--port"]) : command === "verify" ? await freePort() : 8790;
     let inspectorPort = options["--inspector-port"] ? portOf(options["--inspector-port"]) : command === "verify" ? await freePort() : portOf(port + 1);
     if (inspectorPort === port) throw new Error("HTTP 和 inspector 端口不能相同。");
-    metadata = { kind, instance, nonce: randomBytes(24).toString("hex"), port, inspectorPort, createdAt: new Date().toISOString() };
+    metadata = { kind, instance, nonce: randomBytes(24).toString("hex"), port, inspectorPort, createdAt: new Date().toISOString(), ...(command === "clone" ? { snapshotImport: true } : {}) };
     await writeFile(metadataFile, JSON.stringify(metadata, null, 2), { mode: 0o600, flag: "wx" });
     await writeFile(path.join(directory, ".dev.vars"), `ADMIN_PASSWORD=${randomBytes(18).toString("base64url")}\nADMIN_SECRET=${randomBytes(48).toString("base64url")}\nEMAIL_CODE_PEPPER=${randomBytes(48).toString("base64url")}\nMAIL_PAYLOAD_KEY=${randomBytes(32).toString("base64url")}\n`, { mode: 0o600, flag: "wx" });
   }
@@ -240,6 +246,7 @@ export default {
     d1_databases: [{ binding: "DB", database_name: `tangbao-local-${instance}`, database_id: "00000000-0000-0000-0000-000000000000", migrations_dir: path.join(root, "migrations"), remote: false }],
     vars: disabled,
   }, null, 2));
+  if (!applyMigrations) return metadata;
   const migrationLog = path.join(directory, "migrations.log");
   const log = openSync(migrationLog, "a", 0o600);
   try {
@@ -311,7 +318,13 @@ async function seed(metadata) {
   return runScenarios({ metadata, directory, fixtureFile, includeEdgeScenarios: command === "verify", checkServer: () => checkServer(metadata) });
 }
 
-if (command === "prepare") {
+if (command === "clone") {
+  if (!options["--instance"] || !options["--snapshot"] || !options["--baseline"]) throw new Error("clone 需要 --instance、--snapshot <SQL备份>、--baseline <已执行迁移JSON>；可用 --port 指定端口。");
+  if (existsSync(directory)) throw new Error("副本必须使用全新 instance；不覆盖已有数据或失败证据。");
+  const metadata = await prepare({ applyMigrations: false });
+  await importSnapshot({ snapshot: options["--snapshot"], baseline: options["--baseline"], directory, stateDirectory, root, launch, completed, applyMigrations: () => prepare({ allowIncompleteClone: true }) });
+  showInfo(metadata);
+} else if (command === "prepare") {
   showInfo(await prepare());
 } else if (command === "dev") {
   const metadata = await loadMetadata();

@@ -102,6 +102,8 @@ npm run local:info -- --instance epic-5-demo
 
 ## 上线与回退
 
+需要拿现有数据演练时，先用 `local:clone` 导入副本，具体输入、备份获取和切换步骤见 [账号迁移与小范围试用](accounts-rollout.md)。它与生成合成数据的 `local:seed` 用途不同。
+
 生产使用 Cloudflare Email Sending、每日 200 封预算、不设置月度限制；详见 [账号设计](accounts.md)。真实发信由指定受控地址单独验收，发送受理不等于进收件箱。
 
 部署者准备生产时，先在本地检出待发布版本并核对 `wrangler.jsonc` 中 `DB` 的数据库名称/ID，以及 `EMAIL` 的发件地址。新增 `EMAIL_CODE_PEPPER`、`MAIL_PAYLOAD_KEY` 两个 Worker secret，分别使用密码管理器生成至少 32 字节的独立随机值，不填进 Git 或聊天；已有 `ADMIN_SECRET` 也需为足够长的随机值。可在 Cloudflare 的 Worker → 设置 → 变量与机密中添加，或使用 `npx wrangler secret put <名称> --config wrangler.jsonc` 的交互输入。密钥轮换需要另做验证码/outbox/旧凭据恢复安排，不把更换密钥当作普通重启。

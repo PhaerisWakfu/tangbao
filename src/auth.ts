@@ -17,10 +17,19 @@ const RENEW_BEFORE = 365 * DAY;
 const KDF = { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 };
 let kdfTail: Promise<unknown> = Promise.resolve();
 
-function validPassword(password: unknown): string {
-  if (typeof password !== "string" || [...password].length < 15 || [...password].length > 128) {
-    throw new AuthError(400, "PASSWORD_LENGTH", "密码须为15至128个字符，空格也会保留。");
+function passwordInput(password: unknown): string {
+  if (typeof password !== "string" || [...password].length < 1 || [...password].length > 128) {
+    throw new AuthError(400, "PASSWORD_LENGTH", "请输入密码，最多128个字符，空格也会保留。");
   }
+  return password;
+}
+
+export function validateNewPassword(password: unknown): string {
+  if (typeof password !== "string" || [...password].length < 6 || [...password].length > 20) {
+    throw new AuthError(400, "PASSWORD_LENGTH", "密码须为6至20个字符，空格也会保留。");
+  }
+  const categories = Number(/[A-Za-z]/.test(password)) + Number(/[0-9]/.test(password)) + Number(/[\p{P}\p{S}]/u.test(password));
+  if (categories < 2) throw new AuthError(400, "PASSWORD_COMPLEXITY", "密码须包含数字、英文字母、特殊符号中的至少两类。");
   return password;
 }
 
@@ -33,9 +42,9 @@ async function derive(password: string, salt: Uint8Array): Promise<Uint8Array> {
   return job;
 }
 
-/** Native workerd scrypt; parameters/version/salt remain in the stored representation. */
+/** Native workerd scrypt. Creation routes validate the new policy; this KDF also supports legacy hashes. */
 export async function hashPassword(password: string): Promise<string> {
-  validPassword(password);
+  passwordInput(password);
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const key = await derive(password, salt);
   return `scrypt$v1$32768$8$3$${b64url(salt)}$${b64url(key)}`;
@@ -192,7 +201,7 @@ async function register(request: Request, env: AuthEnv): Promise<Response> {
   await requestRate(request, env, "register", 15);
   const body = await payload(request);
   const email = normalizeEmail(body.email);
-  const password = validPassword(body.password);
+  const password = validateNewPassword(body.password);
   await kdfRate(env, email);
   const passwordHash = await hashPassword(password);
   const id = randomToken(18);
@@ -224,7 +233,7 @@ async function login(request: Request, env: AuthEnv): Promise<Response> {
   await requestRate(request, env, "login", 40);
   const body = await payload(request);
   const email = normalizeEmail(body.email);
-  const password = validPassword(body.password);
+  const password = passwordInput(body.password);
   await kdfRate(env, email);
   const row = await env.DB.prepare("SELECT * FROM accounts WHERE email = ?").bind(email).first<AccountRow>();
   // Nonexistent accounts pay the same KDF cost without storing a reusable dummy password.
@@ -306,7 +315,7 @@ async function forgotPassword(request: Request, env: AuthEnv): Promise<Response>
 async function resetPassword(request: Request, env: AuthEnv): Promise<Response> {
   await requestRate(request, env, "reset", 40);
   const body = await payload(request);
-  const password = validPassword(body.password);
+  const password = validateNewPassword(body.password);
   const { row, digest } = await checkChallenge(env, body, "reset");
   await kdfRate(env, row.email);
   const passwordHash = await hashPassword(password);
@@ -332,8 +341,8 @@ async function changePassword(request: Request, env: AuthEnv): Promise<Response>
   const account = await requireAccount(request, env, false);
   await requestRate(request, env, "change-password", 20);
   const body = await payload(request);
-  const current = validPassword(body.currentPassword);
-  const next = validPassword(body.password);
+  const current = passwordInput(body.currentPassword);
+  const next = validateNewPassword(body.password);
   await kdfRate(env, account.email, 2);
   const row = await env.DB.prepare("SELECT * FROM accounts WHERE id = ? AND status = 'active'").bind(account.id).first<AccountRow>();
   if (!row || !await verifyPassword(current, row.password_hash)) throw new AuthError(401, "PASSWORD_INCORRECT", "当前密码不正确，请检查后重试。");

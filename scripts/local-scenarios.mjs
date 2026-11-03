@@ -5,6 +5,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+function freshAccountPassword() {
+  // Exactly 20 characters, with letters, digits and punctuation guaranteed.
+  return `Tb9!${randomBytes(12).toString("base64url")}`;
+}
+
 // Each actor has a separate cookie jar. Only the generated local wrapper exposes
 // fixture/mail controls; every request checks the instance marker before writing.
 export async function runScenarios({ metadata, directory, fixtureFile, checkServer, includeEdgeScenarios = true }) {
@@ -99,7 +104,7 @@ export async function runScenarios({ metadata, directory, fixtureFile, checkServ
       },
       async register({ verify = true } = {}) {
         state.email ||= `${name}@example.test`;
-        state.password ||= `Local-account-${randomBytes(18).toString("base64url")}`;
+        state.password ||= freshAccountPassword();
         const result = await this.request("/api/auth/register", { method: "POST", body: { email: state.email, password: state.password } });
         state.accountId = result.account.id;
         state.challengeId = result.challengeId;
@@ -180,7 +185,8 @@ export async function runScenarios({ metadata, directory, fixtureFile, checkServ
     await check("邮箱规范化与唯一性", async () => {
       await member.register();
       const other = actor("duplicate");
-      await other.request("/api/auth/register", { method: "POST", body: { email: ` ${member.state.email.toUpperCase()} `, password: "Another-long-password" }, status: [400,409] });
+      const duplicate=await other.request("/api/auth/register", { method: "POST", body: { email: ` ${member.state.email.toUpperCase()} `, password: freshAccountPassword() }, status:409 });
+      assert.equal(duplicate.code,"ACCOUNT_UNAVAILABLE");
       await member.request("/api/admin/queue", { status: 403 });
     });
     for (const [suffix, operator] of [["local-a", operatorA], ["local-b", operatorB]]) {
@@ -422,9 +428,22 @@ async function runAccountEdgeScenarios({ actor, admin, local, testMail, advance,
   const recovery = actor("recovery");
   const claimantA = actor("claimant-a"), claimantB = actor("claimant-b");
   let migratedWinner;
+  await check("新密码限制6至20字符并要求数字字母特殊字符至少两类",async()=>{
+    for(const [i,password] of ["Tb9!a",`Tb9!${"a".repeat(17)}`,"123456","abcdef","!@#$%^"].entries()) {
+      const client=actor(`password-invalid-${i}`);
+      const rejected=await client.request("/api/auth/register",{method:"POST",body:{email:`password-invalid-${i}@example.test`,password},status:400});
+      assert(/^PASSWORD_/.test(rejected.code));
+      assert(!rejected.account);
+    }
+    for(const [i,password] of ["abc123","123!@#","abc!@#",freshAccountPassword()].entries()) {
+      const client=actor(`password-valid-${i}`);
+      const accepted=await client.request("/api/auth/register",{method:"POST",body:{email:`password-valid-${i}@example.test`,password}});
+      assert(accepted.account.id);
+    }
+  });
   await check("同邮箱并发注册最多一个账号和验证任务",async()=>{
     const left=actor("register-race-a"),right=actor("register-race-b");
-    const body={email:"register-race@example.test",password:`Concurrent-password-${randomBytes(18).toString("base64url")}`};
+    const body={email:"register-race@example.test",password:freshAccountPassword()};
     const result=await Promise.all([left,right].map(client=>client.request("/api/auth/register",{method:"POST",body,status:[200,409]})));
     assert.equal(result.filter(value=>value.account).length,1);
     assert.equal(result.filter(value=>value.code==="ACCOUNT_UNAVAILABLE").length,1);
@@ -499,7 +518,9 @@ async function runAccountEdgeScenarios({ actor, admin, local, testMail, advance,
     const mail = await testMail(result.challengeId);
     assert.equal(mail.purpose,"reset");
     await recovery.request("/api/auth/email/verify", {method:"POST",body:{challengeId:result.challengeId,code:mail.code},status:[400,409]});
-    const newPassword = `Reset-password-${randomBytes(18).toString("base64url")}`;
+    const invalid=await recovery.request("/api/auth/password/reset", {method:"POST",body:{challengeId:result.challengeId,code:mail.code,password:"123456"},status:400});
+    assert(/^PASSWORD_/.test(invalid.code));
+    const newPassword = freshAccountPassword();
     await recovery.request("/api/auth/password/reset", {method:"POST",body:{challengeId:result.challengeId,code:mail.code,password:newPassword}});
     assert.equal((await recovery.request("/api/auth/me")).account,null);
     await recovery.request("/api/auth/login", {method:"POST",body:{email:recovery.state.email,password:recovery.state.password},status:401});
@@ -508,7 +529,10 @@ async function runAccountEdgeScenarios({ actor, admin, local, testMail, advance,
     await recovery.request("/api/auth/password/reset", {method:"POST",body:{challengeId:result.challengeId,code:mail.code,password:newPassword},status:[400,409]});
   });
   await check("修改密码撤销当前会话，新密码可正常登录", async () => {
-    const password = `Changed-password-${randomBytes(18).toString("base64url")}`;
+    const invalid=await recovery.request("/api/auth/password/change", {method:"POST",body:{currentPassword:recovery.state.password,password:"abcdef"},status:400});
+    assert(/^PASSWORD_/.test(invalid.code));
+    assert((await recovery.request("/api/auth/me")).account);
+    const password = freshAccountPassword();
     await recovery.request("/api/auth/password/change", {method:"POST",body:{currentPassword:recovery.state.password,password}});
     assert.equal((await recovery.request("/api/auth/me")).account,null);
     recovery.state.password=password;
@@ -597,7 +621,7 @@ async function runAccountEdgeScenarios({ actor, admin, local, testMail, advance,
   await check("日预算在调用发送前拦截", async () => {
     await local("/__local/control",{budgetUsed:200});
     const user=actor("budget");
-    await user.request("/api/auth/register",{method:"POST",body:{email:"budget@example.test",password:"Budget-long-password"},status:[200,429,503]});
+    await user.request("/api/auth/register",{method:"POST",body:{email:"budget@example.test",password:freshAccountPassword()},status:[200,429,503]});
     const messages=(await local("/__local/mail")).messages;
     assert(!messages.some(message=>message.email==="budget@example.test" && ["test","accepted"].includes(message.status)));
     await local("/__local/control",{budgetUsed:0});

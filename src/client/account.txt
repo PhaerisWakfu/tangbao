@@ -31,6 +31,26 @@
   const links = dialog.querySelector(".account-links");
   const error = dialog.querySelector(".account-error");
   const notice = dialog.querySelector(".account-notice");
+  const NEW_PASSWORD_HINT = "6–20 个字符，数字、英文字母、特殊符号至少包含两类。空格会保留，但不算特殊符号。";
+
+  function passwordError(value, policy) {
+    const length = Array.from(value).length;
+    if (policy === "existing") return length < 1 || length > 128 ? "密码须为1至128个字符，空格也会保留。" : "";
+    if (length < 6 || length > 20) return "密码须为6至20个字符，空格也会保留。";
+    const categories = Number(/[A-Za-z]/.test(value)) + Number(/[0-9]/.test(value)) + Number(/[\p{P}\p{S}]/u.test(value));
+    return categories < 2 ? "密码须包含数字、英文字母、特殊符号中的至少两类。" : "";
+  }
+
+  function validatePasswordField(input, showError = false) {
+    const message = passwordError(input.value, input.dataset.passwordPolicy);
+    input.setCustomValidity(message);
+    if (showError) {
+      input.setAttribute("aria-invalid", String(Boolean(message)));
+      error.textContent = message;
+      error.dataset.passwordField = message ? input.name : "";
+    } else if (!message) input.removeAttribute("aria-invalid");
+    return !message;
+  }
 
   async function request(path, body, options = {}) {
     let response;
@@ -82,10 +102,26 @@
     input.type = type;
     input.required = true;
     if (autocomplete) input.autocomplete = autocomplete;
-    if (type === "password") { input.minLength = name === "currentPassword" || mode === "login" || mode === "claim" ? 1 : 15; input.maxLength = 128; }
+    if (type === "password") {
+      if (mode === "claim") { input.minLength = 1; input.maxLength = 128; }
+      else {
+        input.dataset.passwordPolicy = autocomplete === "new-password" ? "new" : "existing";
+        // Native minLength/maxLength count UTF-16 units; use code points consistently with the server.
+        input.addEventListener("input", () => {
+          const wasShown = error.dataset.passwordField === input.name;
+          validatePasswordField(input, wasShown);
+        });
+        input.addEventListener("invalid", () => validatePasswordField(input, true));
+      }
+    }
     if (type === "email") { input.value = account?.email || email; input.maxLength = 254; input.autocapitalize = "none"; input.spellcheck = false; }
     if (name === "code") { input.inputMode = "numeric"; input.pattern = "[0-9]{6}"; input.maxLength = 6; }
     wrapper.append(text, input);
+    if (input.dataset.passwordPolicy === "new") {
+      const hint = document.createElement("small"); hint.className = "account-password-hint";
+      hint.id = "account-new-password-hint"; hint.textContent = NEW_PASSWORD_HINT;
+      input.setAttribute("aria-describedby", hint.id); wrapper.append(hint);
+    }
     form.append(wrapper);
     return input;
   }
@@ -174,7 +210,7 @@
       forgot: "请输入注册邮箱。如果该邮箱可以找回密码，我们会发送验证码。",
       reset: "请输入邮件中的验证码。重置后所有旧登录失效，请使用新密码重新登录。",
       manage: account ? `${account.email} · ${account.verified ? "邮箱已验证" : "邮箱待验证"}` : "尚未登录。",
-      change: "新密码为 15–128 个字符，空格也会作为密码的一部分。修改后所有旧登录失效。",
+      change: "修改密码后，所有旧登录失效，请使用新密码重新登录。",
       claim: "输入原模型的旧口令以证明归属。每个账号只能拥有一个模型；绑定不自动恢复已停用模型。",
       confirm: "确认后旧口令和旧登录将失效，之后请使用此邮箱账号登录。",
       logoutPending: "本站客户端缓存已经尝试清理，但尚未确认服务器会话已撤销。请联网后重试退出；此页不会自动恢复登录。",
@@ -210,9 +246,9 @@
     form.className = "account-form";
     const values = {};
     if (["login", "register", "forgot"].includes(mode)) values.email = field(form, "邮箱", "email", "email", "username");
-    if (["login", "register", "reset"].includes(mode)) values.password = field(form, mode === "reset" ? "新密码（15–128 个字符）" : mode === "register" ? "密码（15–128 个字符）" : "密码", "password", "password", mode === "login" ? "current-password" : "new-password");
+    if (["login", "register", "reset"].includes(mode)) values.password = field(form, mode === "reset" ? "新密码" : "密码", "password", "password", mode === "login" ? "current-password" : "new-password");
     if (["verify", "reset"].includes(mode)) values.code = field(form, "六位验证码", "code", "text", "one-time-code");
-    if (mode === "change") { values.currentPassword = field(form, "当前密码", "currentPassword", "password", "current-password"); values.password = field(form, "新密码（15–128 个字符）", "password", "password", "new-password"); }
+    if (mode === "change") { values.currentPassword = field(form, "当前密码", "currentPassword", "password", "current-password"); values.password = field(form, "新密码", "password", "password", "new-password"); }
     if (mode === "claim") values.password = field(form, "原模型的旧口令", "password", "password", "off");
     if (mode === "confirm") {
       const details = document.createElement("p"); details.className = "account-claim-preview";
@@ -222,6 +258,9 @@
     submit.textContent = { login: "登录", register: "注册并验证邮箱", verify: "验证邮箱", forgot: "发送找回验证码", reset: "重置密码", change: "修改密码", claim: "核验旧口令", confirm: "确认绑定" }[mode]; form.append(submit);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      for (const input of form.querySelectorAll("[data-password-policy]")) {
+        if (!validatePasswordField(input, true)) { input.reportValidity(); return; }
+      }
       const actionMode = mode;
       const payload = Object.fromEntries(Object.entries(values).map(([key, input]) => [key, key === "email" || key === "code" ? input.value.trim() : input.value]));
       if (payload.email) email = payload.email;
