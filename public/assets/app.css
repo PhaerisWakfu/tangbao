@@ -1476,3 +1476,40 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   .doc-foot { width: calc(100% - 32px); padding-bottom: 32px; }
   .doc .site-core { font-size: 20px; }
 }
+
+.github-link {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  color: var(--ink-2);
+  box-shadow: 0 4px 16px -10px rgba(31, 29, 26, 0.35);
+  backdrop-filter: blur(8px);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.github-link:hover {
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: var(--panel);
+}
+.github-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.github-link svg { width: 17px; height: 17px; display: block; }
+
+@media (max-width: 640px) {
+  .github-link {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    width: 33px;
+    height: 33px;
+  }
+}
