@@ -379,6 +379,45 @@ body[data-presence="asleep"] {
   font-size: 11px;
   color: var(--faint);
 }
+#pane-audit .roster-search {
+  display: block;
+  width: calc(100% - 48px);
+  height: 32px;
+  margin: 0 24px 10px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  outline: none;
+}
+#pane-audit .roster-search:focus {
+  border-color: var(--line-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+#pane-audit .roster-search::placeholder { color: var(--faint); }
+#pane-audit .roster-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+#pane-audit .roster-pager button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+#pane-audit .roster-pager button:hover:not(:disabled) { border-color: var(--line-2); color: var(--ink); }
+#pane-audit .roster-pager button:disabled { opacity: 0.45; cursor: default; }
+#pane-audit .roster-pager span { font-size: 11px; color: var(--faint); }
 #pane-audit .seat-all {
   display: inline-flex;
   align-items: center;

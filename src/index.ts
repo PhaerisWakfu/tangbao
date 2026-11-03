@@ -71,6 +71,7 @@ const DAY = 24 * HOUR;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const MODEL_RECENT_MS = 30 * DAY;
 const MODEL_PAGE_SIZE = 30;
+const AUDIT_MODEL_PAGE_SIZE = 20;
 const MODEL_SEARCH_MAX = 40;
 const QUEUE_CAP = 400;
 const BODY_LIMIT = 2000;
@@ -1273,7 +1274,22 @@ function auditState(request: Request): string {
 
 async function audit(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
+  const url = new URL(request.url);
   const asked = listPage(request);
+  const operatorPageAsked = Number(url.searchParams.get("mpage") || "1");
+  const operatorPageRequested = Number.isFinite(operatorPageAsked)
+    ? Math.max(1, Math.floor(operatorPageAsked))
+    : 1;
+  const operatorQuery = (url.searchParams.get("mq") || "").trim().slice(0, MODEL_SEARCH_MAX);
+  const operatorWhere = operatorQuery
+    ? "WHERE (o.id LIKE ? ESCAPE '\\' OR o.blurb LIKE ? ESCAPE '\\')"
+    : "";
+  const operatorBindings: unknown[] = operatorQuery
+    ? [
+        `%${operatorQuery.replace(/[\\%_]/g, "\\$&")}%`,
+        `%${operatorQuery.replace(/[\\%_]/g, "\\$&")}%`,
+      ]
+    : [];
   let model = modelQuery(request);
   if (model === HOME_MODEL) model = "";
   const state = auditState(request);
@@ -1286,32 +1302,35 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
           ? " AND reported_at > 0"
           : "";
   const visible = "((operator_id != ? AND queued = 0) OR reported_at > 0)";
-  const [countRow, operatorRows] = await Promise.all([
+  const [countRow, operatorCountRow] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM threads WHERE ${visible} AND (? = '' OR operator_id = ?)${stateWhere}`,
     )
       .bind(HOME_MODEL, model, model)
       .first<{ n: number }>(),
-    env.DB.prepare(
-      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
-        COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
-       FROM operators o
-       LEFT JOIN (
-         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
-         GROUP BY operator_id
-       ) p ON p.operator_id = o.id
-       JOIN (
-         SELECT DISTINCT operator_id AS id
-         FROM threads
-         WHERE ${visible}
-       ) used ON used.id = o.id
-       ORDER BY o.created_at ASC`,
-    )
-      .bind(HOME_MODEL)
-      .all<PresenceRow>(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM operators o ${operatorWhere}`)
+      .bind(...operatorBindings)
+      .first<{ n: number }>(),
   ]);
+  const operatorTotal = tally(operatorCountRow);
+  const operatorPages = Math.max(1, Math.ceil(operatorTotal / AUDIT_MODEL_PAGE_SIZE));
+  const operatorPage = Math.min(operatorPageRequested, operatorPages);
+  const operatorRows = await env.DB.prepare(
+    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+      COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
+     FROM operators o
+     LEFT JOIN (
+       SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+       FROM threads
+       WHERE awaiting = 1 AND queued = 0
+       GROUP BY operator_id
+     ) p ON p.operator_id = o.id
+     ${operatorWhere}
+     ORDER BY o.active DESC, o.last_seen_at DESC, o.id ASC
+     LIMIT ? OFFSET ?`,
+  )
+    .bind(...operatorBindings, AUDIT_MODEL_PAGE_SIZE, (operatorPage - 1) * AUDIT_MODEL_PAGE_SIZE)
+    .all<PresenceRow>();
   const operators = operatorRows.results.map((row) => presenceFromRow(row, Date.now()));
   const statusRank: Record<PresenceState, number> = {
     online: 0,
@@ -1365,6 +1384,11 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     model,
     state,
     models: [...models].sort((a, b) => a.localeCompare(b)),
+    operatorPage,
+    operatorPageSize: AUDIT_MODEL_PAGE_SIZE,
+    operatorTotal,
+    operatorPages,
+    operatorHasMore: operatorPage < operatorPages,
   });
 }
 

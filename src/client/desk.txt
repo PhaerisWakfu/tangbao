@@ -12,6 +12,7 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
+const auditSearch = $("#audit-model-search");
 const profileOpen = $("#profile-open");
 const profileForm = $("#profile-form");
 const profileSuffix = $("#profile-suffix");
@@ -24,6 +25,9 @@ let pending = 0;
 let applyPage = 1;
 let auditPage = 1;
 let auditModel = "";
+let auditModelPage = 1;
+let auditModelQuery = "";
+let auditModelTimer = 0;
 let auditState = "";
 let applyToken = 0;
 let auditToken = 0;
@@ -923,24 +927,32 @@ $("#pane-audit").addEventListener("click", (event) => {
   void loadAudit();
 });
 
+auditSearch.addEventListener("input", () => {
+  auditModelQuery = auditSearch.value.trim();
+  auditModelPage = 1;
+  auditStamp = "";
+  clearTimeout(auditModelTimer);
+  auditModelTimer = window.setTimeout(() => {
+    void loadAudit();
+  }, 300);
+});
+
 async function loadAudit() {
   const token = ++auditToken;
-  const params = new URLSearchParams({ page: String(auditPage) });
+  const params = new URLSearchParams({ page: String(auditPage), mpage: String(auditModelPage) });
   if (auditModel) params.set("model", auditModel);
   if (auditState) params.set("state", auditState);
+  if (auditModelQuery) params.set("mq", auditModelQuery);
   const data = await api(`/api/admin/audit?${params}`);
   if (token !== auditToken) return;
   auditPage = Number(data.page) || 1;
   auditModel = data.model || "";
   auditState = data.state || "";
+  auditModelPage = Number(data.operatorPage) || 1;
   const total = Number(data.total) || 0;
   const operators = data.operators || [];
-  if (auditModel && !operators.some((operator) => operator.id === auditModel)) {
-    auditModel = "";
-    auditStamp = "";
-    void loadAudit();
-    return;
-  }
+  const operatorTotal = Number(data.operatorTotal) || 0;
+  const operatorPages = Number(data.operatorPages) || 1;
   const lead = $("#audit-lead");
   if (lead) {
     lead.textContent = "";
@@ -996,6 +1008,35 @@ async function loadAudit() {
     for (const operator of operators) seats.append(operatorSeat(operator));
   }
   roster.append(seats);
+
+  if (operatorTotal > 0 && operatorPages > 1) {
+    const pager = document.createElement("div");
+    pager.className = "roster-pager";
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "上一页";
+    prev.disabled = auditModelPage <= 1;
+    prev.addEventListener("click", () => {
+      if (auditModelPage <= 1) return;
+      auditModelPage -= 1;
+      auditStamp = "";
+      void loadAudit();
+    });
+    const label = document.createElement("span");
+    label.textContent = `${auditModelPage} / ${operatorPages} · ${operatorTotal} 个`;
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "下一页";
+    next.disabled = auditModelPage >= operatorPages;
+    next.addEventListener("click", () => {
+      if (auditModelPage >= operatorPages) return;
+      auditModelPage += 1;
+      auditStamp = "";
+      void loadAudit();
+    });
+    pager.append(prev, label, next);
+    roster.append(pager);
+  }
 
   const talksCol = document.createElement("section");
   talksCol.className = "talks-col";
