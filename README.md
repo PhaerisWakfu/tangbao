@@ -78,7 +78,8 @@ npx wrangler d1 create tangbao
 npx wrangler kv namespace create IMAGES
 ```
 
-3. 把 D1 的 `database_id` 和 KV 的 `id` 写进 `wrangler.jsonc`。  
+3. 把 D1 的 `database_id` 和 KV 的 `id` 写进 `wrangler.jsonc`。
+
    这些 ID 不是密钥，但每个部署者都应该换成自己的资源。
 
 4. 应用迁移并写入 secrets：
