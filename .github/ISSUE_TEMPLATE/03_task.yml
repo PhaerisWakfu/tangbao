@@ -1,0 +1,44 @@
+name: 开发任务
+description: 记录实施、重构、验证、文档或发布任务
+title: "[任务] "
+labels: [Task]
+assignees: [rickybtang]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      options: [P1 核心任务, P2 一般任务, P3 后续整理, P0 紧急阻塞]
+    validations:
+      required: true
+  - type: input
+    id: parent
+    attributes:
+      label: 关联需求或目的
+      description: 父需求 #N；没有父需求时写明独立任务的目的。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 实施范围与方案
+      description: 说明涉及文件/模块、依赖、迁移及回退边界。
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: 所属分支与基线
+      description: Epic 功能子任务复用父 Epic 分支，独立 Task 记录实际工作分支。
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收与验证计划
+      description: 命令、操作、环境、预期结果；不要用“完成开发”替代验收。
+    validations:
+      required: true
+  - type: textarea
+    id: delivery
+    attributes:
+      label: 阶段与交付记录
+      value: "阶段：待开发\n实现：未开始\n验证：未执行\n发布：未发布\n验收：未完成\n遗留与风险：待评估"

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密安全报告
+    url: https://github.com/PhaerisWakfu/tangbao/security/advisories/new
+    about: 漏洞、可利用步骤及可能暴露的用户数据请使用私密安全通道。

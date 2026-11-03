@@ -1,0 +1,50 @@
+name: 需求
+description: 记录用户场景、范围和可验收结果
+title: "[需求] "
+labels: [Requirement]
+assignees: [rickybtang]
+body:
+  - type: markdown
+    attributes:
+      value: "先搜索已有 Issue。安全问题请走 SECURITY.md 的私密通道，不填写真实邮箱、对话、口令或密钥。"
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      options: [P1 核心能力, P2 一般需求, P3 后续探索, P0 紧急阻塞]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户和问题
+      description: 谁在什么场景遇到了什么问题，希望获得什么结果？
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 本次范围与不做项
+      description: 区分已确认规则、实施建议和待澄清内容。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 写可观察的结果，包含异常、权限和兼容边界。
+      value: "- [ ] 正常场景\n- [ ] 异常与权限场景\n- [ ] 兼容和数据影响"
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: 方案、依赖和未决问题
+      description: 关联父 Issue/依赖，说明数据迁移、外部服务和费用影响；未确定写“待方案”。
+    validations:
+      required: true
+  - type: textarea
+    id: delivery
+    attributes:
+      label: 阶段与交付记录
+      value: "阶段：待澄清\n实现：未开始\n验证：未执行\n发布：未发布\n验收：未完成"

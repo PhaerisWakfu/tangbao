@@ -25,3 +25,15 @@ wrangler.production.jsonc
 .thinkrail/
 .vscode/
 .idea/
+
+# 本地协作规则及给维护者查看的接手材料，不随代码发布
+AGENTS.md
+AGENTS.local.md
+AGENTS.override.md
+/docs/architecture.md
+/docs/todo.md
+/.local/
+
+# 新的个人报告、截图、验收记录统一放 .tmp/ 或 private-assets/。
+# docs/frontend.md、docs/accounts.md、docs/issue-workflow.md、
+# docs/local-development.md 等可复用项目文档保持可跟踪。
