@@ -111,7 +111,7 @@ async function prepare({ applyMigrations = true, allowIncompleteClone = false } 
     }
   } else {
     if (existsSync(directory)) throw new Error("目录已存在但没有有效实例标记；不覆盖，改用新 instance。");
-    await mkdir(directory, { recursive: true });
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     const port = options["--port"] ? portOf(options["--port"]) : command === "verify" ? await freePort() : 8790;
     let inspectorPort = options["--inspector-port"] ? portOf(options["--inspector-port"]) : command === "verify" ? await freePort() : portOf(port + 1);
     if (inspectorPort === port) throw new Error("HTTP 和 inspector 端口不能相同。");

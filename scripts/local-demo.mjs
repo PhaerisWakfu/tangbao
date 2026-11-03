@@ -1,6 +1,7 @@
 // This HTML is embedded only in each ignored local wrapper, never a production route.
 export function demoHtml(metadata) {
   const context = JSON.stringify({ nonce: metadata.nonce, instance: metadata.instance, port: metadata.port });
+  const snapshotNotice = metadata.snapshotImport ? `<section><h2>数据库备份副本 · 图片未验收</h2><p>这里使用导入备份后的独立本地数据库，所有操作只影响副本。旧图片仅有数据库记录，KV 文件尚未复制，图片显示、下载及完整性暂未验收；不会连接线上 KV 补图。</p><p>请用下方测试账号登录；也可自行注册并从本页取验证码。绑定原模型：账号设置 → 绑定已有模型 → 输入本人原来的模型口令 → 核对型号后确认。管理员使用下方本地测试管理员账号；登录工作台后到“审计”页按型号查看旧历史，“对话”页只显示待回复消息。</p><p>旧匿名对话不会自动出现在新账号中，关联需要原浏览器保留的对话凭证，不能只凭邮箱或 IP。可以先用访客入口建立一段本地测试对话，登录后在历史列表主动关联，再在另一设备入口登录同一账号核对。</p></section>` : "";
   return `<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>糖包本地验收</title>
 <style>
@@ -8,10 +9,11 @@ body{margin:0;background:#fcfbf9;color:#312b25;font:15px/1.6 system-ui,sans-seri
 </style>
 <main><h1>糖包本地验收</h1>
 <p>这里连接本机隔离数据库和合成邮件箱，不发送真实邮件。注册时可使用 <code>your-name@example.test</code>，验证码会出现在下面。刷新页面仍能查看最新邮件。</p>
+${snapshotNotice}
 <p><a href="/" target="_blank" rel="noopener">打开首页</a> · <a href="/chat" target="_blank" rel="noopener">打开聊天</a> · <a href="/desk" target="_blank" rel="noopener">打开工作台</a></p>
 <section><h2>演示账号</h2><p class="muted">每个角色的链接使用独立主机名，浏览器存储相互隔离。请用对应邮箱和密码正常登录。</p><div class="scroll"><table><thead><tr><th>角色/入口</th><th>邮箱或型号</th><th>合成密码/旧口令</th></tr></thead><tbody id="actors"></tbody></table></div></section>
 <section><h2>本地验证邮件</h2><p class="muted">验证成功、过期或永久失败的邮件会清理验证码。尚无邮件时，先在产品页注册或申请找回。</p><button id="refresh" type="button">刷新验证码</button><p id="status" role="status"></p><div class="scroll"><table><thead><tr><th>邮箱</th><th>用途</th><th>验证码</th><th>发送状态</th></tr></thead><tbody id="mail"></tbody></table></div></section>
-<section><h2>建议验收顺序</h2><ul><li>匿名聊天一段，再新建第二段，确认出现账号弹层且草稿和附件保留。</li><li>注册合成邮箱，从本页取验证码，完成验证后继续发送。</li><li>刷新或重新打开产品页，确认保持登录和历史可见。</li><li>打开独立设备环境，用同一账号登录，确认历史一致。</li><li>退出账号，确认页面和本地存储清空，下一次进入需要密码登录。</li><li>使用新的已验证账号和“待绑定旧模型”口令，演练绑定已有模型。</li></ul></section></main>
+<section><h2>建议验收顺序</h2><ul><li>匿名聊天一段，再新建第二段，确认出现账号弹层且草稿和附件保留。</li><li>注册合成邮箱，从本页取验证码，完成验证后继续发送。</li><li>刷新或重新打开产品页，确认保持登录和历史可见。</li><li>打开独立设备环境，用同一账号登录，确认历史一致。</li><li>退出账号，确认页面和本地存储清空，下一次进入需要密码登录。</li><li>${metadata.snapshotImport ? "使用尚未拥有模型的已验证账号，输入本人原来的旧模型口令，核对型号后确认绑定。" : "使用新的已验证账号和“待绑定旧模型”口令，演练绑定已有模型。"}</li></ul></section></main>
 <script>
 const context=${context};
 const text=(parent,value)=>{const cell=document.createElement('td');cell.textContent=value;parent.append(cell);return cell};

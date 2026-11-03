@@ -34,6 +34,9 @@ export async function importSnapshot({ snapshot, baseline, directory, stateDirec
   async function run(args) {
     const child = launch([...args, "--local", "--persist-to", stateDirectory], ["ignore", "pipe", "pipe"]);
     let stdout = "", stderr = "";
+    // A pipe chunk can end inside a multibyte character; decode across chunks.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.on("data", chunk => { stderr += chunk; });
     try { await completed(child); }
