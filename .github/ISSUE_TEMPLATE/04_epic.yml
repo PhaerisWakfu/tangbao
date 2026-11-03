@@ -1,0 +1,46 @@
+name: Epic
+description: 汇总较大目标及其可验收的子需求
+title: "[Epic] "
+labels: [Epic]
+assignees: [rickybtang]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 用户目标及已确认规则
+      description: 标明优先级；区分已确认规则、建议及未决项。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围与边界
+      description: 说明本期、不做项、旧功能兼容与外部依赖；补充 Requirement 或 Task 标签。
+    validations:
+      required: true
+  - type: textarea
+    id: children
+    attributes:
+      label: 子 Issue 和依赖顺序
+      description: 创建后必须设置 GitHub 原生父子关系，正文清单不能替代层级。
+      value: "- [ ] #待创建：可独立验收的交付项"
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: Epic 专属功能分支及基线
+      description: 开始开发前建立独立分支并回填；同一 Epic 的功能子任务复用此分支。
+      placeholder: codex/epic-父Issue编号-简短名称；基线 main 或已确认的其他基线
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 整体验收与关闭条件
+      description: 所有必需子项验收后关闭；说明迁移、发布及用户验收边界。
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: 当前阶段
+      value: "待方案评审；尚未实现和发布。"

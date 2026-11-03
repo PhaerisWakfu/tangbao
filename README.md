@@ -35,6 +35,15 @@ wrangler.jsonc        Cloudflare 配置
 
 需要 Node.js 22 以上。
 
+后续开发验证优先使用隔离入口（独立 D1/KV，自动生成测试凭据）：
+
+```bash
+npm ci
+npm run local:verify
+```
+
+人工多人验收可使用 `local:prepare` / `local:dev` / `local:seed`，完整命令与身份地址见 [本地部署手册](docs/local-development.md)。下面保留普通 Wrangler 配置方式，用于需要自定义部署配置的开发。
+
 ```bash
 npm install
 copy .dev.vars.example .dev.vars
@@ -95,11 +104,26 @@ npm run deploy
 ## 检查
 
 ```bash
+npm run types
 npx tsc --noEmit
 npm run check
 ```
 
+干净检出时先运行 `npm run types`，生成不提交到 Git 的 Worker 类型声明，再执行类型检查。当前 CI 缺少这一步，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。
+
 `scripts/smoke.mjs` 会向本地服务写入测试数据，不要指向生产环境。
+
+旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归。本地迁移脚本指定的数据库名称与配置不一致，临时可使用 `npx wrangler d1 migrations apply DB --local`；修复由 Issue 跟踪。
+
+## 后续开发入口
+
+- [参与开发](CONTRIBUTING.md)：分支、提交范围与检查入口
+- [前端规范](docs/frontend.md)：样式、交互、响应式、可访问性和验证要求
+- [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
+- [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧口令绑定和 Resend
+- [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
+
+后续需求与实现统一在 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；文档中的方案不代表功能已实现或部署。
 
 ## 设计稿
 

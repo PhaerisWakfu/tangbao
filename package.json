@@ -11,6 +11,11 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "local:prepare": "node scripts/local-sandbox.mjs prepare",
+    "local:dev": "node scripts/local-sandbox.mjs dev",
+    "local:seed": "node scripts/local-sandbox.mjs seed",
+    "local:verify": "node scripts/local-sandbox.mjs verify",
+    "local:info": "node scripts/local-sandbox.mjs info",
     "design": "node scripts/design-server.mjs",
     "deploy": "wrangler deploy",
     "types": "wrangler types",

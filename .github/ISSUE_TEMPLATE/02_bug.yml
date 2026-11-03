@@ -1,0 +1,65 @@
+name: Bug
+description: 记录复现、影响、根因和修复验证
+title: "[Bug] "
+labels: [bug]
+assignees: [rickybtang]
+body:
+  - type: markdown
+    attributes:
+      value: "公开 Issue 仅用合成数据。安全漏洞及利用细节请通过 SECURITY.md 的私密报告入口。"
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      options: [P2 一般缺陷, P1 核心阻塞, P0 紧急不可用, P3 轻微问题]
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: 证据状态
+      options: [已在指定环境复现, 静态代码发现，运行时待验证, 用户反馈，尚未复现]
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: 修复分支
+      description: Bug 修复统一在 Ricky 专属的 rick-dev 上进行。
+      value: rick-dev
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境与版本
+      description: 本地/测试/生产、commit、浏览器及必要配置差异，不贴密钥。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤及脱敏证据
+      description: 静态发现填写源码位置和待验证步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期、实际与影响范围
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: 根因与修复方案
+      description: 未知可写待定位；说明共享消费者和是否需要数据修复。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 回归与关闭条件
+      value: "- [ ] 原复现步骤通过\n- [ ] 相邻路径与异常恢复验证\n- [ ] 记录实现、验证、发布、验收和未测边界"
+    validations:
+      required: true
