@@ -1071,8 +1071,10 @@ function paintModels() {
 
 async function loadModels(pick) {
   if (!pick && (modelSearchMode || Date.now() - modelsAt < 60000)) return;
+  const seq = ++modelSearchSeq;
   try {
     const data = await api("/api/models");
+    if (seq !== modelSearchSeq) return;
     models = data.models || [];
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchMode = false;
