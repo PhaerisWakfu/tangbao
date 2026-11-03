@@ -1,11 +1,20 @@
 {
   "name": "tangbao",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PhaerisWakfu/tangbao.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "design": "node scripts/design-server.mjs",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
+    "check": "node scripts/check-client.mjs",
     "migrate:local": "wrangler d1 migrations apply tangbao --local",
     "migrate:remote": "wrangler d1 migrations apply tangbao --remote"
   },

@@ -1,9 +1,27 @@
 node_modules
 .wrangler
 .tmp
-.dev.vars
+.dev.vars*
+!.dev.vars.example
 dist
 *.log
 worker-configuration.d.ts
 .DS_Store
 Thumbs.db
+
+# 不公开的设计过程文档
+/design/brief.md
+
+# 个人联系方式，不进入公开仓库
+/public/assets/wechat-qr.jpg
+
+# 本地生产配置和备份
+private-assets/
+wrangler.production.jsonc
+*.sqlite
+*.db
+*.dump
+*.backup
+.thinkrail/
+.vscode/
+.idea/

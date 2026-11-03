@@ -18,12 +18,14 @@
   "kv_namespaces": [
     {
       "binding": "IMAGES",
+      // 部署到自己的账号时换成自己的 KV namespace ID。
       "id": "3b9ad11ebb4f4812b93c04b3e9e86e3a"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
+      // 部署到自己的账号时换成自己的 D1 database ID。
       "database_name": "tangbao261102",
       "database_id": "40a8c0a3-0aef-473f-9708-6ef90a2f40c0",
       "migrations_dir": "migrations"
