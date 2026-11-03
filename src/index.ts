@@ -1571,7 +1571,7 @@ async function unblockThread(request: Request, env: AppEnv, id: string): Promise
   await forgetBlock(
     env,
     [thread.token_hash, thread.visitor_hash, thread.ip_hash],
-    seat.super ? [GLOBAL_BLOCK, thread.operator_id] : [thread.operator_id],
+    seat.super ? [] : [thread.operator_id],
   );
   return json({ ok: true });
 }
@@ -1957,9 +1957,14 @@ async function forgetBlock(
   operatorIds: string[],
 ): Promise<void> {
   const fresh = presentIds(...ids);
-  const scopes = [...new Set(operatorIds.map(blockScope))];
-  if (!fresh.length || !scopes.length) return;
+  if (!fresh.length) return;
   const marks = fresh.map(() => "?").join(", ");
+  if (!operatorIds.length) {
+    await env.DB.prepare(`DELETE FROM blocks WHERE id IN (${marks})`).bind(...fresh).run();
+    return;
+  }
+  const scopes = [...new Set(operatorIds.map(blockScope))];
+  if (!scopes.length) return;
   const scopeMarks = scopes.map(() => "?").join(", ");
   await env.DB.prepare(
     `DELETE FROM blocks WHERE id IN (${marks}) AND operator_id IN (${scopeMarks})`,
