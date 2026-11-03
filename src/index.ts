@@ -543,8 +543,20 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
   if (operatorId === HOME_MODEL) return homePresence(env, now);
   const row = await env.DB.prepare(
     `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
-       (SELECT COUNT(*) FROM threads t WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0) AS pending,
-       (SELECT MIN(updated_at) FROM threads t WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0) AS oldest_pending_at
+       (SELECT COUNT(*) FROM threads t
+        WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM blocks b
+            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash)
+              AND (b.operator_id = o.id OR b.operator_id = '*')
+          )) AS pending,
+       (SELECT MIN(t.updated_at) FROM threads t
+        WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM blocks b
+            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash)
+              AND (b.operator_id = o.id OR b.operator_id = '*')
+          )) AS oldest_pending_at
      FROM operators o
      WHERE o.id = ?`,
   )
@@ -1534,12 +1546,9 @@ async function blockThread(request: Request, env: AppEnv, id: string): Promise<R
   if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
     throw new HttpError(404, "这屉不在笼里。");
   }
-  await rememberBlock(
-    env,
-    [thread.token_hash, thread.visitor_hash, thread.ip_hash],
-    seat.super ? GLOBAL_BLOCK : thread.operator_id,
-  );
-  await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  const scope = seat.super ? GLOBAL_BLOCK : blockScope(thread.operator_id);
+  await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash], scope);
+  await closeBlockedThreads(env, thread, scope);
   return json({ ok: true });
 }
 
@@ -1959,6 +1968,24 @@ async function forgetBlock(
     .run();
 }
 
+async function closeBlockedThreads(
+  env: AppEnv,
+  thread: { token_hash: string; visitor_hash: string | null; ip_hash: string | null },
+  operatorId: string,
+): Promise<void> {
+  const scope = blockScope(operatorId);
+  const scoped = scope !== GLOBAL_BLOCK;
+  const sql = `UPDATE threads
+    SET awaiting = 0
+    WHERE awaiting = 1
+      ${scoped ? "AND operator_id = ?" : ""}
+      AND (token_hash = ? OR visitor_hash = ? OR ip_hash = ?)`;
+  const bindings: unknown[] = scoped
+    ? [scope, thread.token_hash, thread.visitor_hash, thread.ip_hash]
+    : [thread.token_hash, thread.visitor_hash, thread.ip_hash];
+  await env.DB.prepare(sql).bind(...bindings).run();
+}
+
 async function visitorHash(request: Request): Promise<string> {
   const raw = request.headers.get("x-visitor") || "";
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(raw)) return "";
@@ -1980,6 +2007,7 @@ async function attachIdentity(
   );
   if (blocked) {
     await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip], operatorId);
+    await closeBlockedThreads(env, thread, operatorId);
   }
   if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
     await env.DB.prepare(
