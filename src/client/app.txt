@@ -1074,7 +1074,7 @@ async function loadModels(pick) {
   const seq = ++modelSearchSeq;
   try {
     const data = await api("/api/models");
-    if (seq !== modelSearchSeq) return;
+    if (seq !== modelSearchSeq || modelSearchMode) return;
     models = data.models || [];
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchMode = false;
@@ -1150,6 +1150,7 @@ async function loadMoreModels() {
 }
 
 modelSearch.addEventListener("input", () => {
+  modelSearchMode = Boolean(modelSearch.value.trim());
   clearTimeout(modelSearchTimer);
   modelSearchTimer = setTimeout(() => {
     void searchModels();
