@@ -19,7 +19,7 @@
     "migrate:remote": "wrangler d1 migrations apply tangbao --remote"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261019.1",
+    "@cloudflare/workers-types": "^5.20261031.1",
     "playwright-core": "^1.64.1",
     "typescript": "^5.9.3",
     "wrangler": "^4.42.0"
