@@ -1,0 +1,4 @@
+interface:
+  display_name: "缺陷修复"
+  short_description: "调查糖包项目缺陷，维护 Bug Issue，在 rick-dev 修复并记录根因、回归和验收状态"
+  default_prompt: "使用 $bugfix 调查并修复当前缺陷，维护 Bug Issue，在 rick-dev 完成针对性回归和结果回填。"
