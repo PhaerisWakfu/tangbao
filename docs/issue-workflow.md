@@ -6,11 +6,11 @@
 
 | 场景 | Skill | 输出 |
 | --- | --- | --- |
-| 新需求、反馈、方案及范围调整 | [requirement](../skills/requirement/SKILL.md)，调用 `$requirement` | 场景、范围、验收、Epic/子项及依赖 |
-| 按 Issue 实现功能或工程任务 | [develop](../skills/develop/SKILL.md)，调用 `$develop` | 实现、针对性验证及交付记录 |
-| 异常调查、根因定位与修复 | [bugfix](../skills/bugfix/SKILL.md)，调用 `$bugfix` | Bug 证据、修复、回归及验收记录 |
+| 新需求、反馈、方案及范围调整 | [requirement](../.agents/skills/requirement/SKILL.md)，调用 `$requirement` | 场景、范围、验收、Epic/子项及依赖 |
+| 按 Issue 实现功能或工程任务 | [develop](../.agents/skills/develop/SKILL.md)，调用 `$develop` | 实现、针对性验证及交付记录 |
+| 异常调查、根因定位与修复 | [bugfix](../.agents/skills/bugfix/SKILL.md)，调用 `$bugfix` | Bug 证据、修复、回归及验收记录 |
 
-安装可将仓库 `skills/` 下上述三个目录分别链接或复制到本机 `$CODEX_HOME/skills/`（未设置时为 `~/.codex/skills/`）下。复制安装需同步后续更新；自动发现以当前会话的可用 Skill 列表为准，未加载时可直接读取对应入口执行。名称不带项目前缀，适用范围仍为本文声明的仓库。
+源码统一放在仓库标准目录 `.agents/skills/`，每个场景仅保留一份 SKILL.md；名称、触发说明和简介使用该文件的 YAML frontmatter，调用示例写在正文。省去可选的 agents/openai.yaml 界面配置，不维护额外的 UI 默认提示。Codex 可按[仓库 Skill 发现规则](https://learn.chatgpt.com/docs/build-skills#where-to-save-skills)读取这些入口，无需在根目录增加 skills/ 或安装到个人全局目录。自动发现以当前会话的可用 Skill 列表为准，未加载时可直接读取对应入口执行；适用范围仍为本文声明的仓库。
 
 ## Skill 共用执行约定
 

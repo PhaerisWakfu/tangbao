@@ -1,4 +1,0 @@
-interface:
-  display_name: "需求整理"
-  short_description: "将糖包项目反馈整理为可开发的 GitHub Issues，完成查重、澄清、层级拆分和验收定义"
-  default_prompt: "使用 $requirement 整理当前需求，维护 GitHub Issues 的范围、验收、标签、责任人和原生父子关系。"

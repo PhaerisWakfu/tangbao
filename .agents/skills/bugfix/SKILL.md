@@ -1,17 +1,21 @@
 ---
 name: bugfix
 description: 调查并修复糖包项目的缺陷，维护 GitHub Bug Issue，在 rick-dev 定位根因、实施修复、回归并回填验收证据。用于异常反馈、Bug 排查和修复；新增能力及产品范围设计分别使用 develop 或 requirement。
+metadata:
+  short-description: "调查糖包项目缺陷，维护 Bug Issue，在 rick-dev 修复并记录根因、回归和验收状态"
 ---
 
 # 缺陷修复
 
 输入为异常反馈或已有 Bug Issue；输出为证据支持的调查结论、适用的修复与回归记录。未复现、仅静态发现和已修复是不同结论。
 
+调用示例：使用 `$bugfix` 调查并修复当前缺陷，维护 Bug Issue，在 rick-dev 完成针对性回归和结果回填。
+
 ## 建立调查范围
 
-1. 读取当前 checkout 的 [Issue 工作流程](../../docs/issue-workflow.md)，遵守共享的 Skill 执行约定；适用仓库以文档声明为准。读取当前可用的 AGENTS.md、CONTRIBUTING.md，按涉及范围读取前端/账号规范及本地部署手册；文档以 checkout 根目录解析。
+1. 读取当前 checkout 的 [Issue 工作流程](../../../docs/issue-workflow.md)，遵守共享的 Skill 执行约定；适用仓库以文档声明为准。读取当前可用的 AGENTS.md、CONTRIBUTING.md，按涉及范围读取前端/账号规范及本地部署手册；文档以 checkout 根目录解析。
 2. 搜索本仓库相关 Open/Closed Issue，读取已有记录及父项，优先续写。没有对应项时建立 Bug Issue，设置实际 bug label、默认 assignee 和适用的原生父子关系，再读取元数据核验；不要仅靠标题标记类型。
-3. 使用 [Issue 记录格式](../../docs/issue-records.md) 中的 Bug 格式记录环境/版本、前置条件、最小触发步骤、预期/实际和影响范围。明确证据级别，区分产品预期、实现缺陷、数据及环境问题；公开安全漏洞按 SECURITY.md 脱敏，不公开利用细节。
+3. 使用 [Issue 记录格式](../../../docs/issue-records.md) 中的 Bug 格式记录环境/版本、前置条件、最小触发步骤、预期/实际和影响范围。明确证据级别，区分产品预期、实现缺陷、数据及环境问题；公开安全漏洞按 SECURITY.md 脱敏，不公开利用细节。
 
 ## 定位和修复
 
@@ -25,6 +29,6 @@ description: 调查并修复糖包项目的缺陷，维护 GitHub Bug Issue，�
 
 修复后重复原触发步骤，检查相邻消费者、异常恢复及相关权限边界；按风险选择自动或浏览器回归。记录实际分支、commit、dirty 状态、instance 和结果。不能用 mock、语法通过或旧版本结果替代当前行为验证；不为本地验证访问生产数据或真实发信。
 
-按 [Issue 记录格式](../../docs/issue-records.md) 回填根因、变更、原始失败/修复后结果、未验证范围、提交/推送、部署、验收和遗留。Git 操作按本次授权执行；中文标题后空一行写正文，使用 Refs #N，提交前核验暂存和忽略边界。
+按 [Issue 记录格式](../../../docs/issue-records.md) 回填根因、变更、原始失败/修复后结果、未验证范围、提交/推送、部署、验收和遗留。Git 操作按本次授权执行；中文标题后空一行写正文，使用 Refs #N，提交前核验暂存和忽略边界。
 
 提供 Issue、修复内容及有效证据；达到待验收不自动关闭。只有本项验收满足才关闭，不能因提交/合并或本地不再复现直接写成生产已解决。
