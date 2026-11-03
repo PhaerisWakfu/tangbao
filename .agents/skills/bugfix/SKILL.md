@@ -1,6 +1,6 @@
 ---
 name: bugfix
-description: 调查并修复糖包项目的缺陷，维护 GitHub Bug Issue，在 rick-dev 定位根因、实施修复、回归并回填验收证据。用于异常反馈、Bug 排查和修复；新增能力及产品范围设计分别使用 develop 或 requirement。
+description: 调查并修复糖包项目的缺陷，通过 GitHub CLI（gh）维护 Bug Issue，在 rick-dev 定位根因、实施修复、回归并回填验收证据。用于异常反馈、Bug 排查和修复；新增能力及产品范围设计分别使用 develop 或 requirement。
 metadata:
   short-description: "调查糖包项目缺陷，维护 Bug Issue，在 rick-dev 修复并记录根因、回归和验收状态"
 ---
@@ -10,6 +10,8 @@ metadata:
 输入为异常反馈或已有 Bug Issue；输出为证据支持的调查结论、适用的修复与回归记录。未复现、仅静态发现和已修复是不同结论。
 
 调用示例：使用 `$bugfix` 调查并修复当前缺陷，维护 Bug Issue，在 rick-dev 完成针对性回归和结果回填。
+
+Bug 查重、创建、编辑、标签/指派、原生关系及回归回填统一优先用 `gh issue`，缺少子命令的能力用 `gh api`；认证、长正文写入和写后回读遵循 [CLI 操作规则](../../../docs/issue-workflow.md#github-cli-操作)。CLI 写入失败先核实权限和实际结果，不直接改用浏览器来掩盖失败。
 
 ## 建立调查范围
 

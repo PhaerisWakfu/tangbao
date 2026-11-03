@@ -16,12 +16,41 @@
 
 - 从当前 checkout 核对根目录、远程、分支、dirty 状态及适用指令，避免对其他项目套用本仓库规则。本次明确用户指令优先；旧任务的 main 直推等授权不能沿用到新任务。AGENTS.md 等本地材料缺少时，使用已跟踪规范和实际代码，不为补齐入口而提交本地报告。
 - 项目中的 AI/模型由人回复；设计建议、用户已确认规则、实际实现分别识别。按涉及范围读取前端、账号、本地部署规范，不为每次任务加载全部资料。
-- GitHub 工具能力足够时优先使用；否则使用已认证 CLI 或浏览器。单一入口失败可换可用入口，成功后核验实际元数据和正文。模板缺失不妨碍用结构化正文维护 Issue；必要写入未完成时明确待同步内容和阻碍，不能将本地草稿说成远程已完成。
+- 本仓库日常 GitHub Issue 操作优先使用官方 CLI `gh`，子命令未覆盖时用 `gh api` 调用 REST/GraphQL。正常读写不打开浏览器；CLI 失败先诊断并报告具体原因，确实无法覆盖或用户要求页面操作时才用备用入口。授权和业务页面验证按其实际需要使用浏览器，不能把浏览器成功当作 CLI 已修复。模板缺失不妨碍用结构化正文维护 Issue；必要写入未完成时明确待同步内容和阻碍，不能将本地草稿说成远程已完成。
 - 原生父子关系、labels 和 assignee 均须实际设置并核验，按下文统一规则执行；依赖与父子归属分别维护。不为演示或验证 Skill 创建无业务意义的 Issue。
 - 只对真正影响方案且无法从现有证据得到的问题请求澄清；等待必要回答时继续独立工作，不将超时当作批准。用户已授权的工作继续推进，不添加固定的重复确认。
 - Git 提交、推送、部署和真实邮件等操作按本次范围及授权执行，Skill 不扩大授权。生产访问与本地验证分开；公开安全问题按 SECURITY.md 脱敏。
 - 验证按风险选取并记录有效覆盖；重要失败、重跑条件和未验证项保留。文档或 Skill 变更检查结构、链接、场景职责和实际提交范围，无需为此重跑业务回归。
 - 实时进展回填 Issue；稳定规范发生变化才更新对应文档。提交前逐文件检查 diff、暂存区和忽略结果，AGENTS.md 及一次性报告/截图/凭据继续排除，不使用强制添加绕过忽略。
+
+## GitHub CLI 操作
+
+开始前检查 `gh --version`、`gh auth status`，确认活动账号和目标仓库；账号具有仓库 WRITE 权限不等于当前令牌具有 Issue 写权限。所有命令显式指定 `--repo PhaerisWakfu/tangbao`；`gh api` 显式写仓库路径，避免因当前目录或环境变量操作其他仓库。
+
+按实际任务选择命令，下面的编号仅展示命令用法：
+
+```sh
+# 查询已有工作与完整记录
+gh issue list --repo PhaerisWakfu/tangbao --state all --search '关键词'
+gh issue view 4 --repo PhaerisWakfu/tangbao --json number,title,body,state,labels,assignees,parent,updatedAt
+
+# 正文先写到被忽略的临时文件，再更新或创建
+gh issue edit 4 --repo PhaerisWakfu/tangbao --body-file .tmp/issue-4.md
+gh issue create --repo PhaerisWakfu/tangbao --title '需求标题' --body-file .tmp/requirement.md --label Requirement --assignee rickybtang --parent 5
+
+# 设置真实元数据与原生关系
+gh issue edit 6 --repo PhaerisWakfu/tangbao --add-label Requirement --add-assignee rickybtang --parent 5
+gh api --paginate 'repos/PhaerisWakfu/tangbao/issues/10/sub_issues?per_page=100'
+```
+
+- 查重覆盖 Open/Closed Issue。写入前读最新正文与 updatedAt；更新主描述时保留并行修改，不能用旧快照覆盖。发现并行更新就重新读取并合并本次内容。
+- 多行正文、评论使用 `--body-file`；`gh api` 的复杂载荷使用 `--input` JSON 文件。临时文件放被忽略的 `.tmp/`，不要在命令字符串中拼接未经转义的 Markdown、反引号或 `$()`，不新增根目录文件或辅助 YAML。
+- 创建、编辑、评论、标签、指派、父子关系均通过 CLI 执行；按安装版本的 `--help` 确认可用参数，未覆盖的能力继续使用 `gh api`。父子关系不能用正文链接替代。
+- 每次写入后回读对应资源，核对本次正文/评论及应有的 labels、assignee、parent、state；多页列表按需分页。响应失败或部分成功时先检查远端实际结果，再决定是否重试，避免重复 Issue 或评论。
+- 读成功不能证明写权限。遇到 403 时区分账号权限、令牌权限/资源范围和授权方式；例如细粒度令牌对外部协作者场景有限制。凭据调整由用户完成授权；不输出令牌，不自动扩大权限，不将换浏览器绕过失败记录为 CLI 成功。
+- 只为真实任务写入，不创建演示 Issue 来验证工具。CLI 的读写/回读证据和失败原因记录在原 Issue；不将本机登录状态和具体 Token 信息提交到仓库。
+
+命令依据：[Issue 编辑](https://cli.github.com/manual/gh_issue_edit)、[Issue 创建](https://cli.github.com/manual/gh_issue_create)、[API 调用](https://cli.github.com/manual/gh_api)。
 
 ## 最小工作单元
 
