@@ -71,6 +71,10 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key。部署者的 Wrangler 登录或 CI Token 用于发布/管理资源，不是邮件业务配置；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 则是站点自身的 Worker Secrets。外部应用走 REST API 才需要发信 Token/Account ID，本版没有启用该 REST 适配器。部署顺序、Secrets 放置、管理员引导和验收见[发布交接](accounts-rollout.md#代码先提交部署者随后联调)。
 
+与 [Send emails 入门指南的 Workers 栏](https://developers.cloudflare.com/email-service/get-started/send-emails/) 对照：`wrangler.jsonc` 配置 `send_email` 的 `EMAIL` 绑定，`src/email.ts` 调用 `env.EMAIL.send({to, from, subject, text, headers})`，保存返回的 `messageId`。验证码先进入持久 outbox 再调用该绑定；纯文本邮件无需额外提供 HTML。
+
+教程的 `remote: true` 用于本地 `wrangler dev` 连接 Cloudflare 真实邮件服务，需要对应账号授权；部署后的 Worker 直接使用原生绑定。`local:*` 验收工具另行强制本地模式、移除远程邮件绑定并使用模拟邮件箱，不能仅修改根配置的 `remote` 就让该沙箱实发。真实联调按发布交接建立独立云端试运行站；若另设本地真实发信配置，只对 `EMAIL` 启用远程绑定，D1/KV 仍保持本地，不能整体改成远程运行。
+
 ```text
 MAIL_MODE=disabled                 # disabled | test | cloudflare
 MAIL_FROM=糖包 <noreply@mail.phaeris.cn>
