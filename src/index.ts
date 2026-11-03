@@ -488,7 +488,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
       .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY)
       .all<{ key: string; value: string }>(),
     env.DB.prepare(
-      "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ?",
+      `SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${unblockedThread("threads")}`,
     )
       .bind(HOME_MODEL)
       .first<{ n: number; oldest: number | null }>(),
@@ -525,6 +525,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
          FROM threads t
          JOIN operators o2 ON o2.id = t.operator_id
          WHERE t.awaiting = 1 AND t.queued = 0
+           AND ${unblockedThread("t")}
            ${activeOnly ? "AND o2.active = 1" : ""}
          GROUP BY t.operator_id
        ) p ON p.operator_id = o.id
@@ -577,15 +578,13 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash, 'account:' || t.account_id)
-              AND (b.operator_id = o.id OR b.operator_id = '*')
+            WHERE ${threadBlockMatch("t", "o.id")}
           )) AS pending,
        (SELECT MIN(t.updated_at) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash, 'account:' || t.account_id)
-              AND (b.operator_id = o.id OR b.operator_id = '*')
+            WHERE ${threadBlockMatch("t", "o.id")}
           )) AS oldest_pending_at
      FROM operators o
      WHERE o.id = ? AND ${ownership.sql}`,
@@ -739,10 +738,11 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     const previous = await replay(); if (previous) return previous;
     throw new AuthError(401, "AUTH_REQUIRED", "第一段可以继续聊。开启新对话前，请注册并验证邮箱。");
   }
-  if (await isBlocked(env, [visitor, ip, accountBlockKey(account?.id)])) throw new HttpError(403, BLOCKED);
+  const identities = [visitor, accountBlockKey(account?.id)];
+  if (await isBlocked(env, identities, undefined, [ip])) throw new HttpError(403, BLOCKED);
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
-  const assignment = await assignOperator(env, incoming.operator, [visitor, ip, accountBlockKey(account?.id)]);
-  if (assignment.id !== POOL_MODEL && await isBlocked(env, [visitor, ip, accountBlockKey(account?.id)], assignment.id)) throw new HttpError(403, "这个模型暂时不接你的话。");
+  const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
+  if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
   await assertQueue(env, false);
   const id = randomId(16), token = randomId(32), now = Date.now(), messageId = randomId(16);
   const operator = assignment.id, queued = assignment.queued ? 1 : 0;
@@ -1016,8 +1016,8 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
        FROM operators o
        LEFT JOIN (
          SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
+         FROM threads t
+         WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
@@ -1059,8 +1059,8 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      WHERE ${where.join(" AND ")}
@@ -1117,19 +1117,20 @@ function reasonOf(value: unknown): string {
 
 type Assignment = { id: string; requested: string; fallback: boolean; queued: boolean };
 
-async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<string | null> = []): Promise<string> {
+async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<string | null> = [], ipIdentities: Array<string | null> = []): Promise<string> {
   const ids = presentIds(...identities);
-  const blockFilter = ids.length ? `AND NOT EXISTS (
-    SELECT 1 FROM blocks b WHERE b.id IN (${ids.map(() => "?").join(",")})
-      AND (b.operator_id=o.id OR b.operator_id='*')
-  )` : "";
+  const globalIds = presentIds(...ids, ...ipIdentities);
+  const matches: string[] = [];
+  if (ids.length) matches.push(`(b.operator_id=o.id AND b.id IN (${ids.map(() => "?").join(",")}))`);
+  if (globalIds.length) matches.push(`(b.operator_id='*' AND b.id IN (${globalIds.map(() => "?").join(",")}))`);
+  const blockFilter = matches.length ? `AND NOT EXISTS (SELECT 1 FROM blocks b WHERE ${matches.join(" OR ")})` : "";
   const row = await env.DB.prepare(
     `SELECT o.id
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      WHERE o.active = 1 AND ${OWNER_READY}
@@ -1140,12 +1141,12 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
      ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
      LIMIT 1`,
   )
-    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids)
+    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
     .first<{ id: string }>();
   return row?.id || HOME_MODEL;
 }
 
-async function assignOperator(env: AppEnv, value: string, identities: Array<string | null>): Promise<Assignment> {
+async function assignOperator(env: AppEnv, value: string, identities: Array<string | null>, ipIdentities: Array<string | null>): Promise<Assignment> {
   const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
   if (requested === HOME_MODEL) {
     return { id: HOME_MODEL, requested, fallback: false, queued: false };
@@ -1158,7 +1159,7 @@ async function assignOperator(env: AppEnv, value: string, identities: Array<stri
       return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }
-  const chosen = await autoModelId(env, Date.now(), identities);
+  const chosen = await autoModelId(env, Date.now(), identities, ipIdentities);
   if (chosen === HOME_MODEL) {
     return {
       id: POOL_MODEL,
@@ -1414,8 +1415,8 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      ${operatorWhere}
@@ -1501,8 +1502,7 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
        )
        AND NOT EXISTS (
          SELECT 1 FROM blocks b
-         WHERE b.id IN (t.token_hash,t.visitor_hash,t.ip_hash,'account:'||t.account_id)
-           AND (b.operator_id=? OR b.operator_id='*')
+         WHERE ${threadBlockMatch("t", "?")}
        )
      ORDER BY t.updated_at ASC
      LIMIT ?`,
@@ -1527,8 +1527,7 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
          )
          AND NOT EXISTS (
            SELECT 1 FROM blocks b
-           WHERE b.id IN (threads.token_hash,threads.visitor_hash,threads.ip_hash,'account:'||threads.account_id)
-             AND (b.operator_id=? OR b.operator_id='*')
+           WHERE ${threadBlockMatch("threads", "?")}
          )
          AND EXISTS (
            SELECT 1 FROM operators o
@@ -1536,7 +1535,7 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
          )
          AND (
            SELECT COUNT(*) FROM threads t
-           WHERE t.operator_id = ? AND t.awaiting = 1
+           WHERE t.operator_id = ? AND t.awaiting = 1 AND ${unblockedThread("t")}
          ) < ?`,
     )
       .bind(operatorId, row.id, HOME_MODEL, blockScope(operatorId), operatorId, freshAfter, ...ownership.values, operatorId, PENDING_CAP)
@@ -1553,12 +1552,12 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const [countRow, rows] = await Promise.all([
     env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND queued = 1",
+      `SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND queued = 1 AND ${unblockedThread("threads")}`,
     ).first<{ n: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt
        FROM threads
-       WHERE awaiting = 1 AND queued = 1
+       WHERE awaiting = 1 AND queued = 1 AND ${unblockedThread("threads")}
        ORDER BY updated_at ASC
        LIMIT 100`,
     ).all<{ id: string; title: string; preview: string; updatedAt: number }>(),
@@ -1575,13 +1574,13 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   if (!seat.super) await migrateHomeBacklog(env, own, seat);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} ORDER BY updated_at ASC LIMIT 100`,
+      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
     )
       .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
-       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} ORDER BY updated_at DESC LIMIT 40`,
+       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
     )
       .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
@@ -1591,18 +1590,12 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
       : Promise.resolve(null),
   ]);
   const status = statusPayload(publicPresence(presence.status));
-  const scope = blockScope(own);
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
-     WHERE operator_id = ? AND (
-       token_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-       OR visitor_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-       OR ip_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-       OR ('account:' || account_id) IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-     ) AND ${ownership.sql}
+     WHERE operator_id = ? AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", "?")}) AND ${ownership.sql}
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(own, scope, scope, scope, scope, ...ownership.values)
+    .bind(own, own, ...ownership.values)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
@@ -1638,7 +1631,10 @@ async function blockThread(request: Request, env: AppEnv, id: string): Promise<R
     throw new HttpError(404, "这屉不在笼里。");
   }
   const scope = seat.super ? GLOBAL_BLOCK : blockScope(thread.operator_id);
-  await rememberBlock(env, thread.account_id ? [accountBlockKey(thread.account_id)] : [thread.token_hash, thread.visitor_hash, thread.ip_hash], scope, seat);
+  const ids = seat.super
+    ? [accountBlockKey(thread.account_id), thread.token_hash, thread.visitor_hash, thread.ip_hash]
+    : thread.account_id ? [accountBlockKey(thread.account_id)] : [thread.token_hash, thread.visitor_hash];
+  await rememberBlock(env, ids, scope, seat);
   await closeBlockedThreads(env, thread, scope, seat);
   await ensureSeatModel(env, seat);
   return json({ ok: true });
@@ -1662,16 +1658,22 @@ async function unblockThread(request: Request, env: AppEnv, id: string): Promise
   if (!thread) {
     throw new HttpError(404, "这屉不在笼里。");
   }
-  const scopes = [...new Set((seat.super ? [GLOBAL_BLOCK, thread.operator_id] : [thread.operator_id]).map(blockScope))];
+  const scopes = seat.super ? [] : [blockScope(thread.operator_id)];
   const writeOwnership = seatOwnership(seat, "blocks.operator_id", [], true);
   if (thread.account_id) {
     const marks = scopes.map(() => "?").join(",");
-    await env.DB.prepare(`DELETE FROM blocks WHERE operator_id IN (${marks}) AND
+    await env.DB.prepare(`DELETE FROM blocks WHERE ${seat.super ? "" : `operator_id IN (${marks}) AND `}
       (id=? OR id IN(SELECT token_hash FROM threads WHERE account_id=?)
       OR id IN(SELECT visitor_hash FROM threads WHERE account_id=?)
-      OR id IN(SELECT ip_hash FROM threads WHERE account_id=?)) AND ${writeOwnership.sql}`)
-      .bind(...scopes, accountBlockKey(thread.account_id), thread.account_id, thread.account_id, thread.account_id, ...writeOwnership.values).run();
-  } else await forgetBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash], scopes, seat);
+      ${seat.super ? "OR (operator_id='*' AND id IN(SELECT ip_hash FROM threads WHERE account_id=?))" : ""}) AND ${writeOwnership.sql}`)
+      .bind(...scopes, accountBlockKey(thread.account_id), thread.account_id, thread.account_id, ...(seat.super ? [thread.account_id] : []), ...writeOwnership.values).run();
+  } else if (seat.super) {
+    // Aggregate by visitor, never by shared IP. An IP is only a global-block identity.
+    await env.DB.prepare(`DELETE FROM blocks WHERE id IN (?,?)
+      OR id IN(SELECT token_hash FROM threads WHERE visitor_hash=?)
+      OR (operator_id='*' AND (id=? OR id IN(SELECT ip_hash FROM threads WHERE visitor_hash=?)))`)
+      .bind(thread.token_hash, thread.visitor_hash || null, thread.visitor_hash || null, thread.ip_hash, thread.visitor_hash || null).run();
+  } else await forgetBlock(env, [thread.token_hash, thread.visitor_hash], scopes, seat);
   await ensureSeatModel(env, seat);
   return json({ ok: true });
 }
@@ -1775,8 +1777,8 @@ async function siteStatus(env: AppEnv): Promise<StatusPayload> {
        FROM operators o
        LEFT JOIN (
          SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
+         FROM threads t
+         WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
          GROUP BY operator_id
        ) p ON p.operator_id = o.id`,
     )
@@ -1821,7 +1823,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
-  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, accountBlockKey(thread.account_id)], thread.operator_id);
+  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
       id: thread.id,
@@ -2039,25 +2041,43 @@ function blockScope(operatorId: string): string {
   return operatorId === HOME_MODEL || operatorId === POOL_MODEL ? GLOBAL_BLOCK : operatorId;
 }
 
-async function isBlocked(
+// Model blocks use conversation/visitor/account identity. Only global blocks match IPs.
+function threadBlockMatch(thread = "t", operator = `${thread}.operator_id`): string {
+  const ids = `${thread}.token_hash,${thread}.visitor_hash,'account:'||${thread}.account_id`;
+  return `((b.operator_id=${operator} AND b.id IN (${ids}))
+    OR (b.operator_id='*' AND b.id IN (${ids},${thread}.ip_hash)))`;
+}
+
+function unblockedThread(thread = "t", operator = `${thread}.operator_id`): string {
+  return `NOT EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch(thread, operator)})`;
+}
+
+async function blockingScope(
   env: AppEnv,
   ids: Array<string | null | undefined>,
   operatorId?: string,
-): Promise<boolean> {
+  ipIds: Array<string | null | undefined> = [],
+): Promise<string | null> {
   const fresh = presentIds(...ids);
-  if (!fresh.length) return false;
-  const marks = fresh.map(() => "?").join(", ");
+  const globalIds = presentIds(...fresh, ...ipIds);
   const scope = operatorId ? blockScope(operatorId) : "";
-  const scopeWhere = scope
-    ? "AND (operator_id = ? OR operator_id = '*')"
-    : "AND operator_id = '*'";
-  const bindings = scope ? [...fresh, scope] : fresh;
-  const row = await env.DB.prepare(
-    `SELECT id FROM blocks WHERE id IN (${marks}) ${scopeWhere} LIMIT 1`,
-  )
-    .bind(...bindings)
-    .first();
-  return Boolean(row);
+  const matches: string[] = [], values: unknown[] = [];
+  if (scope && scope !== GLOBAL_BLOCK && fresh.length) {
+    matches.push(`(operator_id=? AND id IN (${fresh.map(() => "?").join(",")}))`);
+    values.push(scope, ...fresh);
+  }
+  if (globalIds.length) {
+    matches.push(`(operator_id='*' AND id IN (${globalIds.map(() => "?").join(",")}))`);
+    values.push(...globalIds);
+  }
+  if (!matches.length) return null;
+  const row = await env.DB.prepare(`SELECT operator_id FROM blocks WHERE ${matches.join(" OR ")}
+    ORDER BY CASE WHEN operator_id='*' THEN 0 ELSE 1 END LIMIT 1`).bind(...values).first<{ operator_id: string }>();
+  return row?.operator_id || null;
+}
+
+async function isBlocked(env: AppEnv, ids: Array<string | null | undefined>, operatorId?: string, ipIds: Array<string | null | undefined> = []): Promise<boolean> {
+  return Boolean(await blockingScope(env, ids, operatorId, ipIds));
 }
 
 async function rememberBlock(
@@ -2087,9 +2107,15 @@ async function forgetBlock(
   seat?: Seat,
 ): Promise<void> {
   const fresh = presentIds(...ids);
-  const scopes = [...new Set(operatorIds.map(blockScope))];
-  if (!fresh.length || !scopes.length) return;
+  if (!fresh.length) return;
   const marks = fresh.map(() => "?").join(", ");
+  if (!operatorIds.length) {
+    if (!seat?.super) throw new AuthError(403, "ADMIN_REQUIRED", "只有管理员可以解除全部范围的封禁。");
+    await env.DB.prepare(`DELETE FROM blocks WHERE id IN (${marks})`).bind(...fresh).run();
+    return;
+  }
+  const scopes = [...new Set(operatorIds.map(blockScope))];
+  if (!scopes.length) return;
   const scopeMarks = scopes.map(() => "?").join(", ");
   const ownership = seat ? seatOwnership(seat, "blocks.operator_id", [], true) : { sql: "1=1", values: [] };
   await env.DB.prepare(
@@ -2107,18 +2133,18 @@ async function closeBlockedThreads(
 ): Promise<void> {
   const scope = blockScope(operatorId);
   const scoped = scope !== GLOBAL_BLOCK;
-  const identity = thread.account_id
-    ? "account_id = ?"
-    : "(token_hash = ? OR visitor_hash = ? OR ip_hash = ?)";
+  const identity = scoped
+    ? thread.account_id ? "account_id = ?" : "(token_hash = ? OR visitor_hash = ?)"
+    : "(token_hash = ? OR visitor_hash = ? OR ip_hash = ? OR account_id = ?)";
   const ownership = seat ? seatOwnership(seat, "threads.operator_id", [], true) : { sql: "1=1", values: [] };
   const sql = `UPDATE threads
     SET awaiting = 0
     WHERE awaiting = 1
       ${scoped ? "AND operator_id = ?" : ""}
       AND ${identity} AND ${ownership.sql}`;
-  const identities = thread.account_id
-    ? [thread.account_id]
-    : [thread.token_hash, thread.visitor_hash, thread.ip_hash];
+  const identities = scoped
+    ? thread.account_id ? [thread.account_id] : [thread.token_hash, thread.visitor_hash]
+    : [thread.token_hash, thread.visitor_hash, thread.ip_hash, thread.account_id || null];
   const bindings = scoped ? [scope, ...identities] : identities;
   await env.DB.prepare(sql).bind(...bindings, ...ownership.values).run();
 }
@@ -2135,36 +2161,34 @@ async function attachIdentity(
   request: Request,
   operatorId: string,
 ): Promise<{ blocked: boolean }> {
-  if (thread.account_id) {
-    const key = accountBlockKey(thread.account_id);
-    const blocked = await isBlocked(env, [key, thread.token_hash, thread.visitor_hash, thread.ip_hash], operatorId);
-    if (blocked) { await rememberBlock(env, [key], operatorId); await closeBlockedThreads(env, thread, operatorId); }
-    return { blocked };
-  }
   const visitor = await visitorHash(request);
   const ip = await clientHash(request);
-  const blocked = await isBlocked(
-    env,
-    [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip],
-    operatorId,
-  );
-  if (blocked) {
-    await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip], operatorId);
-    await closeBlockedThreads(env, thread, operatorId);
+  const ids = [accountBlockKey(thread.account_id), thread.token_hash, thread.visitor_hash, ...(thread.account_id ? [] : [visitor])];
+  const scope = await blockingScope(env, ids, operatorId, [thread.ip_hash, ip]);
+  if (scope) {
+    const identityBlocked = scope !== GLOBAL_BLOCK || await isBlocked(env, ids);
+    if (identityBlocked) {
+      const remembered = thread.account_id ? [accountBlockKey(thread.account_id)] : ids;
+      await rememberBlock(env, remembered, scope);
+      await closeBlockedThreads(env, thread, scope);
+    } else {
+      // A shared-IP hit is temporary network scope, not proof that this visitor/account is banned.
+      await env.DB.prepare("UPDATE threads SET awaiting = 0 WHERE id = ?").bind(thread.id).run();
+    }
   }
-  if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
+  if (!thread.account_id && ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash))) {
     await env.DB.prepare(
       "UPDATE threads SET visitor_hash = COALESCE(visitor_hash, ?), ip_hash = COALESCE(ip_hash, ?) WHERE id = ?",
     )
       .bind(visitor || null, ip || null, thread.id)
       .run();
   }
-  return { blocked };
+  return { blocked: Boolean(scope) };
 }
 
 async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> {
   if (alreadyWaiting) return;
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1").first<{ n: number }>();
+  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND ${unblockedThread("threads")}`).first<{ n: number }>();
   if (Number(row?.n ?? 0) >= QUEUE_CAP) {
     throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
   }

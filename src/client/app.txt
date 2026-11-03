@@ -606,6 +606,7 @@ function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
+  applyBlocked(false);
   threadModel = "";
   threadQueued = false;
   updateReportEntry();

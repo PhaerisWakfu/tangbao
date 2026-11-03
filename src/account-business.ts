@@ -116,9 +116,10 @@ export async function accountBusinessRoute(request: Request, env: BusinessEnv): 
       env.DB.prepare("UPDATE threads SET account_id=?,token_hash=? WHERE id=? AND account_id IS NULL AND token_hash=? AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')")
         .bind(account.id, await digest(randomToken(32)), id, thread.token_hash, account.id),
       env.DB.prepare(`INSERT OR IGNORE INTO blocks(id,operator_id,created_at)
-        SELECT ?,operator_id,created_at FROM blocks WHERE id IN (?,?,?)
+        SELECT ?,operator_id,created_at FROM blocks
+        WHERE id IN (?,?)
         AND EXISTS(SELECT 1 FROM threads WHERE id=? AND account_id=?)`)
-        .bind(`account:${account.id}`, thread.token_hash, thread.visitor_hash, thread.ip_hash, id, account.id),
+        .bind(`account:${account.id}`, thread.token_hash, thread.visitor_hash, id, account.id),
       env.DB.prepare("UPDATE thread_creations SET token_ciphertext=NULL WHERE thread_id=? AND EXISTS(SELECT 1 FROM threads WHERE id=? AND account_id=?)").bind(id, id, account.id),
     ]);
     if (result[0].meta.changes !== 1) throw new AuthError(409, "HISTORY_CONFLICT", "这段对话的归属刚刚发生变化，请刷新后重试。");

@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { runBlockMergeScenarios } from "./local-block-scenarios.mjs";
 
 function freshAccountPassword() {
   // Exactly 20 characters, with letters, digits and punctuation guaranteed.
@@ -395,7 +396,10 @@ export async function runScenarios({ metadata, directory, fixtureFile, checkServ
       assert.equal((await member.request(`/api/threads/${a.id}`)).blocked,false);
       assert.equal((await device.request(`/api/threads/${a.id}`)).blocked,false);
     });
-    if (includeEdgeScenarios) await runAccountEdgeScenarios({ actor, admin, local, testMail, advance, check, bootstrap });
+    if (includeEdgeScenarios) {
+      await runBlockMergeScenarios({ actor, admin, operatorA, operatorB, check, checkServer, directory });
+      await runAccountEdgeScenarios({ actor, admin, local, testMail, advance, check, bootstrap });
+    }
     const demoPassword = `Legacy-demo-${randomBytes(18).toString("base64url")}`;
     await local("/__local/fixture", { action:"create-legacy", operatorId:"tangbao-local-legacy-demo", password:demoPassword });
     fixture.actors["legacy-demo"]={operatorId:"tangbao-local-legacy-demo",password:demoPassword};

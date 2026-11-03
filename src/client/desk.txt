@@ -214,7 +214,7 @@ function renderThread(data) {
     shelve.textContent = "先放下";
   }
   if (data.thread.blocked) {
-    if (block.dataset.confirm !== "1") block.textContent = "解开";
+    if (block.dataset.confirm !== "1") block.textContent = seat.super ? "全部解开" : "解开";
     block.dataset.mode = "undo";
   } else if (block.dataset.confirm !== "1") {
     block.textContent = "拉黑";
@@ -403,13 +403,14 @@ $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
   const undo = button.dataset.mode === "undo";
+  const undoLabel = seat.super ? "全部解开" : "解开";
   if (button.dataset.confirm !== "1") {
     button.dataset.confirm = "1";
-    button.textContent = undo ? "确定解开" : "确定拉黑";
+    button.textContent = undo ? `确定${undoLabel}` : "确定拉黑";
     window.setTimeout(() => {
       if (button.dataset.confirm !== "1") return;
       button.dataset.confirm = "";
-      button.textContent = undo ? "解开" : "拉黑";
+      button.textContent = undo ? undoLabel : "拉黑";
     }, 2200);
     return;
   }
