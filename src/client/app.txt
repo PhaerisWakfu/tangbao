@@ -513,6 +513,7 @@ async function openThread(id) {
 function newChat(pickModel) {
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
+  blocked = false;
   threadModel = "";
   threadQueued = false;
   updateReportEntry();

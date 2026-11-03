@@ -547,15 +547,23 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash)
-              AND (b.operator_id = o.id OR b.operator_id = '*')
+            WHERE (b.operator_id = o.id AND (
+                     b.id = t.token_hash OR b.id = t.visitor_hash
+                   ))
+               OR (b.operator_id = '*' AND (
+                     b.id = t.token_hash OR b.id = t.visitor_hash OR b.id = t.ip_hash
+                   ))
           )) AS pending,
        (SELECT MIN(t.updated_at) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE b.id IN (t.token_hash, t.visitor_hash, t.ip_hash)
-              AND (b.operator_id = o.id OR b.operator_id = '*')
+            WHERE (b.operator_id = o.id AND (
+                     b.id = t.token_hash OR b.id = t.visitor_hash
+                   ))
+               OR (b.operator_id = '*' AND (
+                     b.id = t.token_hash OR b.id = t.visitor_hash OR b.id = t.ip_hash
+                   ))
           )) AS oldest_pending_at
      FROM operators o
      WHERE o.id = ?`,
@@ -684,7 +692,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const assignment = await assignOperator(env, incoming.operator);
   if (
     assignment.id !== POOL_MODEL &&
-    (await isBlocked(env, [visitor, ip], assignment.id))
+    (await isBlocked(env, [visitor], assignment.id))
   ) {
     throw new HttpError(403, "这个模型暂时不接你的话。");
   }
@@ -1504,17 +1512,19 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
       : Promise.resolve(null),
   ]);
   const status = statusPayload(publicPresence(presence.status));
-  const scope = blockScope(own);
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
-     WHERE operator_id = ? AND (
-       token_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-       OR visitor_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-       OR ip_hash IN (SELECT id FROM blocks WHERE operator_id = ? OR operator_id = '*')
-     )
+     WHERE operator_id = ?
+       AND EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE (b.operator_id = ? AND (b.id = threads.token_hash OR b.id = threads.visitor_hash))
+            OR (b.operator_id = '*' AND (
+              b.id = threads.token_hash OR b.id = threads.visitor_hash OR b.id = threads.ip_hash
+            ))
+       )
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(own, scope, scope, scope)
+    .bind(own, own)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
@@ -1547,7 +1557,10 @@ async function blockThread(request: Request, env: AppEnv, id: string): Promise<R
     throw new HttpError(404, "这屉不在笼里。");
   }
   const scope = seat.super ? GLOBAL_BLOCK : blockScope(thread.operator_id);
-  await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash], scope);
+  const ids = seat.super
+    ? [thread.token_hash, thread.visitor_hash, thread.ip_hash]
+    : [thread.token_hash, thread.visitor_hash];
+  await rememberBlock(env, ids, scope);
   await closeBlockedThreads(env, thread, scope);
   return json({ ok: true });
 }
@@ -1718,7 +1731,14 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
   const seat = await requireSeat(request, env);
   if (!seat.super && thread.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
-  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash], thread.operator_id);
+  const scope = blockScope(thread.operator_id);
+  const blocked = await isBlocked(
+    env,
+    scope === GLOBAL_BLOCK
+      ? [thread.token_hash, thread.visitor_hash, thread.ip_hash]
+      : [thread.token_hash, thread.visitor_hash],
+    thread.operator_id,
+  );
   return json({
     thread: {
       id: thread.id,
@@ -2005,13 +2025,14 @@ async function attachIdentity(
 ): Promise<{ blocked: boolean }> {
   const visitor = await visitorHash(request);
   const ip = await clientHash(request);
-  const blocked = await isBlocked(
-    env,
-    [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip],
-    operatorId,
-  );
+  const scope = blockScope(operatorId);
+  const ids =
+    scope === GLOBAL_BLOCK
+      ? [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]
+      : [thread.token_hash, thread.visitor_hash, visitor];
+  const blocked = await isBlocked(env, ids, operatorId);
   if (blocked) {
-    await rememberBlock(env, [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip], operatorId);
+    await rememberBlock(env, ids, operatorId);
     await closeBlockedThreads(env, thread, operatorId);
   }
   if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
