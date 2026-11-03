@@ -511,6 +511,7 @@ async function openThread(id) {
 }
 
 function newChat(pickModel) {
+  if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
   threadModel = "";
   threadQueued = false;
@@ -878,8 +879,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-$("#new").addEventListener("click", newChat);
-$("#new-top").addEventListener("click", newChat);
+$("#new").addEventListener("click", () => newChat());
+$("#new-top").addEventListener("click", () => newChat());
 $("#open-side").addEventListener("click", () => body.classList.add("drawer"));
 $("#close-side").addEventListener("click", closeSide);
 $("#scrim").addEventListener("click", closeSide);
