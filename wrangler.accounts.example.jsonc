@@ -1,0 +1,47 @@
+{
+  // Copy to ignored wrangler.production.jsonc, then replace ALL placeholders.
+  // For a private test Worker, use its own name, URL, D1 and KV.
+  // No passwords, API tokens, peppers or encryption keys belong in this file.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "replace-worker-name",
+  "account_id": "00000000000000000000000000000000",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "replace-before-deploy.invalid", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "replace-database-name",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }],
+  "kv_namespaces": [{
+    "binding": "IMAGES",
+    "id": "00000000000000000000000000000000"
+  }],
+  "send_email": [{
+    "name": "EMAIL",
+    "allowed_sender_addresses": ["noreply@mail.phaeris.cn"]
+  }],
+  "vars": {
+    "APP_ORIGIN": "https://replace-before-deploy.invalid",
+    "MAIL_MODE": "cloudflare",
+    "MAIL_FROM": "糖包 <noreply@mail.phaeris.cn>",
+    "MAIL_DAILY_LIMIT": "200",
+    "MAINTENANCE": "1"
+  },
+  // Maintenance starts paused. Set MAINTENANCE=0 only after the schema is ready
+  // and the whole hostname is restricted to the deployment/acceptance users.
+  "triggers": { "crons": ["* * * * *"] }
+  // Add queues.consumers plus MAIL_EVENTS_QUEUE/MAIL_EVENTS_ACCOUNT_ID only
+  // after creating and verifying the Email Sending event subscription.
+}

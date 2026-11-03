@@ -51,6 +51,45 @@ npm run local:info -- --instance epic-5-demo
 
 成功 seed 后再次执行会复用同一组合成身份，不重复申请或创建对话。中断/失败的实例保持原样，改用新 instance。已有实例更新源码时先停止对应服务，再 prepare 应用缺少的迁移；prepare 不清数据，也不替换已存在的本地密钥，只补齐缺少的测试密钥。
 
+## 从账号改造前原版手工造数据
+
+需要亲自建立旧模型、匿名对话及画作，再测试账号迁移时，使用独立原版入口：
+
+```sh
+npm run local:legacy:prepare -- --instance manual-legacy --port 8900 --inspector-port 8901
+npm run local:legacy:dev -- --instance manual-legacy
+# 另一个终端查看引导页和角色地址
+npm run local:legacy:info -- --instance manual-legacy
+```
+
+工具通过 `git archive` 固定检出账号改造前的 `633893951f5249673a07353b37b05685af841a45`，放入忽略目录 `.tmp/local-legacy/<instance>/source/`；它不是新 Git worktree，不切换当前分支，也不改原 checkout。仓库需包含该历史提交，浅克隆先补齐 Git 历史。`node_modules` 链接当前已安装依赖，因此仍需先 `npm ci`。启动前核对冻结源文件摘要，防止当前 Epic 继续开发时带入新业务源码。
+
+新实例仅复用冻结原版的本地 prepare，严格应用前 20 份迁移，没有 accounts 表，也不运行 seed。模型、申请、对话、消息和图片元数据均为空，只有随机本地管理员口令。旧首页、申请、聊天、工作台及业务逻辑保持原样。外层本地 wrapper 只提供回环地址限制、独立引导页及浏览器数据保存入口；远程数据库、邮件、飞书和推送关闭。原版 prepare 的随机凭据换行格式仅在新生成的本地文件中规范化，不修改冻结源码。
+
+`local:legacy:info` 给出含实例 nonce 的引导链接，管理员口令在引导页内。每个角色使用自己的 `.localhost` 地址，以隔离 cookie/localStorage。至少使用申请者 A、管理员、运营者 A、访客 A/B；申请者 B、运营者 B 可用于第二个模型。不要改用统一的 `127.0.0.1` 页面操作所有角色。
+
+手工步骤：
+
+1. 进入申请者页面，点击“我知道了”，填写型号、邮箱和模型说明并提交；邮箱可用 `name@example.test`，旧版不会发送验证邮件。
+2. 管理员在自己的 `/desk` 用引导页口令“掀开笼屉”，进入“申请”页审批。然后回到原来那个申请者地址，刷新首页，点击“申请成为AI”；进度弹层会显示旧版发放的口令，手动复制给对应运营者。
+3. 运营者在自己的 `/desk` 用这份口令登录，保持工作台打开，确认“在线”。访客从各自 `/chat` 选择对应型号再发消息；无人在线时 Auto 会先进入消息池。原版每个 IP 每小时最多创建 8 段对话，多个本地角色仍共享本机网络，不通过改业务规则绕过。
+4. 在工作台左侧选中一段对话。回复框左下角“＋”→“画一张”，画完点“放进回复”，再点发送箭头“写下”；已有画作使用“＋”→“添加图片”，或粘贴图片，添加后也要发送。访客聊天框的“＋”同样支持图片上传。
+5. 完成后，从引导页分别打开各角色的“保存浏览器数据”，点击保存按钮。这一步读取该角色同源的 `tangbao.v1`、`tangbao.visitor`、`tangbao.apply`、`tangbao.model`、`tangbao.presence` 五个键，保留匿名历史 token、访客及申请标识和偏好；不读取 HttpOnly cookie，不枚举其他 localStorage 键，不清理浏览器数据。
+
+浏览器保存值写入本地 `settings` 的固定 `local_legacy_browser:<role>` 键，服务端同时检查实例 nonce、同源 Origin、角色主机名及键白名单。匿名身份和旧工作台 cookie 仍留在浏览器；后续迁移尽量沿用同一角色主机名、端口和浏览器配置，不能仅靠 SQL 备份恢复浏览器登录态。
+
+持久数据位于 `.tmp/local-legacy/<instance>/source/.tmp/local-sandboxes/<instance>/state/`，包含 D1 和本地 KV。重复 prepare 只核对既有实例并展示地址，不重跑迁移、生成身份或清数据。不要用当前版本的 `local:prepare` 指向这套旧数据。
+
+准备迁移时，先在运行原版的终端停止对应 `local:legacy:dev`，再备份：
+
+```sh
+npm run local:legacy:backup -- --instance manual-legacy
+```
+
+备份拒绝正在运行的实例，不自动停服。结果写入 `.tmp/local-legacy/<instance>/backups/<时间>-<随机值>/`，保留 SQL、实际已执行迁移清单、完整 D1/KV state、各角色主动保存的浏览器数据，以及仅本地使用的凭据和地址信息；原实例保持原样。`backup.json` 记录状态、行数和 SQL 摘要，`state-manifest.json` 记录完整 state 文件摘要。失败备份不覆盖，保留后重新操作。
+
+这些文件含本地演练对话、token 和口令，全部位于忽略目录，不提交或公开。SQL 本身不包含 KV 图片二进制，不能把导出 SQL 当成画作备份；这里的完整 state 副本才同时保留 D1/KV。工具只准备和备份旧版，不自动执行账号迁移；切换到新版、KV 恢复及实际迁移结果另行记录。
+
 ## 多个人与跨设备怎么验
 
 普通多标签共享 cookie/localStorage，不能当作不同账号。`local:info` 和验收面板中的角色入口使用不同的 `.localhost` 主机名，从而隔离 cookie 和浏览器存储。例如一个管理员、两位运营者、两位匿名访客，全部访问同一个本地数据库。

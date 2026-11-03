@@ -41,6 +41,12 @@
 
 清 cookie、隐私模式或换浏览器会产生新匿名身份，不能承诺严格“一人一次”。IP/行为限流用于抑制滥用，不把共享网络的人视作同一账号。
 
+无痕窗口不能作为可靠的永久设备身份。Chrome 在所有无痕窗口关闭后会清除该会话的 cookie 和站点数据；普通网页没有可静默读取、跨浏览器且不可重置的物理设备编号。浏览器指纹仅能作风险信号，浏览器也会限制可用于指纹识别的信息，不能据此执行严格“每台设备终身一次”的额度。
+
+Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterprise Bot Management 加相应附加服务），现有 Workers Paid 不代表已具备该功能。官方明确说明不同设备可能得到相同 ID，建议用于识别高频滥用而非唯一识别单台设备。因此不为一次匿名额度引入该服务，也不新增指纹采集或修改匿名门槛。当前新建对话还受服务端每 IP 每小时 8 次的创建限流；该限制不能等同于设备或个人额度，换网络仍可能绕过。
+
+能力边界核对于 2026-11-03：[Chrome 无痕会话](https://support.google.com/chrome/answer/95464?hl=en)、[MDN 浏览器指纹](https://developer.mozilla.org/en-US/docs/Glossary/Fingerprinting)、[Cloudflare Ephemeral IDs 限制](https://developers.cloudflare.com/turnstile/tutorials/fraud-detection-with-ephemeral-ids/)、[Turnstile 套餐](https://developers.cloudflare.com/turnstile/plans/)。第二段要求邮箱验证账号，不称为实名验证；若将来要求更严格的额度，需要另行确定账号门槛及滥用治理方案。
+
 已归属账号的对话采用稳定账号身份执行模型级拉黑，不能因换设备绕过；匿名普通模型封禁匹配 token/visitor，普通模型不写入或匹配 IP。IP 只参与管理员全局封禁，读请求不把 IP-only 命中扩散为其他访问者的永久身份封禁。历史关联按原 token/visitor 继承有效封禁，不将共享 IP 升级成账号封禁。
 
 普通运营者仅能解除本人模型作用域中的封禁；管理员“全部解开”可清理同一账号或同一匿名 visitor 的跨模型封禁及对应全局 IP 记录。聚合同一访问者时使用账号/非空 visitor，不按共享 IP 搜集其他人的对话或删除其独立封禁。解封不等于恢复已停用账号。
@@ -62,6 +68,8 @@
 生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；提供的控制台截图显示发送已启用、DNS 已配置。日额度 200 封已由用户确认，真实收件箱送达仍需单独验收。
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
+
+当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key。部署者的 Wrangler 登录或 CI Token 用于发布/管理资源，不是邮件业务配置；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 则是站点自身的 Worker Secrets。外部应用走 REST API 才需要发信 Token/Account ID，本版没有启用该 REST 适配器。部署顺序、Secrets 放置、管理员引导和验收见[发布交接](accounts-rollout.md#代码先提交部署者随后联调)。
 
 ```text
 MAIL_MODE=disabled                 # disabled | test | cloudflare

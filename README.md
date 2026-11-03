@@ -80,6 +80,8 @@ npm run dev
 
 当前项目按 Workers Paid + D1 + KV 部署。免费 Workers 的每日请求额度可能不够持续轮询。
 
+**从旧版升级前，先看[部署者交接、SQL 与上线验收](docs/accounts-rollout.md#代码先提交部署者随后联调)。** 账号迁移不随 Git 提交自动执行；先核对自动部署设置，再安排维护窗口、最新备份、新目标库及配套代码切换。历史图片 KV 必须保留，不能用本地测试库覆盖生产。
+
 1. 登录 Cloudflare：
 
 ```bash
@@ -93,22 +95,25 @@ npx wrangler d1 create tangbao
 npx wrangler kv namespace create IMAGES
 ```
 
-3. 把 D1 的 `database_id` 和 KV 的 `id` 写进 `wrangler.jsonc`。
+3. 复制 `wrangler.accounts.example.jsonc` 为不提交的 `wrangler.production.jsonc`，填写实际 Worker、域名、`APP_ORIGIN`、D1/KV 名称和 ID。
 
    这些 ID 不是密钥，但每个部署者都应该换成自己的资源。
 
 4. 备份并核对目标数据库，再应用尚未执行的迁移，逐项添加服务端 secrets：
 
 ```bash
-npx wrangler d1 migrations list DB --remote
-npx wrangler d1 migrations apply DB --remote
-npx wrangler secret put ADMIN_SECRET
-npx wrangler secret put EMAIL_CODE_PEPPER
-npx wrangler secret put MAIL_PAYLOAD_KEY
-npm run deploy
+npx wrangler d1 migrations list DB --remote --config wrangler.production.jsonc
+npx wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc
+# 只有全新 Worker 才生成独立 ADMIN_SECRET，原站升级保留原值。
+npx wrangler secret put EMAIL_CODE_PEPPER --config wrangler.production.jsonc
+npx wrangler secret put MAIL_PAYLOAD_KEY --config wrangler.production.jsonc
+# 按交接手册完成资源/维护/访问限制核对后，再部署选定目标。
+npx wrangler deploy --config wrangler.production.jsonc
 ```
 
-不要提交 `.dev.vars`，也不要整份上传其中的本地禁用/测试配置。发信前确认 `mail.phaeris.cn` 已启用、DNS 已配置，以及 `wrangler.jsonc` 中 `APP_ORIGIN`、发件地址、`MAIL_MODE=cloudflare` 与真实站点一致。随后注册并验证管理员账号，由部署者运行受控引导，再用邮箱和密码登录。完整迁移、管理员引导和可选投递事件队列说明见 [上线与回退](docs/local-development.md#上线与回退) 及 [账号设计](docs/accounts.md)。生产发送、收件箱送达和退信需单独验收。
+不要提交 `.dev.vars` 或 `wrangler.production.jsonc`，也不要上传本地禁用/测试配置。原生 `EMAIL` 绑定运行时不需要发信 API Key；部署 Token 放本机/CI Secrets，邮件 pepper 和加密密钥放 Worker Secrets。发信前确认域名已启用、DNS 已配置，以及正式 `APP_ORIGIN`、发件地址、`MAIL_MODE=cloudflare` 一致。
+
+模板默认维护开启，业务 API、注册和验证均暂停；在覆盖全部入口的受限站点中关闭维护后，才能正常注册、真实邮箱验证并受控引导首个管理员。完整步骤、配置位置、上线验证和回退见[发布交接手册](docs/accounts-rollout.md)。生产发送、收件箱送达、真实回执及历史图片需部署者另行验收。
 
 ## 检查
 
@@ -118,11 +123,11 @@ npx tsc --noEmit
 npm run check
 ```
 
-干净检出时先运行 `npm run types`，生成不提交到 Git 的 Worker 类型声明，再执行类型检查。当前 CI 缺少这一步，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。
+干净检出及 CI 都先运行 `npm run types`，生成不提交到 Git 的 Worker 类型声明，再执行类型检查。
 
 `scripts/smoke.mjs` 会向本地服务写入测试数据，不要指向生产环境。
 
-旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归。本地迁移脚本指定的数据库名称与配置不一致，临时可使用 `npx wrangler d1 migrations apply DB --local`；修复由 Issue 跟踪。
+旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归；遗留由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。迁移脚本已统一使用 `DB` binding；非默认目标仍须显式追加 `--config`，例如 `npm run migrate:remote -- --config wrangler.production.jsonc`。
 
 ## 后续开发入口
 
