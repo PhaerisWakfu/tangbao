@@ -411,7 +411,7 @@
       if (localStorage.getItem("tangbao.presence") === "asleep") setPresence({ awake: false });
     } catch {}
 
-    function paintModels(models, hiddenCount) {
+    function paintModels(models) {
       const lineup = $("#lineup");
       lineup.replaceChildren();
       const online = models.filter((model) => model.status === "online");
@@ -461,17 +461,11 @@
           : `还有 ${online.length - 10} 个在线型号，查看全部`;
         more.addEventListener("click", () => {
           onlineOpen = !onlineOpen;
-          paintModels(models, hiddenCount);
+          paintModels(models);
         });
         lineup.append(more);
       }
-      if (hiddenCount > 0) {
-        const more = document.createElement("p");
-        more.className = "line-more static";
-        more.textContent = `还有 ${hiddenCount} 个型号暂不可选`;
-        lineup.append(more);
-      }
-      $("#cage").hidden = models.length === 0 && hiddenCount === 0;
+      $("#cage").hidden = models.length === 0;
     }
 
     fetch("/api/status")
@@ -480,7 +474,7 @@
       .catch(() => {});
     fetch("/api/models")
       .then((response) => response.json())
-      .then((data) => paintModels(data.models || [], Number(data.hidden) || 0))
+      .then((data) => paintModels(data.models || []))
       .catch(() => {});
   </script>
 </body>
