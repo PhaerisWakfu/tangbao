@@ -1510,34 +1510,33 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
 .github-link {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 11px 0 9px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-family: var(--sans);
-  font-size: 12px;
-  letter-spacing: 0.02em;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 2px 8px -5px rgba(31, 29, 26, 0.3);
   text-decoration: none;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .github-link:hover {
-  color: var(--ink);
-  border-color: var(--line-2);
-  background: var(--panel);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
 }
 .github-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.github-link svg { width: 14px; height: 14px; display: block; }
+.github-link svg { width: 16px; height: 16px; display: block; }
 
 @media (max-width: 640px) {
   .front-top { padding-top: 14px; }
-  .github-link { height: 28px; font-size: 11.5px; }
-  .github-link svg { width: 13px; height: 13px; }
+  .github-link { width: 32px; height: 32px; }
+  .github-link svg { width: 15px; height: 15px; }
 
   .card {
     position: fixed;

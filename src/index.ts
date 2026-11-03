@@ -1286,20 +1286,33 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
           ? " AND reported_at > 0"
           : "";
   const visible = "((operator_id != ? AND queued = 0) OR reported_at > 0)";
-  const [countRow, presence, used] = await Promise.all([
+  const [countRow, operatorRows] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS n FROM threads WHERE ${visible} AND (? = '' OR operator_id = ?)${stateWhere}`,
     )
       .bind(HOME_MODEL, model, model)
       .first<{ n: number }>(),
-    loadPresence(env),
     env.DB.prepare(
-      `SELECT DISTINCT operator_id AS id FROM threads WHERE ${visible}`,
+      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+        COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
+       FROM operators o
+       LEFT JOIN (
+         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
+         FROM threads
+         WHERE awaiting = 1 AND queued = 0
+         GROUP BY operator_id
+       ) p ON p.operator_id = o.id
+       JOIN (
+         SELECT DISTINCT operator_id AS id
+         FROM threads
+         WHERE ${visible}
+       ) used ON used.id = o.id
+       ORDER BY o.created_at ASC`,
     )
       .bind(HOME_MODEL)
-      .all<{ id: string }>(),
+      .all<PresenceRow>(),
   ]);
-  const operators = presence.operators;
+  const operators = operatorRows.results.map((row) => presenceFromRow(row, Date.now()));
   const statusRank: Record<PresenceState, number> = {
     online: 0,
     busy: 1,
@@ -1311,7 +1324,6 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   );
   const models = new Set<string>();
   for (const row of operators) models.add(row.id);
-  for (const row of used.results) if (row.id) models.add(row.id);
   const total = tally(countRow);
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
   const page = Math.min(asked, pages);
