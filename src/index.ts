@@ -775,13 +775,20 @@ async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean
 
 async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
   try {
-    if (seat.super) {
+    if (seat.super && seat.operatorId === HOME_MODEL) {
       await env.DB.prepare(
         `INSERT INTO settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value
          WHERE CAST(settings.value AS INTEGER) < ?`,
       )
         .bind(HOME_SEEN_KEY, String(now), now - HEARTBEAT_WRITE)
+        .run();
+      return;
+    }
+    if (seat.super && !seat.operatorId) return;
+    if (seat.super) {
+      await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE id = ? AND owner_account_id = ? AND last_seen_at < ?")
+        .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE)
         .run();
       return;
     }
@@ -1090,7 +1097,8 @@ function logout(request: Request): Response {
 
 async function readProfile(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (seat.super) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL });
+  if (seat.super && !seat.operatorId) return json({ super: true, operatorId: null, id: null, needsModel: true });
+  if (seat.super && seat.operatorId === HOME_MODEL) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL });
   const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
     .bind(seat.operatorUid, seat.accountId)
     .first<{ id: string; blurb: string | null }>();
@@ -1104,7 +1112,8 @@ async function readProfile(request: Request, env: AppEnv): Promise<Response> {
 
 async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (seat.super) throw new HttpError(403, "糖包本人不用改型号。");
+  if (seat.super && !seat.operatorId) throw new HttpError(409, "请先绑定模型，再修改模型资料。");
+  if (seat.super && seat.operatorId === HOME_MODEL) throw new HttpError(403, "糖包本人不用改型号。");
   const payload = await readJson(request);
   const suffix = modelSuffix(payload.suffix);
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
@@ -1728,25 +1737,23 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
-  const ownership = seatOwnership(seat, "threads.operator_id", [], seat.super);
-  const operatorFilter = seat.super ? "" : " AND operator_id = ?";
-  const operatorValues = seat.super ? [] : [own];
+  const ownership = seatOwnership(seat, "threads.operator_id");
   const now = Date.now();
   await touchSeat(env, seat, now);
   if (!seat.super) await migrateHomeBacklog(env, own, seat);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0${operatorFilter} AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
+      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
     )
-      .bind(...operatorValues, ...ownership.values)
+      .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
-       FROM threads WHERE awaiting = 0${operatorFilter} AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
+       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
     )
-      .bind(...operatorValues, ...ownership.values)
+      .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
-    seat.super ? homePresence(env, now) : operatorPresence(env, own, now, seat),
+    seat.super && own === HOME_MODEL ? homePresence(env, now) : operatorPresence(env, own, now, seat),
     seat.super
       ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
       : Promise.resolve(null),
@@ -1754,17 +1761,18 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   const status = statusPayload(publicPresence(presence.status));
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
-     WHERE ${seat.super ? "1=1" : "operator_id = ?"} AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", seat.super ? "threads.operator_id" : "?")}) AND ${ownership.sql}
+     WHERE operator_id = ? AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", "?")}) AND ${ownership.sql}
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(...(seat.super ? [] : [own, own]), ...ownership.values)
+    .bind(own, own, ...ownership.values)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
   await ensureSeatModel(env, seat);
   return json({
     super: seat.super,
-    operatorId: seat.operatorId,
+    operatorId: seat.operatorId || null,
+    needsModel: !seat.operatorId,
     status,
     waiting: waiting.results.filter((row) => !blockedIds.has(row.id)),
     pending: pendingRow?.n ?? 0,
@@ -1880,13 +1888,14 @@ async function pushSubscribe(request: Request, env: AppEnv): Promise<Response> {
   const p256dh = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { p256dh?: unknown }).p256dh : "");
   const auth = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { auth?: unknown }).auth : "");
   if (!endpoint || !p256dh || !auth) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再开启后台通知。");
   const ownership = seat.super ? { sql: "1=1", values: [] } : seatOwnership(seat, "operators.id");
   const result = await env.DB.prepare(
     `INSERT INTO push_subscriptions (endpoint, operator_id, p256dh, auth, created_at)
      SELECT ?, ${seat.super ? "?" : "operators.id"}, ?, ?, ? ${seat.super ? "" : "FROM operators"} WHERE ${ownership.sql}
      ON CONFLICT(endpoint) DO UPDATE SET operator_id = excluded.operator_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at`,
   )
-    .bind(endpoint, ...(seat.super ? [HOME_MODEL] : []), p256dh, auth, Date.now(), ...ownership.values)
+    .bind(endpoint, ...(seat.super ? [seat.operatorId] : []), p256dh, auth, Date.now(), ...ownership.values)
     .run();
   if (!result.meta.changes) throw new AuthError(409, "MODEL_CHANGED", "模型状态已变化，请刷新后重新订阅。");
   return json({ ok: true });
@@ -2364,7 +2373,7 @@ type LegacySeat = { super: boolean; operatorId: string };
 type Seat = LegacySeat & { accountId: string; operatorUid: string | null };
 
 function seatOwnership(seat: Seat, operatorExpression: string, expressionValues: unknown[] = [], adminAll = false): { sql: string; values: unknown[] } {
-  if (seat.super) return adminAll ? { sql: "1=1", values: [] } : { sql: `${operatorExpression} = ?`, values: [...expressionValues, HOME_MODEL] };
+  if (seat.super) return adminAll ? { sql: "1=1", values: [] } : { sql: `${operatorExpression} = ?`, values: [...expressionValues, seat.operatorId] };
   return {
     sql: `EXISTS (SELECT 1 FROM operators seat_operator JOIN accounts seat_account ON seat_account.id = seat_operator.owner_account_id
       WHERE seat_operator.id = ${operatorExpression} AND seat_operator.operator_uid = ? AND seat_operator.owner_account_id = ?
@@ -2374,7 +2383,8 @@ function seatOwnership(seat: Seat, operatorExpression: string, expressionValues:
 }
 
 async function ensureSeatModel(env: AppEnv, seat: Seat): Promise<void> {
-  if (seat.super) return;
+  if (seat.super && !seat.operatorId) return;
+  if (seat.super && seat.operatorId === HOME_MODEL) return;
   const ownership = seatOwnership(seat, "?", [seat.operatorId]);
   const current = await env.DB.prepare(`SELECT 1 AS current WHERE ${ownership.sql}`).bind(...ownership.values).first();
   if (!current) throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。");
@@ -2387,7 +2397,10 @@ async function requireSeat(request: Request, env: AppEnv): Promise<Seat> {
     throw new AuthError(401, "AUTH_REQUIRED", "请先用邮箱和密码登录。");
   }
   if (!account.verified) throw new AuthError(403, "EMAIL_UNVERIFIED", "请先验证邮箱。");
-  if (account.roles.includes("admin")) return { super: true, operatorId: HOME_MODEL, accountId: account.id, operatorUid: null };
+  if (account.roles.includes("admin")) {
+    const owned = await env.DB.prepare("SELECT id,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; operator_uid: string | null }>();
+    return { super: true, operatorId: owned?.id || "", accountId: account.id, operatorUid: owned?.operator_uid || null };
+  }
   const operator = await env.DB.prepare("SELECT id,active,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; active: number; operator_uid: string | null }>();
   if (!operator || !account.roles.includes("operator")) throw new AuthError(403, "OPERATOR_REQUIRED", "通过申请或绑定已有模型后，才能进入后台。");
   if (operator.active !== 1) throw new AuthError(403, "MODEL_DISABLED", "这个模型已停用，普通聊天仍可使用。");
