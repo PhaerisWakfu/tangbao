@@ -4,7 +4,7 @@
 
 ## 分支、实例与数据
 
-Epic 的子项复用父 Epic 分支，Bug 使用 `rick-dev`，规则见 [Issue 工作流程](issue-workflow.md)。验收记录注明分支、提交、dirty 状态、instance 和结果。
+Epic 的子项复用父 Epic 的 `feat/epic-*` 分支；普通缺陷使用 `fix/*`，线上紧急修复使用 `hotfix/*`，规则见 [Issue 工作流程](issue-workflow.md)。验收记录注明分支、提交、dirty 状态、instance 和结果。
 
 不同 instance 隔离 D1/KV、端口和凭据，不隔离同一 checkout 的源码。切换分支前检查该 checkout 的运行服务；需要同时运行不同分支时使用独立 checkout，不停止别人的服务。实例如 `epic-5-run-01`，失败重跑换新名称，不覆盖首次失败。
 

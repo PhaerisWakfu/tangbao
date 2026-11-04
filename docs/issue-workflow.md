@@ -84,13 +84,24 @@ gh api --paginate 'repos/PhaerisWakfu/tangbao/issues/10/sub_issues?per_page=100'
 ## 代码开发
 
 1. 开发前更新 Issue 的范围、方案、依赖及验证计划，阶段改为开发中。
-2. 检查分支、脏文件和运行中的本地服务：每个 Epic 单独建立并复用功能分支；Bug 修复在 Ricky 专属的 `rick-dev` 上进行，不吸收无关修改。
+2. 检查分支、脏文件和运行中的本地服务：每个 Epic 单独建立并复用 `feat/epic-<父 Issue 编号>-<slug>` 分支；普通缺陷使用 `fix/<issue>-<slug>`，线上紧急修复使用 `hotfix/<version>-<slug>`，不吸收无关修改。
 3. 做最小可审阅改动。共享组件、鉴权和存储变更检查全局消费者；数据库变更写迁移及回退/补偿说明。
 4. 按 [参与开发](../CONTRIBUTING.md) 和 [本地部署手册](local-development.md) 执行检查，补与风险匹配的行为测试；不能将语法通过视为业务通过。
 5. 提交使用中文标题、空行和正文，附 `Refs #N`。PR 使用仓库模板，描述分支、基线、问题、结果、验证及限制；按实际提交文件审阅，不提交本地专属规则及个人产物。
 6. 实现完成后改为待验证或待验收。代码提交/推送/合并与发布、生产验证、用户验收分别记录。
 
-分支约定：Epic 默认使用 `codex/epic-<父 Issue 编号>-<简短名称>`，基线在父 Issue 写明，未指定时以 `main` 为默认基线；同一 Epic 子任务共用分支。Bug 使用准确名称 `rick-dev`，不加 `codex/` 前缀；本地不存在时先检查远程同名分支。独立文档/规则/工具 Task 在 Issue 记录所属分支，不自动混入某个 Epic。切换前保留和隔离无关未提交改动，不自动 stash/reset 或强推。
+分支约定：统一小写和短横线，不使用个人名或工具名前缀。
+
+```text
+feat/<issue>-<slug>        功能
+fix/<issue>-<slug>         普通缺陷
+hotfix/<version>-<slug>    线上紧急修复
+chore/<slug>               工程维护
+docs/<slug>                文档
+refactor/<slug>            重构
+```
+
+Epic 默认使用 `feat/epic-<父 Issue 编号>-<slug>`，基线在父 Issue 写明，未指定时以 `main` 为默认基线；同一 Epic 子任务共用分支。普通 Bug 使用 `fix/<issue>-<slug>`，线上紧急修复使用 `hotfix/<version>-<slug>`；本地不存在时先检查远程同名分支。独立文档/规则/工具 Task 使用 `docs/<slug>` 或 `chore/<slug>`，并在 Issue 记录所属分支，不自动混入某个 Epic。分支合并后删除；切换前保留和隔离无关未提交改动，不自动 stash/reset 或强推。
 
 本地验证按“确定分支与基线 → 停止当前 checkout 的旧实例 → 切换分支 → prepare → dev/seed 或自动 verify → 回填结果”执行。记录实际分支/提交、工作区是否有未提交改动、instance 和结果。不同 instance 的数据隔离不等于同一 checkout 的源码版本隔离。
 
