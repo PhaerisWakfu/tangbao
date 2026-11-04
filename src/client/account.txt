@@ -222,12 +222,13 @@
     error.textContent = ""; notice.textContent = "";
     intro.hidden = false;
     dialog.dataset.mode = mode;
-    const titles = { login: "登录糖包", register: "注册账号", verify: "验证邮箱", forgot: "找回密码", reset: "设置新密码", manage: "账号设置", change: "修改密码", claim: "绑定已有模型", confirm: "确认绑定模型", logoutConfirm: "退出登录", logoutPending: "服务器退出尚未确认" };
+    const titles = { login: "登录糖包", register: "注册账号", verify: "验证邮箱", "change-email": "更换邮箱", forgot: "找回密码", reset: "设置新密码", manage: "账号设置", change: "修改密码", claim: "绑定已有模型", confirm: "确认绑定模型", logoutConfirm: "退出登录", logoutPending: "服务器退出尚未确认" };
     title.textContent = titles[mode] || titles.login;
     intro.textContent = {
       login: "使用邮箱和密码登录，登录后会长期保持。\n普通登录不发送验证码；共用设备请用完退出。",
       register: "匿名可体验一段对话。验证邮箱后可继续创建对话，也可以申请成为 AI。",
       verify: `请验证 ${account?.email || email}。验证前仍可继续原匿名对话，不能新建第二段或申请 AI。`,
+      "change-email": "输入新的邮箱。验证码会发送到新邮箱；当前账号和此设备的匿名对话不会丢失。",
       forgot: "请输入注册邮箱。如果该邮箱可以找回密码，我们会发送验证码。",
       reset: "请输入邮件中的验证码。重置后所有旧登录失效，请使用新密码重新登录。",
       manage: account ? `${account.email} · ${account.verified ? "邮箱已验证" : "邮箱待验证"}` : "尚未登录。",
@@ -342,7 +343,7 @@
     const form = document.createElement("form");
     form.className = "account-form";
     const values = {};
-    if (["login", "register", "forgot"].includes(mode)) values.email = field(form, "邮箱", "email", "email", "username");
+    if (["login", "register", "forgot", "change-email"].includes(mode)) values.email = field(form, "邮箱", "email", "email", "username");
     if (["login", "register", "reset"].includes(mode)) values.password = field(form, mode === "reset" ? "新密码" : "密码", "password", "password", mode === "login" ? "current-password" : "new-password");
     if (["verify", "reset"].includes(mode)) values.code = field(form, "六位验证码", "code", "text", "one-time-code");
     if (mode === "change") { values.currentPassword = field(form, "当前密码", "currentPassword", "password", "current-password"); values.password = field(form, "新密码", "password", "password", "new-password"); }
@@ -358,7 +359,7 @@
       form.append(details);
     }
     const submit = document.createElement("button"); submit.type = "submit"; submit.className = "account-primary";
-    submit.textContent = { login: "登录", register: "注册并验证邮箱", verify: "验证邮箱", forgot: "发送找回验证码", reset: "重置密码", change: "修改密码", claim: "核验旧口令", confirm: "确认绑定" }[mode]; form.append(submit);
+    submit.textContent = { login: "登录", register: "注册并验证邮箱", verify: "验证邮箱", "change-email": "发送验证码到新邮箱", forgot: "发送找回验证码", reset: "重置密码", change: "修改密码", claim: "核验旧口令", confirm: "确认绑定" }[mode]; form.append(submit);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       for (const input of form.querySelectorAll("[data-password-policy]")) {
@@ -379,6 +380,15 @@
           if (!challengeId) throw new Error("请先点击“重新发送验证码”，再输入新邮件中的验证码。");
           const data = await request("/api/auth/email/verify", { challengeId, code: payload.code });
           if (active()) { challengeId = ""; authenticated(data.account); }
+        } else if (actionMode === "change-email") {
+          const data = await request("/api/auth/email/change", payload);
+          if (!active()) return;
+          setAccount(data.account);
+          challengeId = data.challengeId || "";
+          email = data.account.email;
+          cooldownUntil = Date.now() + 60000;
+          mode = "verify"; render();
+          notice.textContent = mailMessage(data);
         } else if (actionMode === "forgot") {
           const data = await request("/api/auth/password/forgot", payload);
           if (!active()) return;
@@ -422,8 +432,9 @@
       })); resend.dataset.resend = "";
       renderCooldown();
       button("稍后验证", () => close(null));
-      button("邮箱填错了？退出重新注册", () => switchMode("logoutConfirm"));
+      button("邮箱填错了？更换邮箱", () => switchMode("change-email"));
     }
+    if (mode === "change-email") button("返回验证邮箱", () => switchMode("verify"));
     if (mode === "change" || mode === "claim" || mode === "confirm") button("返回账号", () => { claim = null; switchMode("manage"); });
   }
 

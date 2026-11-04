@@ -309,6 +309,39 @@ async function resend(request: Request, env: AuthEnv): Promise<Response> {
   return reply(await createMailChallenge(env, account, "verify"));
 }
 
+async function changeEmail(request: Request, env: AuthEnv): Promise<Response> {
+  const account = await requireAccount(request, env, false);
+  await requestRate(request, env, "change-email", 10);
+  if (account.verified) throw new AuthError(409, "ALREADY_VERIFIED", "邮箱已经验证，不能再更换。");
+  const email = normalizeEmail((await payload(request)).email);
+  if (email === account.email) throw new AuthError(400, "EMAIL_UNCHANGED", "新邮箱和当前邮箱相同。");
+  const exists = await env.DB.prepare("SELECT 1 AS found FROM accounts WHERE email = ? AND id != ?").bind(email, account.id).first();
+  if (exists) throw new AuthError(409, "EMAIL_UNAVAILABLE", "这个邮箱暂时不可用，请换一个邮箱。");
+  const now = authNow(env);
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(`UPDATE mail_deliveries SET status = 'cancelled', payload_ciphertext = NULL, updated_at = ?
+        WHERE challenge_id IN (SELECT id FROM email_challenges WHERE account_id = ? AND purpose = 'verify' AND revoked_at = 0)`).bind(now, account.id),
+      env.DB.prepare(`UPDATE email_challenges SET revoked_at = ? WHERE account_id = ? AND purpose = 'verify' AND revoked_at = 0`).bind(now, account.id),
+      env.DB.prepare(`UPDATE accounts SET email = ?, updated_at = ? WHERE id = ? AND verified_at = 0 AND status = 'active'`).bind(email, now, account.id),
+    ]);
+    if (results[2].meta.changes !== 1) throw new AuthError(409, "AUTH_CHANGED", "账号状态已变化，请重新登录。");
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    if (await env.DB.prepare("SELECT 1 AS found FROM accounts WHERE email = ? AND id != ?").bind(email, account.id).first()) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE", "这个邮箱暂时不可用，请换一个邮箱。");
+    }
+    throw error;
+  }
+  let mail: { challengeId: string | null; mailStatus: string; message?: string };
+  try { mail = await createMailChallenge(env, { id: account.id, email }, "verify"); }
+  catch (error) {
+    if (!(error instanceof MailError)) throw error;
+    mail = { challengeId: null, mailStatus: error.code === "MAIL_DISABLED" ? "disabled" : "unavailable", message: error.message };
+  }
+  return reply({ account: await accountById(env, account.id), ...mail });
+}
+
 async function forgotPassword(request: Request, env: AuthEnv): Promise<Response> {
   await requestRate(request, env, "forgot", 20);
   const email = normalizeEmail((await payload(request)).email);
@@ -403,6 +436,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
     "/api/auth/logout": logout,
     "/api/auth/email/verify": verifyEmail,
     "/api/auth/email/resend": resend,
+    "/api/auth/email/change": changeEmail,
     "/api/auth/password/forgot": forgotPassword,
     "/api/auth/password/reset": resetPassword,
     "/api/auth/password/change": changePassword,

@@ -322,7 +322,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) assertOrigin(request, env);
   const authenticated = await authRoute(request, env);
   if (authenticated) {
-    if (method === "POST" && /\/api\/auth\/(register|email\/resend|password\/forgot)$/.test(path)) ctx.waitUntil(processMailOutbox(env));
+    if (method === "POST" && /\/api\/auth\/(register|email\/resend|email\/change|password\/forgot)$/.test(path)) ctx.waitUntil(processMailOutbox(env));
     return path === "/api/auth/me" ? withGuestCookie(request, env, authenticated) : authenticated;
   }
   const accountResponse = await accountBusinessRoute(request, env);
