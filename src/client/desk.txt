@@ -11,6 +11,7 @@ const presence = $("#presence");
 const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
+const gateCard = $("#login");
 const legacyBind = $("#desk-legacy-bind");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
@@ -101,6 +102,8 @@ function showDesk(on) {
   gate.hidden = on;
   desk.hidden = !on;
   if (!on) {
+    gateCard.classList.remove("is-booting");
+    gateCard.setAttribute("aria-busy", "false");
     waiting = 0;
     pending = 0;
     applyPage = 1;
@@ -478,6 +481,8 @@ function resetDeskView() {
 
 async function syncDeskAccount() {
   if (loggedOut) return;
+  gateCard.classList.add("is-booting");
+  gateCard.setAttribute("aria-busy", "true");
   const sequence = ++deskSyncSequence;
   const account = TangbaoAccount.account;
   const accountId = account?.id || null;
@@ -490,6 +495,10 @@ async function syncDeskAccount() {
   if (account?.verified && (account.operatorId || account.roles?.includes("admin"))) {
     note.textContent = "正在进入笼屉…";
     await tick();
+    if (desk.hidden) {
+      gateCard.classList.remove("is-booting");
+      gateCard.setAttribute("aria-busy", "false");
+    }
     return;
   }
   resetDeskView();
@@ -508,6 +517,10 @@ async function syncDeskAccount() {
       }
     }
   } catch (err) { if (sequence === deskSyncSequence && err.statusCode !== 401) loginErr.textContent = err.message; }
+  if (sequence === deskSyncSequence) {
+    gateCard.classList.remove("is-booting");
+    gateCard.setAttribute("aria-busy", "false");
+  }
 }
 
 $("#desk-login").addEventListener("click", async () => {
