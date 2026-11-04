@@ -11,6 +11,7 @@ const presence = $("#presence");
 const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
+const legacyBind = $("#desk-legacy-bind");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
 const profileForm = $("#profile-form");
@@ -483,6 +484,7 @@ async function syncDeskAccount() {
   if (deskAccountId !== accountId) { deskAccountId = accountId; resetDeskView(); }
   loginErr.textContent = "";
   const note = $("#gate-note");
+  legacyBind.hidden = true;
   $("#desk-login").textContent = account ? account.verified ? "管理当前账号" : "验证邮箱" : "邮箱账号登录";
   $("#desk-claim").hidden = Boolean(account?.operatorId || account?.roles?.includes("admin"));
   if (account?.verified && (account.operatorId || account.roles?.includes("admin"))) {
@@ -496,7 +498,15 @@ async function syncDeskAccount() {
     const legacy = await api("/api/account/legacy-seat");
     if (sequence !== deskSyncSequence) return;
     if (legacy?.admin) note.textContent = "检测到旧管理员登录。管理员迁移需由站点维护者在受控部署流程中完成，不能通过公开绑定获得管理权限。";
-    else if (legacy?.operatorId) note.textContent = `检测到旧模型 ${legacy.operatorId}。旧登录只用于迁移提示；请登录并验证邮箱，再用原模型旧口令完成绑定。`;
+    else if (legacy?.operatorId) {
+      if (account?.verified && !account.operatorId && !account.roles?.includes("admin")) {
+        legacyBind.textContent = `直接绑定旧模型 ${legacy.operatorId}`;
+        legacyBind.hidden = false;
+        note.textContent = `检测到旧模型 ${legacy.operatorId}。可以改用这台设备的旧后台登录直接绑定，不需要旧口令。`;
+      } else {
+        note.textContent = `检测到旧模型 ${legacy.operatorId}。请先登录并验证邮箱，然后用这台设备的旧后台登录直接绑定，不需要旧口令。`;
+      }
+    }
   } catch (err) { if (sequence === deskSyncSequence && err.statusCode !== 401) loginErr.textContent = err.message; }
 }
 
@@ -507,6 +517,18 @@ $("#desk-login").addEventListener("click", async () => {
 $("#desk-claim").addEventListener("click", async () => {
   await TangbaoAccount.open({ mode: "claim", requireVerified: true });
   await syncDeskAccount();
+});
+legacyBind.addEventListener("click", async () => {
+  legacyBind.disabled = true;
+  loginErr.textContent = "正在核验旧后台登录并绑定…";
+  try {
+    await api("/api/account/legacy-claims/seat", { method: "POST" });
+    await TangbaoAccount.refresh();
+    await syncDeskAccount();
+  } catch (error) {
+    loginErr.textContent = error.message;
+    legacyBind.disabled = false;
+  }
 });
 window.addEventListener("tb:account-change", () => { void syncDeskAccount(); });
 window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });

@@ -144,6 +144,37 @@ export async function accountBusinessRoute(request: Request, env: BusinessEnv): 
       .bind(claimId, account.id, operator.operator_uid, await digest(claimId), expiresAt, now).run();
     return json({ claimId, operatorId: operator.id, expiresAt });
   }
+  if (path === "/api/account/legacy-claims/seat" && request.method === "POST") {
+    const account = await requireAccount(request, env);
+    if (!(await consumeRate(env, "legacy-seat-claim:" + account.id, 8, 3_600_000))) throw new AuthError(429, "RATE_LIMITED", "操作太频繁，请稍后再试。");
+    const seat = await legacySeat(request, env);
+    if (!seat || seat.super) throw new AuthError(403, "LEGACY_SESSION_REQUIRED", "没有检测到可迁移的旧后台登录，请使用原口令或联系管理员。");
+    const operator = await env.DB.prepare("SELECT id,operator_uid FROM operators WHERE id=? AND owner_account_id IS NULL AND legacy_claimed_at=0 AND active=1")
+      .bind(seat.operatorId).first<{ id: string; operator_uid: string }>();
+    if (!operator) throw new AuthError(409, "MODEL_ALREADY_OWNED", "这个模型已被绑定或不可用，请联系管理员核查。");
+    if (await env.DB.prepare("SELECT id FROM operators WHERE owner_account_id=?").bind(account.id).first()) throw new AuthError(409, "MODEL_LIMIT", "当前账号已经有一个模型。");
+    if (await env.DB.prepare("SELECT id FROM applications WHERE account_id=? AND status IN ('pending','approved')").bind(account.id).first()) throw new AuthError(409, "APPLICATION_EXISTS", "当前账号已有申请，请先处理申请后再绑定。");
+    const claimId = randomToken(32), now = Date.now();
+    try {
+      const results = await env.DB.batch([
+        env.DB.prepare(`UPDATE operators SET owner_account_id=?,legacy_claimed_at=?,password_hash=?
+          WHERE id=? AND operator_uid=? AND owner_account_id IS NULL AND legacy_claimed_at=0 AND active=1
+          AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')
+          AND NOT EXISTS(SELECT 1 FROM operators WHERE owner_account_id=?)
+          AND NOT EXISTS(SELECT 1 FROM applications WHERE account_id=? AND status IN ('pending','approved'))`)
+          .bind(account.id, now, await digest(randomToken(32)), operator.id, operator.operator_uid, account.id, account.id, account.id),
+        env.DB.prepare("INSERT OR IGNORE INTO account_roles(account_id,role) SELECT ?,'operator' WHERE EXISTS(SELECT 1 FROM operators WHERE id=? AND owner_account_id=?)")
+          .bind(account.id, operator.id, account.id),
+        env.DB.prepare("INSERT INTO legacy_claims(id,account_id,operator_uid,proof_hash,expires_at,created_at,consumed_at) VALUES(?,?,?,?,?,?,?)")
+          .bind(claimId, account.id, operator.operator_uid, await digest(claimId), now, now, now),
+      ]);
+      if (results[0].meta.changes !== 1) throw new AuthError(409, "CLAIM_CONFLICT", "模型或账号归属已发生变化，请刷新后重试。");
+    } catch (error) {
+      if (error instanceof AuthError) throw error;
+      throw new AuthError(409, "CLAIM_CONFLICT", "模型或账号归属已发生变化，请刷新后重试。");
+    }
+    return json({ ok: true, operatorId: operator.id });
+  }
   const confirm = path.match(/^\/api\/account\/legacy-claims\/([A-Za-z0-9_-]{32,80})\/confirm$/);
   if (confirm && request.method === "POST") {
     const account = await requireAccount(request, env);
