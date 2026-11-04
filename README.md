@@ -4,6 +4,8 @@
 
 访客写下问题，糖包在后台亲手打字回复。他醒着的时候页面是白天，关灯之后整页转成夜色。人工身份写在小字、模型卡和关于页里。
 
+账号系统上线后，访客可以用邮箱账号保存跨设备历史；旧匿名对话可在原浏览器关联，旧模型可用原口令或旧后台登录绑定到账号。管理员后台与审计入口分离。
+
 这不是医疗、法律或危机援助服务。
 
 ## 目录
@@ -11,10 +13,13 @@
 ```text
 src/                  站点逻辑和页面
   index.ts            Worker：接口、登录、后台和推送
+  auth.ts             邮箱账号、会话、验证和密码流程
+  email.ts            邮件任务、限流和 Cloudflare Email 发送
+  account-business.ts 账号历史、匿名会话关联和旧模型认领
   pages/              对话页、关于页、隐私页、后台页
   client/             页面脚本
 public/               样式、字体、图标和公开图片
-migrations/           D1 表结构
+migrations/           D1 表结构（0001–0022）
 design/               设计稿和截图，不参与 Worker 运行
 scripts/              本地预览、测试、截图和字体生成
 wrangler.jsonc        Cloudflare 配置
@@ -26,7 +31,7 @@ wrangler.jsonc        Cloudflare 配置
 - Cloudflare Workers 提供页面和 API
 - D1 保存对话、模型、申请、举报等数据
 - Workers KV 保存用户上传的图片
-- Cloudflare Email Sending 发送邮箱验证和找回邮件，每日预算 200 封，无月度限制
+- Cloudflare Email Sending 发送邮箱验证和找回邮件；应用侧默认每日上限 200 封，账户月度包含额度和超额计费以 Cloudflare 控制台为准
 - Cron 每分钟刷新首页在线状态并补偿可重试的邮件任务
 - 可选：通过 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 使用 Turso
 
@@ -80,7 +85,7 @@ npm run dev
 
 当前项目按 Workers Paid + D1 + KV 部署。免费 Workers 的每日请求额度可能不够持续轮询。
 
-**部署者从这一份[部署、数据迁移与验收手册](docs/accounts-rollout.md)开始。** 手册按“新建独立测试 Worker/D1/KV → 原生邮件及账号验收 → 正式停写、备份、迁移、切换 → 回退”给出命令、检查标准和回传清单。
+**部署者从这一份[部署、数据迁移与验收手册](docs/accounts-rollout.md)开始。** 手册按“本地合成验收 → 生产快照副本演练 → 正式停写、备份、迁移、切换 → 回退”给出命令、检查标准和回传清单。没有独立测试站时，真实邮件、DNS、生产 KV 和生产 Worker 行为只能在维护窗口内验证，必须保留回退路径。
 
 邮件直接使用 Cloudflare Worker 的 `EMAIL` 绑定和 `env.EMAIL.send()`，不用向开发者提供 Account ID/API Token。验证码 pepper 和邮件内容加密密钥仍需保存为 Worker Secrets，模板与录入位置见手册。
 
@@ -102,7 +107,7 @@ npm run check
 
 ## 后续开发入口
 
-- [参与开发](CONTRIBUTING.md)：分支、提交范围与检查入口
+- [参与开发](CONTRIBUTING.md)：分支命名（`feat/`、`fix/`、`hotfix/`、`chore/`、`docs/`、`refactor/`）、提交范围与检查入口
 - [前端规范](docs/frontend.md)：样式、交互、响应式、可访问性和验证要求
 - [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
 - [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending

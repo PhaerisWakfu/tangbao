@@ -48,7 +48,7 @@ Git push 不会执行迁移。仓库 CI 只做检查；**先到 Cloudflare 当�
 | `IMAGES` | KV 名称为 `tangbao`；记录实际 namespace ID，原库保留 |
 | 发信域 | Cloudflare → Email Service → Email Sending → `mail.phaeris.cn`，确认发送已启用、DNS 已配置 |
 | 发件人 | `糖包 <noreply@mail.phaeris.cn>`；与绑定限制保持一致 |
-| 配额 | 每日 200 封，无月度限制；测试会真实消耗该账号的发信额度 |
+| 配额 | 应用侧每日上限 200 封；Cloudflare 账户月度额度以控制台为准，测试会真实消耗该账号的发信额度 |
 | 旧配置与任务 | 保存普通变量、Secrets 名称、Cron/Queue、通知配置及恢复方法；不要截图或回传密钥值 |
 | 验收人员 | 准备管理员 A、新申请者 B、旧模型运营者 C 三个账号各自可收件的真实邮箱，及两个独立浏览器配置或设备；C 另需本人原后台口令 |
 
