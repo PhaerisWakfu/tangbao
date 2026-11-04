@@ -1728,21 +1728,23 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
-  const ownership = seatOwnership(seat, "threads.operator_id");
+  const ownership = seatOwnership(seat, "threads.operator_id", [], seat.super);
+  const operatorFilter = seat.super ? "" : " AND operator_id = ?";
+  const operatorValues = seat.super ? [] : [own];
   const now = Date.now();
   await touchSeat(env, seat, now);
   if (!seat.super) await migrateHomeBacklog(env, own, seat);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
+      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0${operatorFilter} AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
     )
-      .bind(own, ...ownership.values)
+      .bind(...operatorValues, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
-       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
+       FROM threads WHERE awaiting = 0${operatorFilter} AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
     )
-      .bind(own, ...ownership.values)
+      .bind(...operatorValues, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
     seat.super ? homePresence(env, now) : operatorPresence(env, own, now, seat),
     seat.super
@@ -1752,10 +1754,10 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   const status = statusPayload(publicPresence(presence.status));
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
-     WHERE operator_id = ? AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", "?")}) AND ${ownership.sql}
+     WHERE ${seat.super ? "1=1" : "operator_id = ?"} AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", seat.super ? "threads.operator_id" : "?")}) AND ${ownership.sql}
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(own, own, ...ownership.values)
+    .bind(...(seat.super ? [] : [own, own]), ...ownership.values)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
