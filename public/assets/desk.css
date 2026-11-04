@@ -11,9 +11,27 @@
 }
 .gate-card svg.mark { display: block; width: 44px; height: 44px; margin: 0 auto 14px; }
 .gate-card h1 { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 600; letter-spacing: 0.06em; }
+.account-gate-actions [hidden] { display: none; }
+.gate-card.is-booting { padding-bottom: 28px; }
 .gate-card.is-booting .account-gate-actions,
-.gate-card.is-booting #login-err { visibility: hidden; }
-.gate-card.is-booting #gate-note { min-height: 2.8em; }
+.gate-card.is-booting #login-err { display: none; }
+.gate-card.is-booting #gate-note { min-height: 0; margin: 8px 0 0; }
+.gate-card.is-booting #gate-note::after {
+  display: block;
+  width: 52px;
+  height: 2px;
+  margin: 14px auto 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  content: "";
+  animation: gate-wait 1.4s ease-in-out infinite;
+}
+@keyframes gate-wait {
+  0% { background-position: 100% 0; opacity: 0.35; }
+  50% { background-position: 0 0; opacity: 0.9; }
+  100% { background-position: -100% 0; opacity: 0.35; }
+}
 .gate-card .field { margin-top: 22px; }
 .gate-card .field input::placeholder { color: var(--faint); }
 .gate-card p { margin: 8px 0 22px; font-size: 14px; line-height: 1.6; color: var(--muted); }
