@@ -16,6 +16,7 @@ import accountJs from "./client/account.txt";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
+import { processImageCleanup } from "./image-cleanup";
 
 class HttpError extends Error {
   constructor(
@@ -439,6 +440,7 @@ export default {
     if (env.MAINTENANCE === "1") return;
     ctx.waitUntil(refreshHomePresence(useTurso(env)));
     ctx.waitUntil(processMailOutbox(useTurso(env)));
+    ctx.waitUntil(processImageCleanup(useTurso(env)));
   },
   async queue(batch, env): Promise<void> {
     if (env.MAINTENANCE === "1") {
@@ -996,16 +998,23 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
 
 async function deleteThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   await loadOwned(env, id, bearer(request), request);
-  const images = await env.DB.prepare(
-    "SELECT image_key FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
-  )
-    .bind(id)
-    .all<{ image_key: string }>();
+  const now = Date.now();
   await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO image_cleanup_jobs (image_key, thread_id, attempts, next_attempt_at, created_at)
+       SELECT image_key, ?, 0, ?, ? FROM message_images
+       WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+       ON CONFLICT(image_key) DO NOTHING`,
+    ).bind(id, now, now, id),
+    env.DB.prepare(
+      "DELETE FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
+    ).bind(id),
     env.DB.prepare("DELETE FROM messages WHERE thread_id = ?").bind(id),
     env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(id),
   ]);
-  await Promise.all(images.results.map((row) => env.IMAGES.delete(row.image_key)));
+  await processImageCleanup(env, id).catch(() => {
+    console.log(JSON.stringify({ event: "image_cleanup_deferred" }));
+  });
   return json({ ok: true });
 }
 
