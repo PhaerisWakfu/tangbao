@@ -358,7 +358,7 @@ function renderHistory() {
     const recover = document.createElement("a");
     recover.className = "hist-recover";
     recover.href = "http://tangbao.phaeris.cn/__recover?stage=workers";
-    recover.textContent = "找不到旧对话？试着找回";
+    recover.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.4" cy="8.4" r="4.8"/><path d="m12 12 4 4"/><path d="M6.2 8.4h4.4"/></svg><span class="hist-recover-copy"><strong>找不到旧对话？</strong><small>试着从旧页面找回</small></span><span class="hist-recover-arrow" aria-hidden="true">→</span>';
     empty.append(document.createElement("br"), recover);
     history.append(empty);
     return;

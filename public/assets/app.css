@@ -305,14 +305,48 @@ body[data-presence="asleep"] svg.steam { display: none; }
 .hist-x[data-confirm="1"] { font-size: 12px; }
 .hist-empty { margin: 16px 10px; font-size: 13px; line-height: 1.6; color: var(--faint); }
 .hist-recover {
-  display: inline-block;
-  margin-top: 5px;
-  color: var(--accent);
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.45;
   text-decoration: none;
-  text-underline-offset: 3px;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 }
-.hist-recover:hover { text-decoration: underline; }
+.hist-recover svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.hist-recover-copy { min-width: 0; }
+.hist-recover-copy strong {
+  display: block;
+  color: var(--ink-2);
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hist-recover-copy small {
+  display: block;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.hist-recover-arrow { margin-left: auto; color: var(--accent); font-size: 13px; }
+.hist-recover:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  color: var(--ink);
+}
 .side-foot {
   display: grid;
   gap: 2px;

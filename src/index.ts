@@ -236,17 +236,48 @@ function useTurso(env: AppEnv): AppEnv {
 
 const RECOVERY_KEYS = ["tangbao.v1", "tangbao.visitor", "tangbao.model", "tangbao.presence"] as const;
 
+const RECOVERY_MARK = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.00 9.60Q13.83 4.58 18.17 4.13A1.20 1.20 0 0 1 19.87 5.83Q14.24 6.48 12.00 9.60ZM13.54 10.16Q18.17 7.50 21.79 9.94A1.20 1.20 0 0 1 21.99 12.33Q17.27 9.21 13.54 10.16ZM14.36 11.58Q19.62 12.52 20.82 16.71A1.20 1.20 0 0 1 19.45 18.68Q17.83 13.25 14.36 11.58ZM14.08 13.20Q17.51 17.30 15.73 21.28A1.20 1.20 0 0 1 13.41 21.90Q15.66 16.70 14.08 13.20ZM12.82 14.26Q12.82 19.60 8.89 21.50A1.20 1.20 0 0 1 6.72 20.49Q11.78 17.96 12.82 14.26ZM11.18 14.26Q7.74 18.34 3.51 17.28A1.20 1.20 0 0 1 2.50 15.11Q8.00 16.42 11.18 14.26ZM9.92 13.20Q4.66 14.12 2.10 10.59A1.20 1.20 0 0 1 2.72 8.27Q6.10 12.82 9.92 13.20ZM9.64 11.58Q5.01 8.91 5.32 4.55A1.20 1.20 0 0 1 7.29 3.18Q6.95 8.83 9.64 11.58ZM10.46 10.16Q8.64 5.14 11.67 2.01A1.20 1.20 0 0 1 14.06 2.21Q10.17 6.33 10.46 10.16Z"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>`;
+
+function recoveryShell(title: string, content: string): string {
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f2e8"><title>${title} · 糖包</title>
+<style>
+:root{--paper:#f7f2e8;--panel:#fffdf8;--ink:#2a241e;--ink2:#5f5448;--faint:#8d7f6e;--accent:#a45a3a;--line:#ddd2c1;--line2:#cbbda9;--serif:"Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,serif}
+@media (prefers-color-scheme:dark){:root{--paper:#1c1916;--panel:#26211c;--ink:#f1e9dd;--ink2:#cabba8;--faint:#8f8172;--accent:#d58a5f;--line:#3d342b;--line2:#4c4035}meta[name="theme-color"]{content:"#1c1916"}}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#fffdf8 0,var(--paper) 48%);color:var(--ink);font:14px/1.75 system-ui,"Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.card{position:relative;width:min(30rem,100%);overflow:hidden;padding:34px 32px 28px;border:1px solid var(--line);border-radius:22px;background:var(--panel);box-shadow:0 28px 80px -58px #2a241e;text-align:center}
+.card::before{position:absolute;top:0;left:30px;width:44px;height:3px;border-radius:0 0 3px 3px;background:var(--accent);content:""}
+.brand{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-family:var(--serif);font-size:14px;font-weight:600;letter-spacing:.12em}
+.brand svg{display:block;width:26px;height:26px}
+.kicker{margin:22px 0 6px;color:var(--accent);font-family:var(--serif);font-size:10px;font-weight:600;letter-spacing:.16em}
+h1{margin:0;font-family:var(--serif);font-size:25px;font-weight:600;line-height:1.35;letter-spacing:.02em}
+.lead{max-width:22rem;margin:13px auto 0;color:var(--ink2);font-size:13px;line-height:1.8;text-wrap:pretty}
+.trail{display:flex;justify-content:center;gap:6px;margin:22px 0 0;padding:0;list-style:none;flex-wrap:wrap}
+.trail li{padding:4px 8px;border:1px solid var(--line);border-radius:999px;color:var(--faint);font-size:10.5px;line-height:1.4}
+.trail li.is-active{border-color:color-mix(in srgb,var(--accent) 28%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--panel));color:var(--accent)}
+.done-icon{display:grid;place-items:center;width:48px;height:48px;margin:18px auto 0;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:50%;background:color-mix(in srgb,var(--accent) 6%,var(--panel));color:var(--accent);font-family:var(--serif);font-size:23px}
+.fallback{display:block;width:100%;margin-top:22px;padding-top:13px;border-top:1px dashed var(--line2);color:var(--faint);font-size:11.5px;text-decoration:none}
+.fallback:hover{color:var(--accent)}
+@media (max-width:640px){body{padding:16px}.card{padding:28px 20px 24px;border-radius:18px}.card::before{left:20px}h1{font-size:22px}.lead{font-size:12.5px}}
+</style></head>
+<body><main class="card"><div class="brand">${RECOVERY_MARK}<span>糖包</span></div>${content}</main></body></html>`;
+}
+
 function recoveryPage(origin: string, stage: "workers" | "done"): string {
   const action = JSON.stringify(`${origin}/__recover`);
   const chat = JSON.stringify(`${origin}/chat?recovered=0`);
   const next = stage === "workers"
     ? JSON.stringify("https://tangbao.sbuiwqvb110.workers.dev/__recover?stage=done")
     : chat;
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>找回旧对话 · 糖包</title>
-<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf7;color:#312a24;font:14px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:30rem;padding:28px;text-align:center}a{color:#9a4f32}</style>
-</head><body><main><h1>正在找回旧对话</h1><p id="status">正在读取这台浏览器里的匿名记录…</p><p><a id="fallback" href="${chat}">如果页面没有自动跳转，点这里回到聊天</a></p></main>
+  return recoveryShell("找回旧对话", `
+<p class="kicker">账号与旧对话</p>
+<h1>正在找回旧对话</h1>
+<p class="lead">正在读取这台浏览器里的匿名记录，找到后会迁回正式站点。</p>
+<ul class="trail"><li class="is-active">当前页面</li><li>HTTP</li><li>workers.dev</li></ul>
+<a class="fallback" href="${chat}">迟迟没有跳转？回到聊天</a>
 <script>
 (() => {
   const data = {};
@@ -266,18 +297,19 @@ function recoveryPage(origin: string, stage: "workers" | "done"): string {
   input.value = JSON.stringify(data);
   form.append(input);
   document.body.append(form);
-  form.submit();
+  window.setTimeout(() => form.submit(), 120);
 })();
-</script></body></html>`;
+</script>`);
 }
 
 function recoveryDonePage(payload: Record<string, string>): string {
   const data = JSON.stringify(JSON.stringify(payload)).replace(/</g, "\\u003c");
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>正在恢复旧对话 · 糖包</title>
-<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf7;color:#312a24;font:14px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:30rem;padding:28px;text-align:center}a{color:#9a4f32}</style>
-</head><body><main><h1>正在恢复旧对话</h1><p>记录已经找到，正在放回账号旁的匿名历史…</p><p><a href="/chat">如果没有自动跳转，点这里</a></p></main>
+  return recoveryShell("旧对话已找回", `
+<p class="kicker">找到了</p>
+<div class="done-icon" aria-hidden="true">✓</div>
+<h1>旧对话已经找回</h1>
+<p class="lead">正在把记录放回聊天列表，稍等片刻。</p>
+<a class="fallback" href="/chat?recovered=1">如果没有自动跳转，点这里回到聊天</a>
 <script>
 (() => {
   const data = JSON.parse(${data});
@@ -296,9 +328,9 @@ function recoveryDonePage(payload: Record<string, string>): string {
   for (const key of ["tangbao.visitor", "tangbao.model", "tangbao.presence"]) {
     if (typeof data[key] === "string") localStorage.setItem(key, data[key]);
   }
-  location.replace("/chat?recovered=1");
+  window.setTimeout(() => location.replace("/chat?recovered=1"), 560);
 })();
-</script></body></html>`;
+</script>`);
 }
 
 async function recoverSession(request: Request, env: AppEnv, url: URL): Promise<Response> {
