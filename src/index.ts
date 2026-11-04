@@ -244,10 +244,10 @@ function recoveryShell(title: string, content: string): string {
 <meta name="theme-color" content="#f7f2e8"><title>${title} · 糖包</title>
 <style>
 :root{--paper:#f7f2e8;--panel:#fffdf8;--ink:#2a241e;--ink2:#5f5448;--faint:#8d7f6e;--accent:#a45a3a;--line:#ddd2c1;--line2:#cbbda9;--serif:"Songti SC","Noto Serif SC","Source Han Serif SC",Georgia,serif}
-@media (prefers-color-scheme:dark){:root{--paper:#1c1916;--panel:#26211c;--ink:#f1e9dd;--ink2:#cabba8;--faint:#8f8172;--accent:#d58a5f;--line:#3d342b;--line2:#4c4035}meta[name="theme-color"]{content:"#1c1916"}}
+@media (prefers-color-scheme:dark){:root{--paper:#1c1916;--panel:#26211c;--ink:#f1e9dd;--ink2:#cabba8;--faint:#8f8172;--accent:#d58a5f;--line:#3d342b;--line2:#4c4035}}
 *{box-sizing:border-box}
 html,body{min-height:100%}
-body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#fffdf8 0,var(--paper) 48%);color:var(--ink);font:14px/1.75 system-ui,"Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,color-mix(in srgb,var(--panel) 88%,var(--accent)) 0,var(--paper) 55%);color:var(--ink);font:14px/1.75 system-ui,"Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
 .card{position:relative;width:min(30rem,100%);overflow:hidden;padding:34px 32px 28px;border:1px solid var(--line);border-radius:22px;background:var(--panel);box-shadow:0 28px 80px -58px #2a241e;text-align:center}
 .card::before{position:absolute;top:0;left:30px;width:44px;height:3px;border-radius:0 0 3px 3px;background:var(--accent);content:""}
 .brand{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-family:var(--serif);font-size:14px;font-weight:600;letter-spacing:.12em}

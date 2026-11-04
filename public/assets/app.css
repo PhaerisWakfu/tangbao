@@ -304,10 +304,12 @@ body[data-presence="asleep"] svg.steam { display: none; }
 .hist-x svg.i { width: 14px; height: 14px; }
 .hist-x[data-confirm="1"] { font-size: 12px; }
 .hist-empty { margin: 16px 10px; font-size: 13px; line-height: 1.6; color: var(--faint); }
-.hist-recover {
+.hist .hist-recover {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
+  width: auto;
   margin-top: 10px;
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
@@ -316,7 +318,11 @@ body[data-presence="asleep"] svg.steam { display: none; }
   color: var(--ink);
   font-size: 11.5px;
   line-height: 1.45;
+  text-align: left;
   text-decoration: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
   transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 }
 .hist-recover svg {
@@ -342,7 +348,7 @@ body[data-presence="asleep"] svg.steam { display: none; }
   font-size: 10.5px;
 }
 .hist-recover-arrow { margin-left: auto; color: var(--accent); font-size: 13px; }
-.hist-recover:hover {
+.hist .hist-recover:hover {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
   color: var(--ink);
