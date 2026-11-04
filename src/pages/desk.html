@@ -52,9 +52,11 @@
       <header class="desk-top">
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>笼屉</a>
         <div class="top-actions">
-          <button class="account-open" type="button" data-account-open>我的账号</button>
+          <button class="account-open account-icon" type="button" data-account-open aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>
+            <span class="account-dot" aria-hidden="true"></span>
+          </button>
           <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
-          <button class="icon-btn" type="button" id="profile-open" data-tip="我的模型" aria-label="我的模型" hidden><svg class="i"><use href="#i-pen"/></svg></button>
         </div>
       </header>
       <nav class="desk-nav" id="desk-nav" hidden>
@@ -145,6 +147,7 @@
       <div class="pane" id="pane-profile" hidden>
         <header class="page-head">
           <div class="page-title-row">
+            <button class="back text-btn" type="button" id="profile-back"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg>返回对话</button>
             <h2>我的模型</h2>
           </div>
           <p class="page-sub">改型号后面那截，前缀 tangbao- 是固定的。</p>

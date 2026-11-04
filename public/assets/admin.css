@@ -30,6 +30,15 @@ body[data-presence="asleep"] {
   letter-spacing: 0.08em;
   line-height: 1.2;
 }
+#profile-back {
+  min-height: 30px;
+  margin-right: 1px;
+  padding: 3px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#profile-back svg { width: 14px; height: 14px; }
+#profile-back:hover { color: var(--ink); }
 .page-count {
   min-width: 0;
   max-width: 100%;
@@ -383,7 +392,7 @@ body[data-presence="asleep"] {
   display: block;
   width: calc(100% - 48px);
   height: 32px;
-  margin: 0 24px 10px;
+  margin: 18px 24px 14px;
   padding: 0 11px;
   border: 1px solid var(--line);
   border-radius: 9px;

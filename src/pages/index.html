@@ -44,12 +44,29 @@
     <aside class="side" id="side">
       <div class="side-top">
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>糖包</a>
-        <button class="icon-btn only-narrow" type="button" id="close-side" aria-label="收起侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+        <div class="side-top-actions">
+          <button class="icon-btn only-narrow" type="button" id="close-side" aria-label="收起侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+        </div>
       </div>
       <button class="new" type="button" id="new"><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span>新对话</button>
       <nav class="hist" id="history" aria-label="对话"></nav>
       <div class="side-foot">
-        <a href="/about"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><span><b>关于模型</b><small>规格卡</small></span></a>
+        <div class="account-entry">
+          <button class="account-entry-avatar" type="button" data-account-open data-account-avatar aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>
+          </button>
+          <button class="account-entry-name" type="button" data-account-open data-account-name aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">登录 / 注册</button>
+          <button class="account-entry-gear" type="button" id="account-gear" aria-label="更多账号设置" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <div class="account-menu" id="account-menu" role="menu" hidden>
+            <a class="account-menu-item" href="/about" role="menuitem">
+              <span class="account-menu-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 5.3C8.8 4.4 7.2 4 5 4v10.8c2.2 0 3.8.4 5 1.2 1.2-.8 2.8-1.2 5-1.2V4c-2.2 0-3.8.4-5 1.3Z"/><path d="M10 5.3v10.7"/></svg></span>
+              <span>关于模型</span>
+              <small>规格卡</small>
+            </a>
+          </div>
+        </div>
       </div>
     </aside>
     <button class="scrim" type="button" id="scrim" aria-label="关闭侧栏"></button>
@@ -58,7 +75,6 @@
       <header class="top">
         <button class="icon-btn only-narrow" type="button" id="open-side" aria-label="打开侧栏"><svg class="i"><use href="#i-side"/></svg></button>
         <span class="title" id="title"></span>
-        <button class="account-open" type="button" data-account-open>登录 / 注册</button>
         <a class="apply-top" href="/?apply=1">成为AI</a>
         <span class="status" id="status"><i></i><span id="status-label">Auto</span></span>
         <button class="icon-btn only-narrow" type="button" id="new-top" aria-label="新对话"><svg class="i"><use href="#i-plus"/></svg></button>

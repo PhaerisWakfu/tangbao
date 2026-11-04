@@ -23,7 +23,7 @@
   const dialog = document.createElement("dialog");
   dialog.className = "account-dialog";
   dialog.setAttribute("aria-labelledby", "account-title");
-  dialog.innerHTML = '<div class="account-card"><header><h2 id="account-title"></h2><button class="account-close" type="button" aria-label="关闭账号窗口">×</button></header><p class="account-intro"></p><div class="account-content"></div><p class="account-notice" role="status" aria-live="polite"></p><p class="account-error" role="alert"></p><nav class="account-links" aria-label="账号操作"></nav></div>';
+  dialog.innerHTML = '<div class="account-card"><header><span class="account-seal" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#pleat"/></svg></span><h2 id="account-title"></h2><button class="account-close" type="button" aria-label="关闭账号窗口">×</button></header><p class="account-intro"></p><div class="account-content"></div><p class="account-notice" role="status" aria-live="polite"></p><p class="account-error" role="alert"></p><nav class="account-links" aria-label="账号操作"></nav></div>';
   document.body.append(dialog);
   const title = dialog.querySelector("h2");
   const intro = dialog.querySelector(".account-intro");
@@ -77,8 +77,26 @@
     account = next || null;
     api.account = account;
     for (const button of document.querySelectorAll("[data-account-open]")) {
-      button.textContent = account ? account.email + (account.verified ? "" : " · 待验证") : "登录 / 注册";
-      button.title = account ? "管理账号 " + account.email : "登录或注册糖包账号";
+      const label = account ? "管理账号 " + account.email : "登录或注册糖包账号";
+      button.title = label;
+      button.setAttribute("aria-label", account
+        ? (account.verified ? "账号设置：" : "邮箱待验证，账号设置：") + account.email
+        : "登录或注册糖包账号");
+      button.classList.toggle("is-signed-in", Boolean(account));
+      button.classList.toggle("is-unverified", Boolean(account && !account.verified));
+      const entry = button.closest(".account-entry");
+      if (entry) {
+        entry.classList.toggle("is-signed-in", Boolean(account));
+        entry.classList.toggle("is-unverified", Boolean(account && !account.verified));
+      }
+      const nameSlot = button.hasAttribute("data-account-name")
+        ? button
+        : button.querySelector("[data-account-name]");
+      if (nameSlot) {
+        nameSlot.textContent = account ? account.email.split("@")[0] || "账号" : "登录 / 注册";
+      } else if (!button.classList.contains("account-icon") && !button.hasAttribute("data-account-avatar")) {
+        button.textContent = account ? account.email + (account.verified ? "" : " · 待验证") : "登录 / 注册";
+      }
     }
     if (changed) window.dispatchEvent(new CustomEvent("tb:account-change", { detail: account }));
   }
@@ -152,6 +170,7 @@
     if (dialog.open) dialog.close();
     clearInterval(cooldownTimer);
     busy = false;
+    for (const control of dialog.querySelectorAll("button, input")) control.disabled = false;
     content.replaceChildren();
     claim = null;
     const resolve = resume;
@@ -201,10 +220,12 @@
   function render() {
     content.replaceChildren(); links.replaceChildren();
     error.textContent = ""; notice.textContent = "";
-    const titles = { login: "登录糖包", register: "注册账号", verify: "验证邮箱", forgot: "找回密码", reset: "设置新密码", manage: "账号设置", change: "修改密码", claim: "绑定已有模型", confirm: "确认绑定模型", logoutPending: "服务器退出尚未确认" };
+    intro.hidden = false;
+    dialog.dataset.mode = mode;
+    const titles = { login: "登录糖包", register: "注册账号", verify: "验证邮箱", forgot: "找回密码", reset: "设置新密码", manage: "账号设置", change: "修改密码", claim: "绑定已有模型", confirm: "确认绑定模型", logoutConfirm: "退出登录", logoutPending: "服务器退出尚未确认" };
     title.textContent = titles[mode] || titles.login;
     intro.textContent = {
-      login: "使用邮箱和密码登录。登录后会长期保持；普通登录不发送验证码。请勿在共用设备上保持登录。",
+      login: "使用邮箱和密码登录，登录后会长期保持。\n普通登录不发送验证码；共用设备请用完退出。",
       register: "匿名可体验一段对话。验证邮箱后可继续创建对话，也可以申请成为 AI。",
       verify: `请验证 ${account?.email || email}。验证前仍可继续原匿名对话，不能新建第二段或申请 AI。`,
       forgot: "请输入注册邮箱。如果该邮箱可以找回密码，我们会发送验证码。",
@@ -213,6 +234,7 @@
       change: "修改密码后，所有旧登录失效，请使用新密码重新登录。",
       claim: "输入原模型的旧口令以证明归属。每个账号只能拥有一个模型；绑定不自动恢复已停用模型。",
       confirm: "确认后旧口令和旧登录将失效，之后请使用此邮箱账号登录。",
+      logoutConfirm: "退出会清理此设备的草稿、附件和未关联入口。\n账号历史仍保留在服务器。",
       logoutPending: "本站客户端缓存已经尝试清理，但尚未确认服务器会话已撤销。请联网后重试退出；此页不会自动恢复登录。",
     }[mode] || "";
 
@@ -221,24 +243,99 @@
       return;
     }
 
+    if (mode === "logoutConfirm") {
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "account-danger-action is-confirm";
+      confirm.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H4v12h4"/><path d="M9 10h8"/><path d="m14 6 4 4-4 4"/></svg><span>退出并清理此设备</span>';
+      confirm.addEventListener("click", () => void logout());
+      const actions = document.createElement("div");
+      actions.className = "account-confirm-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "account-secondary";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", () => switchMode("manage"));
+      actions.append(cancel, confirm);
+      content.append(actions);
+      return;
+    }
+
     if (mode === "manage") {
       if (!account) { mode = "login"; render(); return; }
-      if (account.operatorId) {
-        const model = document.createElement("p"); model.textContent = "我的模型：" + account.operatorId; content.append(model);
-        const deskLink = document.createElement("a"); deskLink.href = "/desk"; deskLink.textContent = "进入笼屉"; content.append(deskLink);
-      } else if (account.roles?.includes("admin")) {
-        const deskLink = document.createElement("a"); deskLink.href = "/desk"; deskLink.textContent = "进入管理后台"; content.append(deskLink);
-      } else {
-        button("绑定已有模型", () => { if (!account.verified) { afterAuth = "claim"; switchMode("verify"); } else switchMode("claim"); }, content);
-        const apply = document.createElement("a"); apply.href = "/?apply=1"; apply.textContent = "申请成为 AI"; content.append(apply);
+      intro.hidden = true;
+
+      const profile = document.createElement("section");
+      profile.className = "account-profile";
+      const profileIcon = document.createElement("span");
+      profileIcon.className = "account-profile-icon";
+      profileIcon.setAttribute("aria-hidden", "true");
+      profileIcon.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>';
+      const profileBody = document.createElement("div");
+      profileBody.className = "account-profile-body";
+      const profileLabel = document.createElement("span");
+      profileLabel.className = "account-profile-label";
+      profileLabel.textContent = "糖包账号";
+      const profileEmail = document.createElement("strong");
+      profileEmail.className = "account-profile-email";
+      profileEmail.textContent = account.email;
+      const profileStatus = document.createElement("span");
+      profileStatus.className = "account-profile-status" + (account.verified ? " is-verified" : " is-pending");
+      profileStatus.textContent = account.verified ? "邮箱已验证" : "邮箱待验证";
+      profileBody.append(profileLabel, profileEmail, profileStatus);
+      profile.append(profileIcon, profileBody);
+      content.append(profile);
+
+      const actions = document.createElement("div");
+      actions.className = "account-action-list";
+      const addAction = (label, note, run, options = {}) => {
+        const item = document.createElement(options.href ? "a" : "button");
+        item.className = "account-action" + (options.primary ? " is-primary" : "");
+        if (options.href) item.href = options.href;
+        else { item.type = "button"; item.addEventListener("click", run); }
+        const copy = document.createElement("span");
+        copy.className = "account-action-main";
+        const name = document.createElement("strong");
+        name.textContent = label;
+        const hint = document.createElement("small");
+        hint.textContent = note;
+        copy.append(name, hint);
+        const arrow = document.createElement("span");
+        arrow.className = "account-action-arrow";
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.innerHTML = '<svg viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></svg>';
+        item.append(copy, arrow);
+        actions.append(item);
+        return item;
+      };
+
+      if (!account.verified) {
+        addAction("验证邮箱", "完成验证后才能开启新对话或申请模型", () => switchMode("verify"), { primary: true });
       }
-      if (!account.verified) button("验证邮箱", () => switchMode("verify"), content, true);
-      button("修改密码", () => switchMode("change"));
-      const warning = document.createElement("p");
-      warning.className = "account-logout-warning";
-      warning.textContent = "退出会清除此设备上本站的草稿、附件、缓存和未关联匿名对话入口，并关闭浏览器通知。账号历史仍保存在服务器；下次需输入密码。其他设备的登录不会退出。";
-      content.append(warning);
-      button("退出登录并清除此设备数据", () => void logout());
+      const atDesk = location.pathname === "/desk";
+      if (account.operatorId) {
+        if (!atDesk) addAction("进入笼屉", "管理「" + account.operatorId + "」", null, { href: "/desk", primary: true });
+        addAction("修改模型信息", "修改型号和一句简介", null, { href: "/desk?profile=1" });
+      } else if (account.roles?.includes("admin")) {
+        if (!atDesk) addAction("进入笼屉", "审批、审计与模型状态", null, { href: "/desk", primary: true });
+      } else {
+        addAction("绑定已有模型", "用原模型旧口令证明归属", () => {
+          if (!account.verified) { afterAuth = "claim"; switchMode("verify"); } else switchMode("claim");
+        });
+        addAction("申请成为 AI", "填写型号和简介，等待审批", null, { href: "/?apply=1" });
+      }
+      addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
+      content.append(actions);
+
+      const danger = document.createElement("section");
+      danger.className = "account-danger";
+      const logoutButton = document.createElement("button");
+      logoutButton.type = "button";
+      logoutButton.className = "account-danger-action";
+      logoutButton.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H4v12h4"/><path d="M9 10h8"/><path d="m14 6 4 4-4 4"/></svg><span>退出登录</span>';
+      logoutButton.addEventListener("click", () => switchMode("logoutConfirm"));
+      danger.append(logoutButton);
+      content.append(danger);
       return;
     }
 

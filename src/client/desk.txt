@@ -13,8 +13,8 @@ const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
-const profileOpen = $("#profile-open");
 const profileForm = $("#profile-form");
+let profileRequested = new URLSearchParams(location.search).get("profile") === "1";
 const profileSuffix = $("#profile-suffix");
 const profileBlurb = $("#profile-blurb");
 const profileErr = $("#profile-err");
@@ -282,9 +282,13 @@ async function loadQueue() {
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
-  profileOpen.hidden = seat.super;
   renderQueue(data);
   paintTitle();
+  if (profileRequested) {
+    profileRequested = false;
+    if (location.search) window.history.replaceState(null, "", "/desk");
+    if (!seat.super) void openProfilePane();
+  }
 }
 
 async function loadProfile() {
@@ -293,6 +297,16 @@ async function loadProfile() {
   const data = await api("/api/admin/profile");
   profileSuffix.value = data.suffix || "";
   profileBlurb.value = data.blurb || "";
+}
+
+async function openProfilePane() {
+  if (seat.super) return;
+  showPane("profile");
+  try {
+    await loadProfile();
+  } catch (err) {
+    profileErr.textContent = err.message;
+  }
 }
 
 async function saveProfile(event) {
@@ -387,14 +401,9 @@ async function tick() {
   arm();
 }
 
-profileOpen.addEventListener("click", async () => {
-  if (seat.super) return;
-  showPane("profile");
-  try {
-    await loadProfile();
-  } catch (err) {
-    profileErr.textContent = err.message;
-  }
+$("#profile-back").addEventListener("click", () => {
+  if (location.search) window.history.replaceState(null, "", "/desk");
+  showPane("thread");
 });
 
 profileForm.addEventListener("submit", saveProfile);
