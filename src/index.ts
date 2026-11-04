@@ -234,9 +234,108 @@ function useTurso(env: AppEnv): AppEnv {
   };
 }
 
+const RECOVERY_KEYS = ["tangbao.v1", "tangbao.visitor", "tangbao.model", "tangbao.presence"] as const;
+
+function recoveryPage(origin: string): string {
+  const action = JSON.stringify(`${origin}/__recover`);
+  const chat = JSON.stringify(`${origin}/chat`);
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>找回旧对话 · 糖包</title>
+<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf7;color:#312a24;font:14px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:30rem;padding:28px;text-align:center}a{color:#9a4f32}</style>
+</head><body><main><h1>正在找回旧对话</h1><p id="status">正在读取这台浏览器里的匿名记录…</p><p><a id="fallback" href="${chat}">如果页面没有自动跳转，点这里回到聊天</a></p></main>
+<script>
+(() => {
+  const data = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("tangbao.")) data[key] = localStorage.getItem(key) || "";
+    }
+  } catch {}
+  if (!data["tangbao.v1"]) { location.replace(${chat}); return; }
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = ${action};
+  form.style.display = "none";
+  const input = document.createElement("textarea");
+  input.name = "payload";
+  input.value = JSON.stringify(data);
+  form.append(input);
+  document.body.append(form);
+  form.submit();
+})();
+</script></body></html>`;
+}
+
+function recoveryDonePage(payload: Record<string, string>): string {
+  const data = JSON.stringify(JSON.stringify(payload)).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>正在恢复旧对话 · 糖包</title>
+<style>body{margin:0;display:grid;min-height:100vh;place-items:center;background:#fbfaf7;color:#312a24;font:14px/1.7 system-ui,"Microsoft YaHei",sans-serif}main{max-width:30rem;padding:28px;text-align:center}a{color:#9a4f32}</style>
+</head><body><main><h1>正在恢复旧对话</h1><p>记录已经找到，正在放回账号旁的匿名历史…</p><p><a href="/chat">如果没有自动跳转，点这里</a></p></main>
+<script>
+(() => {
+  const data = JSON.parse(${data});
+  let current = {};
+  try { current = JSON.parse(localStorage.getItem("tangbao.v1") || "{}") || {}; } catch {}
+  let incoming = null;
+  try { incoming = data["tangbao.v1"] ? JSON.parse(data["tangbao.v1"]) : null; } catch {}
+  if (incoming && typeof incoming === "object") {
+    const threads = new Map();
+    for (const thread of [...(Array.isArray(current.threads) ? current.threads : []), ...(Array.isArray(incoming.threads) ? incoming.threads : [])]) {
+      if (thread && typeof thread.id === "string") threads.set(thread.id, thread);
+    }
+    const merged = { ...current, ...incoming, threads: [...threads.values()], activeId: current.activeId ?? incoming.activeId ?? null };
+    localStorage.setItem("tangbao.v1", JSON.stringify(merged));
+  }
+  for (const key of ["tangbao.visitor", "tangbao.model", "tangbao.presence"]) {
+    if (typeof data[key] === "string") localStorage.setItem(key, data[key]);
+  }
+  location.replace("/chat?recovered=1");
+})();
+</script></body></html>`;
+}
+
+async function recoverSession(request: Request, env: AppEnv, url: URL): Promise<Response> {
+  const origin = env.APP_ORIGIN?.replace(/\/$/, "");
+  if (!origin) return new Response("恢复入口暂不可用。", { status: 503, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  if (request.method === "GET") {
+    return new Response(recoveryPage(origin), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+  }
+  if (request.method !== "POST" || url.protocol !== "https:") return new Response("不支持的恢复请求。", { status: 405 });
+  const referer = request.headers.get("referer");
+  if (referer) {
+    try {
+      const host = new URL(referer).hostname;
+      if (!(host === "phaeris.cn" || host.endsWith(".phaeris.cn") || host.endsWith(".workers.dev"))) return new Response("来源不正确。", { status: 403 });
+    } catch { return new Response("来源不正确。", { status: 403 }); }
+  }
+  if (Number(request.headers.get("content-length") || "0") > 1_500_000) return new Response("记录过大，无法自动迁移。", { status: 413 });
+  let form: FormData;
+  try { form = await request.formData(); } catch { return new Response("记录格式不正确。", { status: 400 }); }
+  const raw = String(form.get("payload") || "");
+  if (!raw || raw.length > 1_500_000) return new Response("没有找到可迁移的记录。", { status: 400 });
+  let parsed: Record<string, unknown>;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("shape");
+    parsed = value as Record<string, unknown>;
+  } catch { return new Response("记录格式不正确。", { status: 400 }); }
+  const clean: Record<string, string> = {};
+  for (const key of RECOVERY_KEYS) {
+    const value = parsed[key];
+    if (typeof value === "string" && value.length <= 1_500_000) clean[key] = value;
+  }
+  if (!Object.keys(clean).length) return new Response("没有找到可迁移的记录。", { status: 400 });
+  return new Response(recoveryDonePage(clean), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/__recover") return recoverSession(request, env, requestUrl);
     const appOrigin = env.APP_ORIGIN?.replace(/\/$/, "");
     if (appOrigin && !localHost(requestUrl.hostname)) {
       try {
