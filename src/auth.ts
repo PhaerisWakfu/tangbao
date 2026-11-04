@@ -109,7 +109,16 @@ export function assertOrigin(request: Request, env: AuthEnv): void {
     } catch { throw new AuthError(503, "AUTH_NOT_CONFIGURED", "账号服务尚未配置，请稍后重试。"); }
   } else if (localHost(url.hostname)) expected = url.origin;
   else throw new AuthError(503, "AUTH_NOT_CONFIGURED", "账号服务尚未配置，请稍后重试。");
-  if (request.headers.get("origin") !== expected) throw new AuthError(403, "ORIGIN_REJECTED", "请求来源不正确，请在本站重新操作。");
+  let origin = request.headers.get("origin");
+  if (!origin || origin === "null") {
+    try {
+      const referer = request.headers.get("referer");
+      origin = referer ? new URL(referer).origin : null;
+    } catch {
+      origin = null;
+    }
+  }
+  if (origin !== expected) throw new AuthError(403, "ORIGIN_REJECTED", "请求来源不正确，请在本站重新操作。");
 }
 
 type AccountRow = { id: string; email: string; password_hash: string; verified_at: number; status: string; session_version: number };

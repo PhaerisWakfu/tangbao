@@ -74,6 +74,10 @@ type Presence = {
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+
+function localHost(host: string): boolean {
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const MODEL_RECENT_MS = 30 * DAY;
 const MODEL_PAGE_SIZE = 30;
@@ -232,6 +236,16 @@ function useTurso(env: AppEnv): AppEnv {
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    const requestUrl = new URL(request.url);
+    const appOrigin = env.APP_ORIGIN?.replace(/\/$/, "");
+    if (appOrigin && !localHost(requestUrl.hostname)) {
+      try {
+        const canonical = new URL(appOrigin);
+        if (requestUrl.protocol !== "https:" || requestUrl.host !== canonical.host) {
+          return Response.redirect(`${canonical.origin}${requestUrl.pathname}${requestUrl.search}`, 308);
+        }
+      } catch {}
+    }
     if (env.MAINTENANCE === "1") {
       const api = new URL(request.url).pathname.startsWith("/api/");
       const message = "站点正在维护，请稍后再试。";
