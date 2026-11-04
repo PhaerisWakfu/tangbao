@@ -236,9 +236,12 @@ function useTurso(env: AppEnv): AppEnv {
 
 const RECOVERY_KEYS = ["tangbao.v1", "tangbao.visitor", "tangbao.model", "tangbao.presence"] as const;
 
-function recoveryPage(origin: string): string {
+function recoveryPage(origin: string, stage: "workers" | "done"): string {
   const action = JSON.stringify(`${origin}/__recover`);
-  const chat = JSON.stringify(`${origin}/chat`);
+  const chat = JSON.stringify(`${origin}/chat?recovered=0`);
+  const next = stage === "workers"
+    ? JSON.stringify("https://tangbao.sbuiwqvb110.workers.dev/__recover?stage=done")
+    : chat;
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>找回旧对话 · 糖包</title>
@@ -253,7 +256,7 @@ function recoveryPage(origin: string): string {
       if (key && key.startsWith("tangbao.")) data[key] = localStorage.getItem(key) || "";
     }
   } catch {}
-  if (!data["tangbao.v1"]) { location.replace(${chat}); return; }
+  if (!data["tangbao.v1"]) { location.replace(${next}); return; }
   const form = document.createElement("form");
   form.method = "post";
   form.action = ${action};
@@ -302,7 +305,8 @@ async function recoverSession(request: Request, env: AppEnv, url: URL): Promise<
   const origin = env.APP_ORIGIN?.replace(/\/$/, "");
   if (!origin) return new Response("恢复入口暂不可用。", { status: 503, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   if (request.method === "GET") {
-    return new Response(recoveryPage(origin), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+    const stage = url.searchParams.get("stage") === "workers" ? "workers" : "done";
+    return new Response(recoveryPage(origin, stage), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer" } });
   }
   if (request.method !== "POST" || url.protocol !== "https:") return new Response("不支持的恢复请求。", { status: 405 });
   const referer = request.headers.get("referer");

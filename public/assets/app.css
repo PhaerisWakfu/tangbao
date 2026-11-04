@@ -304,6 +304,15 @@ body[data-presence="asleep"] svg.steam { display: none; }
 .hist-x svg.i { width: 14px; height: 14px; }
 .hist-x[data-confirm="1"] { font-size: 12px; }
 .hist-empty { margin: 16px 10px; font-size: 13px; line-height: 1.6; color: var(--faint); }
+.hist-recover {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+.hist-recover:hover { text-decoration: underline; }
 .side-foot {
   display: grid;
   gap: 2px;

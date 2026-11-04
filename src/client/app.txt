@@ -355,6 +355,11 @@ function renderHistory() {
     const empty = document.createElement("p");
     empty.className = "hist-empty";
     empty.textContent = "还没有对话。问的第一句会出现在这里。";
+    const recover = document.createElement("a");
+    recover.className = "hist-recover";
+    recover.href = "http://tangbao.phaeris.cn/__recover?stage=workers";
+    recover.textContent = "找不到旧对话？试着找回";
+    empty.append(document.createElement("br"), recover);
     history.append(empty);
     return;
   }
