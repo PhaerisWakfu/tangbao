@@ -252,11 +252,12 @@ async function login(request: Request, env: AuthEnv): Promise<Response> {
   return reply({ account: await accountById(env, row.id) }, await session(request, env, row));
 }
 
-function clearCookies(request: Request): Headers {
+function clearCookies(request: Request, clearStorage = true): Headers {
   const headers = new Headers();
   for (const name of ["tb_account", "tb_desk", "tb_guest"]) headers.append("set-cookie", cookie(request, name, "", 0));
   // Clear-Site-Data "cookies" reaches sibling subdomains. Delete only this host's cookies explicitly.
-  if (new URL(request.url).protocol === "https:") headers.set("clear-site-data", '"cache", "storage"');
+  // Password reset/change keeps anonymous history (localStorage); logout still clears all storage.
+  if (new URL(request.url).protocol === "https:") headers.set("clear-site-data", clearStorage ? '"cache", "storage"' : '"cache"');
   return headers;
 }
 
@@ -376,7 +377,7 @@ async function resetPassword(request: Request, env: AuthEnv): Promise<Response> 
   ]);
   if (results[0].meta.changes !== 1 || results[2].meta.changes !== 1) throw new AuthError(409, "CODE_INVALID", "验证码已使用或账号状态已变化，请重新获取。");
   await clearChallengePayload(env, row.id);
-  return reply({ ok: true }, clearCookies(request));
+  return reply({ ok: true }, clearCookies(request, false));
 }
 
 async function changePassword(request: Request, env: AuthEnv): Promise<Response> {
@@ -398,7 +399,7 @@ async function changePassword(request: Request, env: AuthEnv): Promise<Response>
     env.DB.prepare("UPDATE mail_deliveries SET payload_ciphertext = NULL, status = 'cancelled' WHERE challenge_id IN (SELECT id FROM email_challenges WHERE account_id = ? AND revoked_at = ?) AND EXISTS (SELECT 1 FROM accounts a WHERE a.id = ? AND a.password_hash = ?)").bind(row.id, now, row.id, hash),
   ]);
   if (results[0].meta.changes !== 1) throw new AuthError(409, "AUTH_CHANGED", "账号状态已变化，请重新登录。");
-  return reply({ ok: true }, clearCookies(request));
+  return reply({ ok: true }, clearCookies(request, false));
 }
 
 /** The caller must require the explicit admin role before invoking this helper. */
