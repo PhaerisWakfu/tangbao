@@ -18,6 +18,8 @@ Thumbs.db
 # 本地生产配置和备份
 private-assets/
 wrangler.production.jsonc
+wrangler.accounts-test.jsonc
+wrangler.accounts-source.jsonc
 *.sqlite
 *.db
 *.dump

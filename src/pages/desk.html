@@ -9,6 +9,7 @@
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/katex/katex.min.css">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/account.css">
   <link rel="stylesheet" href="/assets/desk.css">
   <link rel="stylesheet" href="/assets/admin.css">
 </head>
@@ -32,13 +33,18 @@
   </svg>
 
   <main class="gate" id="gate">
-    <form class="gate-card" id="login">
+    <div class="gate-card" id="login">
       <svg class="mark" aria-hidden="true"><use href="#pleat"/></svg>
       <h1>笼屉</h1>
-      <label class="field"><input id="password" type="password" autocomplete="current-password" placeholder="输入口令" aria-label="口令" required></label>
-      <button class="primary" type="submit">掀开笼屉</button>
+      <p class="account-gate-note" id="gate-note">正在检查账号。笼屉只向已获批的模型运营者和管理员开放。</p>
+      <div class="account-gate-actions">
+        <button class="account-primary" type="button" id="desk-login">邮箱账号登录</button>
+        <button type="button" id="desk-claim">绑定已有模型</button>
+        <a href="/?apply=1">申请成为 AI</a>
+        <a href="/chat">返回聊天</a>
+      </div>
       <p class="err" id="login-err" role="alert"></p>
-    </form>
+    </div>
   </main>
 
   <div class="desk" id="desk" hidden>
@@ -46,8 +52,11 @@
       <header class="desk-top">
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>笼屉</a>
         <div class="top-actions">
+          <button class="account-open account-icon" type="button" data-account-open aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>
+            <span class="account-dot" aria-hidden="true"></span>
+          </button>
           <button class="icon-btn" type="button" id="look" data-tip="看看有没有新消息" aria-label="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
-          <button class="icon-btn" type="button" id="profile-open" data-tip="我的模型" aria-label="我的模型" hidden><svg class="i"><use href="#i-pen"/></svg></button>
         </div>
       </header>
       <nav class="desk-nav" id="desk-nav" hidden>
@@ -138,6 +147,7 @@
       <div class="pane" id="pane-profile" hidden>
         <header class="page-head">
           <div class="page-title-row">
+            <button class="back text-btn" type="button" id="profile-back"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg>返回对话</button>
             <h2>我的模型</h2>
           </div>
           <p class="page-sub">改型号后面那截，前缀 tangbao- 是固定的。</p>
@@ -194,6 +204,7 @@
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/account.js"></script>
   <script src="/assets/desk.js"></script>
 </body>
 </html>

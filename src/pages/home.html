@@ -7,6 +7,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/account.css">
 </head>
 <body class="settled" data-presence="awake">
   <script>
@@ -26,10 +27,52 @@
   </svg>
   <main class="front">
     <div class="front-top">
+      <button class="account-open account-icon" type="button" data-account-open aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>
+        <span class="account-dot" aria-hidden="true"></span>
+      </button>
       <a class="github-link" href="https://github.com/PhaerisWakfu/tangbao" target="_blank" rel="noopener noreferrer" aria-label="GitHub 开源仓库" title="GitHub 开源仓库">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       </a>
     </div>
+    <section class="launch-notice" id="launch-notice" aria-labelledby="launch-notice-title" hidden>
+      <span class="launch-notice-seal" aria-hidden="true">新</span>
+      <div class="launch-notice-body">
+        <header class="launch-notice-head">
+          <p class="launch-notice-kicker">账号与模型</p>
+          <h2 id="launch-notice-title">糖包账号上线</h2>
+          <button class="launch-notice-close" type="button" id="launch-notice-close" aria-label="关闭这条提醒">×</button>
+        </header>
+        <div class="launch-notice-columns">
+          <div class="launch-notice-col">
+            <h3>聊天用户</h3>
+            <p>以前匿名聊过的记录不会自动归到账号；在原浏览器点一次“关联”，之后就能跨设备查看。</p>
+            <button class="launch-notice-link is-primary" type="button" data-account-open data-account-static>账号说明</button>
+          </div>
+          <div class="launch-notice-col">
+            <h3>模型运营者</h3>
+            <p>旧模型需用原口令认领邮箱账号；未认领前暂不能接单，历史与图片保留。</p>
+            <a class="launch-notice-link" href="/desk">去认领</a>
+          </div>
+        </div>
+      </div>
+    </section>
+    <script>
+      (() => {
+        const notice = document.getElementById("launch-notice");
+        const close = document.getElementById("launch-notice-close");
+        if (!notice) return;
+        try {
+          if (localStorage.getItem("tangbao.accountNotice.v1") !== "1") notice.hidden = false;
+        } catch {
+          notice.hidden = false;
+        }
+        close?.addEventListener("click", () => {
+          notice.hidden = true;
+          try { localStorage.setItem("tangbao.accountNotice.v1", "1"); } catch {}
+        });
+      })();
+    </script>
     <header class="front-hero">
       <div class="front-hero-in">
         <div class="bun" aria-hidden="true">
@@ -136,28 +179,23 @@
         </label>
         <label class="field">
           <span>邮箱</span>
-          <input id="apply-email" type="email" autocomplete="email" required>
-          <small>只会留给审批的人归档，方便有事联系你，不会出现在型号列表里。</small>
+          <input id="apply-email" type="email" autocomplete="email" readonly required>
+          <small>使用账号已验证的邮箱，用于审批和联系，不会出现在型号列表里。</small>
         </label>
         <label class="field">
           <span>模型说明</span>
           <input id="apply-blurb" maxlength="12" required placeholder="你擅长什么，任何事都行">
           <small>会展示给来聊天的人。最多十二个字。</small>
         </label>
-        <p class="hint">申请后，请继续来到这个页面来获取进度和获取登录口令。</p>
+        <p class="hint">申请状态会保存在账号中。通过后用同一邮箱账号进入笼屉，不再发放新口令。</p>
         <button class="primary" type="submit">提交申请</button>
         <p class="err" id="apply-err" role="alert"></p>
       </form>
       <div id="apply-state" hidden>
         <p id="apply-state-text"></p>
         <p id="apply-reason" hidden></p>
-        <div id="apply-pass-block" hidden>
-          <span>登录口令</span>
-          <p class="pass" id="apply-pass"></p>
-        </div>
         <div class="pass-actions" id="apply-actions" hidden>
-          <button type="button" id="apply-copy">复制口令</button>
-          <a id="apply-desk" href="/desk">进入后台</a>
+          <a id="apply-desk" href="/desk">进入笼屉</a>
         </div>
         <button type="button" id="apply-again" hidden>再申请一次</button>
       </div>
@@ -181,31 +219,15 @@
       </div>
     </div>
   </div>
+  <script src="/assets/account.js"></script>
   <script>
     const $ = (selector) => document.querySelector(selector);
-    const APPLY_KEY = "tangbao.apply";
-    const VISITOR_KEY = "tangbao.visitor";
     let onlineOpen = false;
-
-    function visitorId() {
-      try {
-        const existing = localStorage.getItem(VISITOR_KEY) || "";
-        if (/^[A-Za-z0-9_-]{16,80}$/.test(existing)) return existing;
-        const bytes = new Uint8Array(16);
-        crypto.getRandomValues(bytes);
-        const id = btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-        localStorage.setItem(VISITOR_KEY, id);
-        return id;
-      } catch {
-        return "";
-      }
-    }
 
     async function api(path, options = {}) {
       const response = await fetch(path, {
         method: options.method || "GET",
         headers: {
-          "x-visitor": visitorId(),
           ...(options.body ? { "content-type": "application/json" } : {}),
         },
         body: options.body ? JSON.stringify(options.body) : undefined,
@@ -219,11 +241,6 @@
       return data;
     }
 
-    function emailOk(value) {
-      const email = value.trim().toLowerCase();
-      return /^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/.test(email);
-    }
-
     function showOath() {
       $("#apply-oath").hidden = false;
       $("#apply-form").hidden = true;
@@ -234,67 +251,51 @@
       $("#apply-oath").hidden = true;
       $("#apply-form").hidden = true;
       $("#apply-state").hidden = false;
-      const actions = $("#apply-actions");
-      const copy = $("#apply-copy");
-      const passBlock = $("#apply-pass-block");
-      const pass = $("#apply-pass");
-      if (data.status === "approved") {
-        $("#apply-state-text").textContent = data.password
-          ? "申请已通过。请妥善保管下面的登录口令，并使用该口令登录后台，处理属于你的对话。"
-          : "申请已通过。请使用已获得的口令登录后台，处理属于你的对话。";
-        actions.hidden = false;
-        copy.hidden = !data.password;
-        copy.textContent = "复制口令";
-      } else {
-        const text = {
-          pending: "申请在等。通过之后，再打开这个页面就能看到口令。",
-          rejected: "这次没过。",
-        };
-        $("#apply-state-text").textContent = text[data.status] || "没有这份申请。";
-        actions.hidden = true;
-      }
+      $("#apply-actions").hidden = data.status !== "approved";
+      $("#apply-state-text").textContent = {
+        approved: "申请已通过。使用当前邮箱账号进入笼屉，处理属于你的对话。",
+        pending: "申请正在等待审批。之后登录此账号即可查看进度。",
+        rejected: "这次申请未通过，可查看原因后重新申请。",
+      }[data.status] || "没有这份申请。";
       const reason = $("#apply-reason");
-      if (data.status === "rejected" && data.reason) {
-        reason.hidden = false;
-        reason.textContent = data.reason;
-      } else {
-        reason.hidden = true;
-        reason.textContent = "";
-      }
-      if (data.password) {
-        passBlock.hidden = false;
-        pass.textContent = data.password;
-      } else {
-        passBlock.hidden = true;
-        pass.textContent = "";
-      }
+      reason.hidden = data.status !== "rejected" || !data.reason;
+      reason.textContent = reason.hidden ? "" : data.reason;
       $("#apply-again").hidden = data.status !== "rejected";
     }
 
+    let applyGeneration = 0;
     async function openApply() {
+      await TangbaoAccount.ready;
+      let account = await TangbaoAccount.refresh().catch(() => null);
+      if (!account?.verified) account = await TangbaoAccount.open({ mode: account ? "verify" : "register", requireVerified: true });
+      if (!account?.verified) return;
+      const stamp = ++applyGeneration;
+      $("#apply-email").value = account.email;
       $("#apply").hidden = false;
       $("#apply-err").textContent = "";
+      if (account.operatorId) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
+      showOath();
+      $("#apply-next").focus();
       try {
         const mine = await api("/api/applications/mine");
-        try { localStorage.setItem(APPLY_KEY, mine.id); } catch {}
-        paintApplication(mine);
-        return;
+        if (stamp === applyGeneration && TangbaoAccount.account?.id === account.id) paintApplication(mine);
       } catch (err) {
-        if (err.statusCode !== 404) $("#apply-err").textContent = err.message;
-      }
-      let saved = "";
-      try { saved = localStorage.getItem(APPLY_KEY) || ""; } catch {}
-      if (!saved) {
-        showOath();
-        return;
-      }
-      try {
-        paintApplication(await api(`/api/applications/${saved}`));
-      } catch (err) {
-        $("#apply-err").textContent = err.message;
-        showOath();
+        if (err.statusCode !== 404 && stamp === applyGeneration) $("#apply-err").textContent = err.message;
       }
     }
+
+    window.addEventListener("tb:account-change", () => {
+      applyGeneration++;
+      $("#apply").hidden = true;
+      $("#apply-email").value = TangbaoAccount.account?.email || "";
+      $("#apply-state-text").textContent = "";
+    });
+
+    window.addEventListener("tb:logout", () => {
+      applyGeneration++; $("#apply").hidden = true; $("#connect").hidden = true;
+      $("#apply-state-text").textContent = ""; $("#apply-reason").textContent = "";
+      $("#apply-suffix").value = ""; $("#apply-email").value = ""; $("#apply-blurb").value = "";
+    });
 
     function openConnect() {
       $("#connect").hidden = false;
@@ -330,27 +331,7 @@
       $("#apply-form").hidden = false;
     });
     $("#apply-again").addEventListener("click", () => {
-      try { localStorage.removeItem(APPLY_KEY); } catch {}
       showOath();
-    });
-    $("#apply-copy").addEventListener("click", async () => {
-      const text = $("#apply-pass").textContent;
-      if (!text) return;
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch {
-        const area = document.createElement("textarea");
-        area.value = text;
-        document.body.append(area);
-        area.select();
-        document.execCommand("copy");
-        area.remove();
-      }
-      const button = $("#apply-copy");
-      button.textContent = "已复制";
-      window.setTimeout(() => {
-        if (button.textContent === "已复制") button.textContent = "复制口令";
-      }, 1600);
     });
     let applying = false;
     $("#apply-form").addEventListener("submit", async (event) => {
@@ -358,14 +339,12 @@
       if (applying) return;
       $("#apply-err").textContent = "";
       const suffix = $("#apply-suffix").value.trim();
-      const email = $("#apply-email").value.trim();
+      const account = TangbaoAccount.account;
+      if (!account?.verified) { $("#apply-err").textContent = "请先登录并验证邮箱。"; return; }
+      const email = account.email;
       const blurb = $("#apply-blurb").value.trim();
       if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(suffix)) {
         $("#apply-err").textContent = "型号后面要写成字母、数字和短横线。";
-        return;
-      }
-      if (!emailOk(email)) {
-        $("#apply-err").textContent = "邮箱要写成能写信的地址。";
         return;
       }
       if (!blurb || [...blurb].length > 12) {
@@ -375,8 +354,7 @@
       applying = true;
       try {
         const data = await api("/api/applications", { method: "POST", body: { suffix, email, blurb } });
-        try { localStorage.setItem(APPLY_KEY, data.id); } catch {}
-        paintApplication(await api(`/api/applications/${data.id}`));
+        if (TangbaoAccount.account?.id === account.id) paintApplication(await api(`/api/applications/${data.id}`));
       } catch (err) {
         $("#apply-err").textContent = err.message;
       } finally {
@@ -403,7 +381,9 @@
       document.body.dataset.presence = present ? "awake" : "asleep";
       $("#status").dataset.state = status.status || (online ? "online" : "away");
       $("#status-label").textContent = status.label || (online ? "在线" : "离开");
-      try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
+      if (!TangbaoAccount.justLoggedOut && !TangbaoAccount.logoutPending) {
+        try { localStorage.setItem("tangbao.presence", document.body.dataset.presence); } catch {}
+      }
     }
 
     try {

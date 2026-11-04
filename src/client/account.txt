@@ -1,0 +1,575 @@
+(() => {
+  "use strict";
+  let account = null;
+  let mode = "login";
+  let challengeId = "";
+  let resetChallenge = "";
+  let claim = null;
+  let email = "";
+  let busy = false;
+  let generation = 0;
+  let resume = null;
+  let requireVerified = false;
+  let afterAuth = "";
+  let cooldownUntil = 0;
+  let cooldownTimer = 0;
+  let previousFocus = null;
+  let logoutUnconfirmed = new URLSearchParams(location.search).get("logout") === "pending";
+  let clearing = false;
+  let logoutEpoch = 0;
+  const logoutSignals = new Set();
+  let accountChannel = null;
+  try { accountChannel = new BroadcastChannel("tangbao-account"); } catch {}
+  const dialog = document.createElement("dialog");
+  dialog.className = "account-dialog";
+  dialog.setAttribute("aria-labelledby", "account-title");
+  dialog.innerHTML = '<div class="account-card"><header><span class="account-seal" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#pleat"/></svg></span><h2 id="account-title"></h2><button class="account-close" type="button" aria-label="关闭账号窗口">×</button></header><p class="account-intro"></p><div class="account-content"></div><p class="account-notice" role="status" aria-live="polite"></p><p class="account-error" role="alert"></p><nav class="account-links" aria-label="账号操作"></nav></div>';
+  document.body.append(dialog);
+  const title = dialog.querySelector("h2");
+  const intro = dialog.querySelector(".account-intro");
+  const content = dialog.querySelector(".account-content");
+  const links = dialog.querySelector(".account-links");
+  const error = dialog.querySelector(".account-error");
+  const notice = dialog.querySelector(".account-notice");
+  const NEW_PASSWORD_HINT = "6–20 个字符，数字、英文字母、特殊符号至少包含两类。空格会保留，但不算特殊符号。";
+
+  function passwordError(value, policy) {
+    const length = Array.from(value).length;
+    if (policy === "existing") return length < 1 || length > 128 ? "密码须为1至128个字符，空格也会保留。" : "";
+    if (length < 6 || length > 20) return "密码须为6至20个字符，空格也会保留。";
+    const categories = Number(/[A-Za-z]/.test(value)) + Number(/[0-9]/.test(value)) + Number(/[\p{P}\p{S}]/u.test(value));
+    return categories < 2 ? "密码须包含数字、英文字母、特殊符号中的至少两类。" : "";
+  }
+
+  function validatePasswordField(input, showError = false) {
+    const message = passwordError(input.value, input.dataset.passwordPolicy);
+    input.setCustomValidity(message);
+    if (showError) {
+      input.setAttribute("aria-invalid", String(Boolean(message)));
+      error.textContent = message;
+      error.dataset.passwordField = message ? input.name : "";
+    } else if (!message) input.removeAttribute("aria-invalid");
+    return !message;
+  }
+
+  async function request(path, body, options = {}) {
+    let response;
+    try {
+      response = await fetch(path, {
+        method: body === undefined ? "GET" : "POST", credentials: "same-origin",
+        headers: body === undefined ? undefined : { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: options.signal,
+      });
+    } catch { throw new Error("暂时连不上糖包，请保留当前页面，稍后再试。"); }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const err = new Error(data.error || "操作没有完成，请稍后再试。");
+      err.code = data.code;
+      err.statusCode = response.status;
+      throw err;
+    }
+    return data;
+  }
+
+  function setAccount(next) {
+    const changed = JSON.stringify(account) !== JSON.stringify(next || null);
+    account = next || null;
+    api.account = account;
+    for (const button of document.querySelectorAll("[data-account-open]")) {
+      const label = account ? "管理账号 " + account.email : "登录或注册糖包账号";
+      button.title = label;
+      button.setAttribute("aria-label", account
+        ? (account.verified ? "账号设置：" : "邮箱待验证，账号设置：") + account.email
+        : "登录或注册糖包账号");
+      button.classList.toggle("is-signed-in", Boolean(account));
+      button.classList.toggle("is-unverified", Boolean(account && !account.verified));
+      const entry = button.closest(".account-entry");
+      if (entry) {
+        entry.classList.toggle("is-signed-in", Boolean(account));
+        entry.classList.toggle("is-unverified", Boolean(account && !account.verified));
+      }
+      const nameSlot = button.hasAttribute("data-account-name")
+        ? button
+        : button.querySelector("[data-account-name]");
+      if (nameSlot) {
+        nameSlot.textContent = account ? account.email.split("@")[0] || "账号" : "登录 / 注册";
+      } else if (!button.classList.contains("account-icon") && !button.hasAttribute("data-account-avatar") && !button.hasAttribute("data-account-static")) {
+        button.textContent = account ? account.email + (account.verified ? "" : " · 待验证") : "登录 / 注册";
+      }
+    }
+    if (changed) window.dispatchEvent(new CustomEvent("tb:account-change", { detail: account }));
+  }
+
+  async function refresh() {
+    if (clearing || logoutUnconfirmed) return null;
+    const epoch = logoutEpoch;
+    const data = await request("/api/auth/me");
+    if (epoch !== logoutEpoch || clearing || logoutUnconfirmed) return null;
+    setAccount(data.account);
+    return account;
+  }
+
+  function field(form, label, name, type = "text", autocomplete = "") {
+    const wrapper = document.createElement("label");
+    wrapper.className = "account-field";
+    const text = document.createElement("span");
+    text.textContent = label;
+    const input = document.createElement("input");
+    input.name = name;
+    input.type = type;
+    input.required = true;
+    if (autocomplete) input.autocomplete = autocomplete;
+    if (type === "password") {
+      if (mode === "claim") { input.minLength = 1; input.maxLength = 128; }
+      else {
+        input.dataset.passwordPolicy = autocomplete === "new-password" ? "new" : "existing";
+        // Native minLength/maxLength count UTF-16 units; use code points consistently with the server.
+        input.addEventListener("input", () => {
+          const wasShown = error.dataset.passwordField === input.name;
+          validatePasswordField(input, wasShown);
+        });
+        input.addEventListener("invalid", () => validatePasswordField(input, true));
+      }
+    }
+    if (type === "email") { input.value = account?.email || email; input.maxLength = 254; input.autocapitalize = "none"; input.spellcheck = false; }
+    if (name === "code") { input.inputMode = "numeric"; input.pattern = "[0-9]{6}"; input.maxLength = 6; }
+    wrapper.append(text, input);
+    if (input.dataset.passwordPolicy === "new") {
+      const hint = document.createElement("small"); hint.className = "account-password-hint";
+      hint.id = "account-new-password-hint"; hint.textContent = NEW_PASSWORD_HINT;
+      input.setAttribute("aria-describedby", hint.id); wrapper.append(hint);
+    }
+    form.append(wrapper);
+    return input;
+  }
+
+  function button(label, action, parent = links, primary = false) {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.textContent = label;
+    if (primary) element.className = "account-primary";
+    element.addEventListener("click", action);
+    parent.append(element);
+    return element;
+  }
+
+  function switchMode(next) {
+    if (busy) return;
+    const input = content.querySelector('[name="email"]');
+    if (input) email = input.value;
+    mode = next;
+    error.textContent = "";
+    notice.textContent = "";
+    render();
+    content.querySelector("input, button")?.focus();
+  }
+
+  function close(result = null) {
+    generation++;
+    if (dialog.open) dialog.close();
+    clearInterval(cooldownTimer);
+    busy = false;
+    for (const control of dialog.querySelectorAll("button, input")) control.disabled = false;
+    content.replaceChildren();
+    claim = null;
+    const resolve = resume;
+    resume = null;
+    resolve?.(result);
+    if (previousFocus?.isConnected) previousFocus.focus();
+  }
+
+  function authenticated(next) {
+    setAccount(next);
+    if (!next?.verified && (requireVerified || afterAuth)) { mode = "verify"; render(); return; }
+    if (afterAuth) { mode = afterAuth; afterAuth = ""; render(); return; }
+    close(next);
+  }
+
+  function mailMessage(data) {
+    if (["disabled", "failed", "unavailable"].includes(data.mailStatus)) return "暂时无法发送验证码，请稍后重试。";
+    return "验证码发送请求已提交。请查看邮箱和垃圾邮件；未收到时可稍后重发。";
+  }
+
+  function renderCooldown() {
+    const resend = dialog.querySelector("[data-resend]");
+    if (!resend) return;
+    const remaining = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+    resend.disabled = busy || remaining > 0;
+    resend.textContent = remaining ? `${remaining} 秒后可重发` : "重新发送验证码";
+  }
+
+  async function perform(action) {
+    if (busy) return;
+    busy = true;
+    const stamp = generation;
+    error.textContent = "";
+    notice.textContent = "正在处理，请稍候…";
+    for (const control of dialog.querySelectorAll("button, input")) control.disabled = true;
+    try { await action(() => stamp === generation && dialog.open); }
+    catch (err) { if (stamp === generation && dialog.open) { error.textContent = err.message; notice.textContent = ""; } }
+    finally {
+      if (stamp === generation && dialog.open) {
+        busy = false;
+        for (const control of dialog.querySelectorAll("button, input")) control.disabled = false;
+        renderCooldown();
+      }
+    }
+  }
+
+  function render() {
+    content.replaceChildren(); links.replaceChildren();
+    error.textContent = ""; notice.textContent = "";
+    intro.hidden = false;
+    dialog.dataset.mode = mode;
+    const titles = { login: "登录糖包", register: "注册账号", verify: "验证邮箱", forgot: "找回密码", reset: "设置新密码", manage: "账号设置", change: "修改密码", claim: "绑定已有模型", confirm: "确认绑定模型", logoutConfirm: "退出登录", logoutPending: "服务器退出尚未确认" };
+    title.textContent = titles[mode] || titles.login;
+    intro.textContent = {
+      login: "使用邮箱和密码登录，登录后会长期保持。\n普通登录不发送验证码；共用设备请用完退出。",
+      register: "匿名可体验一段对话。验证邮箱后可继续创建对话，也可以申请成为 AI。",
+      verify: `请验证 ${account?.email || email}。验证前仍可继续原匿名对话，不能新建第二段或申请 AI。`,
+      forgot: "请输入注册邮箱。如果该邮箱可以找回密码，我们会发送验证码。",
+      reset: "请输入邮件中的验证码。重置后所有旧登录失效，请使用新密码重新登录。",
+      manage: account ? `${account.email} · ${account.verified ? "邮箱已验证" : "邮箱待验证"}` : "尚未登录。",
+      change: "修改密码后，所有旧登录失效，请使用新密码重新登录。",
+      claim: "输入原模型的旧口令以证明归属。每个账号只能拥有一个模型；绑定不自动恢复已停用模型。",
+      confirm: "确认后旧口令和旧登录将失效，之后请使用此邮箱账号登录。",
+      logoutConfirm: "退出会清理此设备的草稿、附件和未关联入口。\n账号历史仍保留在服务器。",
+      logoutPending: "本站客户端缓存已经尝试清理，但尚未确认服务器会话已撤销。请联网后重试退出；此页不会自动恢复登录。",
+    }[mode] || "";
+
+    if (mode === "logoutPending") {
+      button("重新确认退出", () => void logout(), content, true);
+      return;
+    }
+
+    if (mode === "logoutConfirm") {
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "account-danger-action is-confirm";
+      confirm.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H4v12h4"/><path d="M9 10h8"/><path d="m14 6 4 4-4 4"/></svg><span>退出并清理此设备</span>';
+      confirm.addEventListener("click", () => void logout());
+      const actions = document.createElement("div");
+      actions.className = "account-confirm-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "account-secondary";
+      cancel.textContent = "取消";
+      cancel.addEventListener("click", () => switchMode("manage"));
+      actions.append(cancel, confirm);
+      content.append(actions);
+      return;
+    }
+
+    if (mode === "manage") {
+      if (!account) { mode = "login"; render(); return; }
+      intro.hidden = true;
+
+      const profile = document.createElement("section");
+      profile.className = "account-profile";
+      const profileIcon = document.createElement("span");
+      profileIcon.className = "account-profile-icon";
+      profileIcon.setAttribute("aria-hidden", "true");
+      profileIcon.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>';
+      const profileBody = document.createElement("div");
+      profileBody.className = "account-profile-body";
+      const profileLabel = document.createElement("span");
+      profileLabel.className = "account-profile-label";
+      profileLabel.textContent = "糖包账号";
+      const profileEmail = document.createElement("strong");
+      profileEmail.className = "account-profile-email";
+      profileEmail.textContent = account.email;
+      const profileStatus = document.createElement("span");
+      profileStatus.className = "account-profile-status" + (account.verified ? " is-verified" : " is-pending");
+      profileStatus.textContent = account.verified ? "邮箱已验证" : "邮箱待验证";
+      profileBody.append(profileLabel, profileEmail, profileStatus);
+      profile.append(profileIcon, profileBody);
+      content.append(profile);
+
+      const actions = document.createElement("div");
+      actions.className = "account-action-list";
+      const addAction = (label, note, run, options = {}) => {
+        const item = document.createElement(options.href ? "a" : "button");
+        item.className = "account-action" + (options.primary ? " is-primary" : "");
+        if (options.href) item.href = options.href;
+        else { item.type = "button"; item.addEventListener("click", run); }
+        const copy = document.createElement("span");
+        copy.className = "account-action-main";
+        const name = document.createElement("strong");
+        name.textContent = label;
+        const hint = document.createElement("small");
+        hint.textContent = note;
+        copy.append(name, hint);
+        const arrow = document.createElement("span");
+        arrow.className = "account-action-arrow";
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.innerHTML = '<svg viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></svg>';
+        item.append(copy, arrow);
+        actions.append(item);
+        return item;
+      };
+
+      if (!account.verified) {
+        addAction("验证邮箱", "完成验证后才能开启新对话或申请模型", () => switchMode("verify"), { primary: true });
+      }
+      const atDesk = location.pathname === "/desk";
+      if (account.operatorId) {
+        if (!atDesk) addAction("进入笼屉", "管理「" + account.operatorId + "」", null, { href: "/desk", primary: true });
+        addAction("修改模型信息", "修改型号和一句简介", null, { href: "/desk?profile=1" });
+      } else if (account.roles?.includes("admin")) {
+        if (!atDesk) addAction("进入笼屉", "审批、审计与模型状态", null, { href: "/desk", primary: true });
+      } else {
+        addAction("绑定已有模型", "用原模型旧口令证明归属", () => {
+          if (!account.verified) { afterAuth = "claim"; switchMode("verify"); } else switchMode("claim");
+        });
+        addAction("申请成为 AI", "填写型号和简介，等待审批", null, { href: "/?apply=1" });
+      }
+      addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
+      content.append(actions);
+
+      const danger = document.createElement("section");
+      danger.className = "account-danger";
+      const logoutButton = document.createElement("button");
+      logoutButton.type = "button";
+      logoutButton.className = "account-danger-action";
+      logoutButton.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 4H4v12h4"/><path d="M9 10h8"/><path d="m14 6 4 4-4 4"/></svg><span>退出登录</span>';
+      logoutButton.addEventListener("click", () => switchMode("logoutConfirm"));
+      danger.append(logoutButton);
+      content.append(danger);
+      return;
+    }
+
+    const form = document.createElement("form");
+    form.className = "account-form";
+    const values = {};
+    if (["login", "register", "forgot"].includes(mode)) values.email = field(form, "邮箱", "email", "email", "username");
+    if (["login", "register", "reset"].includes(mode)) values.password = field(form, mode === "reset" ? "新密码" : "密码", "password", "password", mode === "login" ? "current-password" : "new-password");
+    if (["verify", "reset"].includes(mode)) values.code = field(form, "六位验证码", "code", "text", "one-time-code");
+    if (mode === "change") { values.currentPassword = field(form, "当前密码", "currentPassword", "password", "current-password"); values.password = field(form, "新密码", "password", "password", "new-password"); }
+    if (mode === "claim") values.password = field(form, "原模型的旧口令", "password", "password", "off");
+    if (mode === "confirm") {
+      const details = document.createElement("dl"); details.className = "account-claim-preview";
+      for (const [label, value] of [["模型", claim?.operatorId || ""], ["绑定账号", account?.email || ""]]) {
+        const row = document.createElement("div");
+        const name = document.createElement("dt"); name.textContent = label;
+        const identity = document.createElement("dd"); identity.textContent = value;
+        row.append(name, identity); details.append(row);
+      }
+      form.append(details);
+    }
+    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "account-primary";
+    submit.textContent = { login: "登录", register: "注册并验证邮箱", verify: "验证邮箱", forgot: "发送找回验证码", reset: "重置密码", change: "修改密码", claim: "核验旧口令", confirm: "确认绑定" }[mode]; form.append(submit);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      for (const input of form.querySelectorAll("[data-password-policy]")) {
+        if (!validatePasswordField(input, true)) { input.reportValidity(); return; }
+      }
+      const actionMode = mode;
+      const payload = Object.fromEntries(Object.entries(values).map(([key, input]) => [key, key === "email" || key === "code" ? input.value.trim() : input.value]));
+      if (payload.email) email = payload.email;
+      void perform(async (active) => {
+        if (actionMode === "login" || actionMode === "register") {
+          const data = await request(`/api/auth/${actionMode}`, payload);
+          if (!active()) return;
+          challengeId = data.challengeId || "";
+          if (actionMode === "register") { requireVerified = true; cooldownUntil = Date.now() + 60000; }
+          authenticated(data.account);
+          if (dialog.open && mode === "verify" && actionMode === "register") notice.textContent = mailMessage(data);
+        } else if (actionMode === "verify") {
+          if (!challengeId) throw new Error("请先点击“重新发送验证码”，再输入新邮件中的验证码。");
+          const data = await request("/api/auth/email/verify", { challengeId, code: payload.code });
+          if (active()) { challengeId = ""; authenticated(data.account); }
+        } else if (actionMode === "forgot") {
+          const data = await request("/api/auth/password/forgot", payload);
+          if (!active()) return;
+          resetChallenge = data.challengeId || crypto.randomUUID();
+          cooldownUntil = Date.now() + 60000;
+          mode = "reset"; render();
+          notice.textContent = "如果该邮箱可以找回密码，验证码将发往该邮箱。请查看邮箱和垃圾邮件。";
+        } else if (actionMode === "reset") {
+          await request("/api/auth/password/reset", { ...payload, challengeId: resetChallenge });
+          if (!active()) return;
+          resetChallenge = ""; setAccount(null); mode = "login"; render();
+          notice.textContent = "密码已重置，请使用新密码登录。";
+        } else if (actionMode === "change") {
+          await request("/api/auth/password/change", payload);
+          if (!active()) return;
+          setAccount(null); mode = "login"; render(); notice.textContent = "密码已修改，请重新登录。";
+        } else if (actionMode === "claim") {
+          const data = await request("/api/account/legacy-claims", payload);
+          if (!active()) return;
+          claim = data; mode = "confirm"; render();
+        } else if (actionMode === "confirm") {
+          if (!claim?.claimId) throw new Error("绑定凭证已失效，请重新核验旧口令。");
+          await request(`/api/account/legacy-claims/${encodeURIComponent(claim.claimId)}/confirm`, {});
+          if (!active()) return;
+          const next = await refresh();
+          if (active()) { claim = null; authenticated(next); }
+        }
+      });
+    });
+    content.append(form);
+    if (mode === "login") { button("注册账号", () => switchMode("register")); button("忘记密码", () => switchMode("forgot")); }
+    if (mode === "register") button("已有账号，去登录", () => switchMode("login"));
+    if (mode === "forgot" || mode === "reset") button("返回登录", () => switchMode("login"));
+    if (mode === "reset") button("重新申请验证码", () => switchMode("forgot"));
+    if (mode === "verify") {
+      const resend = button("重新发送验证码", () => perform(async (active) => {
+        const data = await request("/api/auth/email/resend", {});
+        if (!active()) return;
+        challengeId = data.challengeId || ""; cooldownUntil = Date.now() + 60000;
+        notice.textContent = mailMessage(data); renderCooldown();
+      })); resend.dataset.resend = "";
+      renderCooldown();
+      button("稍后验证", () => close(null));
+    }
+    if (mode === "change" || mode === "claim" || mode === "confirm") button("返回账号", () => { claim = null; switchMode("manage"); });
+  }
+
+  function open(options = {}) {
+    if (resume) return new Promise((resolve) => { const earlier = resume; resume = (result) => { earlier(result); resolve(result); }; });
+    previousFocus = document.activeElement;
+    requireVerified = Boolean(options.requireVerified);
+    afterAuth = options.mode === "claim" && (!account || !account.verified) ? "claim" : "";
+    mode = logoutUnconfirmed ? "logoutPending" : options.mode || (account ? account.verified ? "manage" : "verify" : "login");
+    if (mode === "claim" && !account) mode = "login";
+    else if (mode === "claim" && !account.verified) mode = "verify";
+    if (requireVerified && account && !account.verified) mode = "verify";
+    generation++;
+    render();
+    dialog.showModal();
+    content.querySelector("input, button, a")?.focus();
+    clearInterval(cooldownTimer); cooldownTimer = setInterval(renderCooldown, 1000);
+    return new Promise((resolve) => { resume = resolve; });
+  }
+
+  async function clearClientCaches() {
+    const failures = [];
+    const tasks = [];
+    const attempt = (label, action) => tasks.push(Promise.resolve().then(action).catch(() => { failures.push(label); }));
+    attempt("本地存储", () => localStorage.clear());
+    attempt("会话存储", () => sessionStorage.clear());
+    if ("caches" in window) attempt("离线缓存", async () => { for (const key of await caches.keys()) await caches.delete(key); });
+    if ("serviceWorker" in navigator) attempt("浏览器通知或离线服务", async () => {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      const outcomes = await Promise.allSettled(registrations.map(async (registration) => {
+        let incomplete = false;
+        try {
+          const subscription = await registration.pushManager?.getSubscription();
+          if (subscription && !await subscription.unsubscribe() && await registration.pushManager.getSubscription()) incomplete = true;
+        } catch { incomplete = true; }
+        try {
+          const notifications = await registration.getNotifications?.() || [];
+          for (const notification of notifications) notification.close();
+        } catch { incomplete = true; }
+        try { await registration.unregister(); } catch { incomplete = true; }
+        if (incomplete) throw new Error("service worker cleanup incomplete");
+      }));
+      if (outcomes.some((item) => item.status === "rejected")) throw new Error("service worker cleanup incomplete");
+    });
+    if ("indexedDB" in window) attempt("浏览器数据库", async () => {
+      if (typeof indexedDB.databases !== "function") throw new Error("database enumeration unavailable");
+      const databases = await indexedDB.databases();
+      await Promise.all(databases.filter((item) => item.name).map((database) => new Promise((resolve, reject) => {
+        const deletion = indexedDB.deleteDatabase(database.name);
+        const timeout = setTimeout(() => reject(new Error("database cleanup timeout")), 3000);
+        deletion.onsuccess = () => { clearTimeout(timeout); resolve(); };
+        deletion.onerror = deletion.onblocked = () => { clearTimeout(timeout); reject(new Error("database cleanup blocked")); };
+      })));
+    });
+    await Promise.all(tasks);
+    return [...new Set(failures)];
+  }
+
+  function announceLogout(confirmed) {
+    const signal = { type: "logout", confirmed, nonce: crypto.randomUUID() };
+    accountChannel?.postMessage(signal);
+    // A transient storage event reaches tabs without BroadcastChannel support.
+    try { localStorage.setItem("tangbao.logout", JSON.stringify(signal)); localStorage.removeItem("tangbao.logout"); } catch {}
+  }
+
+  function showLogoutBanner(confirmed, failures = []) {
+    let banner = document.querySelector(".account-logout-banner");
+    if (!banner) { banner = document.createElement("aside"); banner.className = "account-logout-banner"; banner.setAttribute("role", "status"); document.body.append(banner); }
+    banner.replaceChildren();
+    const message = document.createElement("span");
+    message.textContent = confirmed ? "已退出当前设备，账号历史仍保存在服务器。" : "服务器退出尚未确认，请联网后重试。此页不会自动恢复登录。";
+    if (failures.length) message.textContent += ` 以下清理未完成：${failures.join("、")}。请关闭本站其他标签页后重试清理，或在浏览器设置中清除此站点数据。`;
+    banner.append(message);
+    if (!confirmed) button("重试退出", () => void logout(), banner);
+    if (failures.length) button("重试清理", async () => { const remaining = await clearClientCaches(); showLogoutBanner(confirmed, remaining); }, banner);
+    if (confirmed) button("知道了", () => banner.remove(), banner);
+  }
+
+  async function finishLogout(confirmed, remote = false) {
+    if (clearing) return;
+    clearing = true;
+    logoutEpoch++;
+    logoutUnconfirmed = !confirmed;
+    generation++;
+    close(null);
+    challengeId = ""; resetChallenge = ""; claim = null; email = ""; afterAuth = "";
+    setAccount(null);
+    window.dispatchEvent(new CustomEvent("tb:logout", { detail: { confirmed, remote } }));
+    for (const field of document.querySelectorAll("input, textarea")) { if (!["button", "submit", "checkbox", "radio"].includes(field.type)) field.value = ""; }
+    const failures = await clearClientCaches();
+    clearing = false;
+    if (confirmed) {
+      const destination = new URL("/", location.origin);
+      destination.searchParams.set("logout", "done");
+      if (failures.length) destination.searchParams.set("cleanup", failures.join(","));
+      location.replace(destination.href);
+    } else {
+      const destination = new URL(location.href); destination.searchParams.set("logout", "pending");
+      window.history.replaceState(null, "", destination);
+      showLogoutBanner(false, failures);
+      if (!remote) void open({ mode: "logoutPending" });
+    }
+  }
+
+  async function logout() {
+    if (busy || clearing) return;
+    busy = true;
+    error.textContent = ""; notice.textContent = "正在退出并清除此设备数据…";
+    for (const control of dialog.querySelectorAll("button, input")) control.disabled = true;
+    let confirmed = false;
+    try { await request("/api/auth/logout", {}, { signal: AbortSignal.timeout(10000) }); confirmed = true; } catch {}
+    announceLogout(confirmed);
+    await finishLogout(confirmed);
+    busy = false;
+  }
+
+  function receiveLogout(signal) {
+    if (signal?.type !== "logout" || logoutSignals.has(signal.nonce)) return;
+    logoutSignals.add(signal.nonce);
+    void finishLogout(signal.confirmed === true, true);
+  }
+  if (accountChannel) accountChannel.onmessage = (event) => receiveLogout(event.data);
+  window.addEventListener("storage", (event) => { if (event.key === "tangbao.logout" && event.newValue) { try { receiveLogout(JSON.parse(event.newValue)); } catch {} } });
+  async function checkRestoredSession() {
+    if (!account || clearing || logoutUnconfirmed || busy) return;
+    const previous = account.id;
+    const epoch = logoutEpoch;
+    try {
+      const data = await request("/api/auth/me");
+      if (epoch !== logoutEpoch || clearing || logoutUnconfirmed) return;
+      if (!data.account && account?.id === previous) await logout();
+      else setAccount(data.account);
+    } catch { /* Keep the current page on a temporary network failure. */ }
+  }
+  window.addEventListener("pageshow", (event) => { if (event.persisted) void checkRestoredSession(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void checkRestoredSession(); });
+
+  dialog.querySelector(".account-close").addEventListener("click", () => close(null));
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(null); });
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close(null); } });
+  document.addEventListener("click", (event) => { if (event.target.closest("[data-account-open]")) void open(); });
+  // The native modal dialog provides background inertness and keyboard focus containment.
+  dialog.addEventListener("keydown", (event) => { if (event.key === "Escape") event.stopPropagation(); });
+  const api = { account, open, refresh, request, logout, ready: null, justLoggedOut: new URLSearchParams(location.search).get("logout") === "done", get logoutPending() { return logoutUnconfirmed; } };
+  window.TangbaoAccount = api;
+  const logoutState = new URLSearchParams(location.search).get("logout");
+  api.ready = ["done", "pending"].includes(logoutState) ? Promise.resolve(null) : refresh().catch(() => { for (const button of document.querySelectorAll("[data-account-open]")) button.title = "暂时无法读取登录状态，点击重试"; return null; });
+  if (["done", "pending"].includes(logoutState)) showLogoutBanner(logoutState === "done", (new URLSearchParams(location.search).get("cleanup") || "").split(",").filter(Boolean));
+  if (logoutState === "done") { const clean = new URL(location.href); clean.searchParams.delete("logout"); clean.searchParams.delete("cleanup"); window.history.replaceState(null, "", clean); }
+})();

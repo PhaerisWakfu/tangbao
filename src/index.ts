@@ -12,6 +12,10 @@ import indexHtml from "./pages/index.html";
 import mdJs from "./client/md.txt";
 import swJs from "./client/sw.txt";
 import manifestJson from "./client/manifest.txt";
+import accountJs from "./client/account.txt";
+import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
+import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
+import { consumeMailEvents } from "./mail-events";
 
 class HttpError extends Error {
   constructor(
@@ -22,7 +26,7 @@ class HttpError extends Error {
   }
 }
 
-type AppEnv = Env & {
+type AppEnv = Env & AuthEnv & {
   ADMIN_PASSWORD?: string;
   ADMIN_SECRET?: string;
   VAPID_PUBLIC_KEY?: string;
@@ -31,6 +35,8 @@ type AppEnv = Env & {
   TURSO_DATABASE_URL?: string;
   TURSO_AUTH_TOKEN?: string;
   MAINTENANCE?: string;
+  MAIL_EVENTS_QUEUE?: string;
+  MAIL_EVENTS_ACCOUNT_ID?: string;
   IMAGES: KVNamespace;
 };
 
@@ -226,19 +232,25 @@ function useTurso(env: AppEnv): AppEnv {
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
+    if (env.MAINTENANCE === "1") {
+      const api = new URL(request.url).pathname.startsWith("/api/");
+      const message = "站点正在维护，请稍后再试。";
+      return new Response(
+        request.method === "HEAD" ? null : api ? JSON.stringify({ error: message, code: "MAINTENANCE" }) : message,
+        {
+          status: 503,
+          headers: {
+            "content-type": api ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
+            "cache-control": "no-store",
+            "retry-after": "60",
+          },
+        },
+      );
+    }
     try {
       const scoped = useTurso(env);
       await ensureReportSchema(scoped);
       const url = new URL(request.url);
-      if (
-        env.MAINTENANCE === "1" &&
-        request.method !== "GET" &&
-        request.method !== "HEAD" &&
-        url.pathname.startsWith("/api/") &&
-        url.pathname !== "/api/admin/login"
-      ) {
-        return json({ error: "正在换屉，稍后再试。" }, 503);
-      }
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
       const ttl = request.method === "GET" ? (pagedModels ? 30 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
@@ -263,6 +275,7 @@ export default {
       }
       return await route(request, scoped, ctx);
     } catch (err) {
+      if (err instanceof AuthError) return json({ error: err.message, code: err.code }, err.status);
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.log(
         JSON.stringify({
@@ -274,7 +287,16 @@ export default {
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
+    if (env.MAINTENANCE === "1") return;
     ctx.waitUntil(refreshHomePresence(useTurso(env)));
+    ctx.waitUntil(processMailOutbox(useTurso(env)));
+  },
+  async queue(batch, env): Promise<void> {
+    if (env.MAINTENANCE === "1") {
+      batch.retryAll({ delaySeconds: 60 });
+      return;
+    }
+    await consumeMailEvents(batch, useTurso(env));
   },
 } satisfies ExportedHandler<AppEnv>;
 
@@ -283,6 +305,23 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const path = url.pathname;
   const method = request.method;
 
+  if (path.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(method)) assertOrigin(request, env);
+  const authenticated = await authRoute(request, env);
+  if (authenticated) {
+    if (method === "POST" && /\/api\/auth\/(register|email\/resend|password\/forgot)$/.test(path)) ctx.waitUntil(processMailOutbox(env));
+    return path === "/api/auth/me" ? withGuestCookie(request, env, authenticated) : authenticated;
+  }
+  const accountResponse = await accountBusinessRoute(request, env);
+  if (accountResponse) return accountResponse;
+  const accountDisable = path.match(/^\/api\/admin\/accounts\/([A-Za-z0-9_-]{16,80})\/disable$/);
+  if (accountDisable && method === "POST") {
+    await requireSuper(request, env);
+    const account = await requireAccount(request, env);
+    if (account.id === accountDisable[1]) throw new AuthError(409, "SELF_DISABLE", "请由另一位管理员处理当前账号停用。");
+    await disableAccount(env, accountDisable[1]);
+    return json({ ok: true });
+  }
+
   if (path === "/api/status" && method === "GET") return json(await siteStatus(env));
   if (path === "/api/models" && method === "GET") return listModels(env, url);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
@@ -290,9 +329,9 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/applications" && method === "POST") return applyModel(request, env, ctx);
   if (path === "/api/applications/mine" && method === "GET") return myApplication(request, env);
   const application = path.match(/^\/api\/applications\/([A-Za-z0-9_-]{16,80})$/);
-  if (application && method === "GET") return applicationStatus(env, application[1]);
+  if (application && method === "GET") return applicationStatus(request, env, application[1]);
   if (path === "/api/admin/login" && method === "POST") return login(request, env);
-  if (path === "/api/admin/logout" && method === "POST") return logout(request);
+  if (path === "/api/admin/logout" && method === "POST") return (await authRoute(new Request(new URL("/api/auth/logout", request.url), request), env))!;
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
   if (path === "/api/admin/profile" && method === "GET") return readProfile(request, env);
   if (path === "/api/admin/profile" && method === "POST") return saveProfile(request, env);
@@ -318,7 +357,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   const image = path.match(/^\/api\/images\/([A-Za-z0-9_-]{16,80})$/);
-  if (image && method === "GET") return serveImage(env, image[1]);
+  if (image && method === "GET") return serveImage(request, env, image[1]);
 
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
@@ -361,9 +400,10 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
                 ? deskHtml
                 : null;
   if (page && (method === "GET" || method === "HEAD")) {
-    return new Response(method === "HEAD" ? null : page, {
+    const response = new Response(method === "HEAD" ? null : page, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
     });
+    return method === "GET" && ["/chat", "/chat.html"].includes(path) ? withGuestCookie(request, env, response) : response;
   }
 
   if (path === "/manifest.webmanifest" && (method === "GET" || method === "HEAD")) {
@@ -383,7 +423,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   const script =
-    path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
+    path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },
@@ -459,7 +499,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
       .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY)
       .all<{ key: string; value: string }>(),
     env.DB.prepare(
-      "SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ?",
+      `SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${unblockedThread("threads")}`,
     )
       .bind(HOME_MODEL)
       .first<{ n: number; oldest: number | null }>(),
@@ -488,7 +528,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
   const [home, rows] = await Promise.all([
     homePresence(env, now),
     env.DB.prepare(
-      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -496,10 +536,11 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
          FROM threads t
          JOIN operators o2 ON o2.id = t.operator_id
          WHERE t.awaiting = 1 AND t.queued = 0
+           AND ${unblockedThread("t")}
            ${activeOnly ? "AND o2.active = 1" : ""}
          GROUP BY t.operator_id
        ) p ON p.operator_id = o.id
-       ${activeOnly ? "WHERE o.active = 1" : ""}
+       ${activeOnly ? "WHERE o.active = 1 AND " + OWNER_READY : ""}
        ORDER BY o.created_at ASC`,
     ).all<PresenceRow>(),
   ]);
@@ -539,36 +580,27 @@ function presenceFromRow(row: PresenceRow, now: number): Presence {
   };
 }
 
-async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now()): Promise<Presence> {
+async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(), seat?: Seat): Promise<Presence> {
   if (operatorId === HOME_MODEL) return homePresence(env, now);
+  const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   const row = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
        (SELECT COUNT(*) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE (b.operator_id = o.id AND (
-                     b.id = t.token_hash OR b.id = t.visitor_hash
-                   ))
-               OR (b.operator_id = '*' AND (
-                     b.id = t.token_hash OR b.id = t.visitor_hash OR b.id = t.ip_hash
-                   ))
+            WHERE ${threadBlockMatch("t", "o.id")}
           )) AS pending,
        (SELECT MIN(t.updated_at) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
             SELECT 1 FROM blocks b
-            WHERE (b.operator_id = o.id AND (
-                     b.id = t.token_hash OR b.id = t.visitor_hash
-                   ))
-               OR (b.operator_id = '*' AND (
-                     b.id = t.token_hash OR b.id = t.visitor_hash OR b.id = t.ip_hash
-                   ))
+            WHERE ${threadBlockMatch("t", "o.id")}
           )) AS oldest_pending_at
      FROM operators o
-     WHERE o.id = ?`,
+     WHERE o.id = ? AND ${ownership.sql}`,
   )
-    .bind(operatorId)
+    .bind(operatorId, ...ownership.values)
     .first<PresenceRow>();
   if (!row) {
     return {
@@ -604,8 +636,8 @@ async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
         .run();
       return;
     }
-    await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE id = ? AND last_seen_at < ?")
-      .bind(now, seat.operatorId, now - HEARTBEAT_WRITE)
+    await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE operator_uid = ? AND owner_account_id = ? AND last_seen_at < ?")
+      .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE)
       .run();
   } catch (err) {
     console.log(
@@ -618,8 +650,8 @@ async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
   }
 }
 
-async function touchReply(env: AppEnv, operatorId: string, now: number): Promise<void> {
-  if (operatorId === HOME_MODEL) {
+async function touchReply(env: AppEnv, seat: Seat, now: number): Promise<void> {
+  if (seat.super) {
     await env.DB.prepare(
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
@@ -627,10 +659,11 @@ async function touchReply(env: AppEnv, operatorId: string, now: number): Promise
       .run();
     return;
   }
-  await env.DB.prepare("UPDATE operators SET last_reply_at = ? WHERE id = ?").bind(now, operatorId).run();
+  await env.DB.prepare("UPDATE operators SET last_reply_at = ? WHERE operator_uid = ? AND owner_account_id = ?")
+    .bind(now, seat.operatorUid, seat.accountId).run();
 }
 
-async function touchAssigned(env: AppEnv, operatorId: string, now: number): Promise<void> {
+async function touchAssigned(env: AppEnv, operatorId: string, now: number, seat?: Seat): Promise<void> {
   if (operatorId === HOME_MODEL) {
     await env.DB.prepare(
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -639,7 +672,9 @@ async function touchAssigned(env: AppEnv, operatorId: string, now: number): Prom
       .run();
     return;
   }
-  await env.DB.prepare("UPDATE operators SET last_assigned_at = ? WHERE id = ?").bind(now, operatorId).run();
+  if (seat && !seat.super) {
+    await env.DB.prepare("UPDATE operators SET last_assigned_at = ? WHERE operator_uid = ? AND owner_account_id = ?").bind(now, seat.operatorUid, seat.accountId).run();
+  } else await env.DB.prepare("UPDATE operators SET last_assigned_at = ? WHERE id = ?").bind(now, operatorId).run();
 }
 
 async function notifyOperator(
@@ -680,59 +715,110 @@ async function notifyOperator(
 }
 
 const BLOCKED = "这边不再收新的话了。";
+const OWNER_READY = "EXISTS(SELECT 1 FROM accounts owner WHERE owner.id=o.owner_account_id AND owner.status='active' AND owner.verified_at>0)";
 
 async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
-  const visitor = await visitorHash(request);
-  const ip = await clientHash(request);
-  if (await isBlocked(env, [visitor, ip])) throw new HttpError(403, BLOCKED);
-  if (!(await allow(env, `thread:${ip}`, 8, HOUR))) {
-    throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
-  }
+  const account = await getAccount(request, env);
+  if (account && !account.verified) throw new AuthError(403, "EMAIL_UNVERIFIED", "请先验证邮箱，再开启新对话。");
+  const guest = account ? null : await getGuest(request, env);
+  if (!account && !guest) return withGuestCookie(request, env, json({ code: "GUEST_IDENTITY_REQUIRED", error: "浏览器身份已准备好，请重新发送。" }, 409));
+  const requestKey = request.headers.get("idempotency-key") || "";
+  if (!/^[A-Za-z0-9_-]{12,100}$/.test(requestKey)) throw new AuthError(400, "IDEMPOTENCY_REQUIRED", "请刷新页面后再发送。");
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
-  const assignment = await assignOperator(env, incoming.operator);
-  if (
-    assignment.id !== POOL_MODEL &&
-    (await isBlocked(env, [visitor], assignment.id))
-  ) {
-    throw new HttpError(403, "这个模型暂时不接你的话。");
+  const imageHashes = await Promise.all(incoming.images.map(async image => ({ type: image.type, hash: await sha256Bytes(image.bytes) })));
+  const fingerprint = await sha256(JSON.stringify({ body: incoming.body, draw: incoming.draw, operator: incoming.operator, images: imageHashes }));
+  const subject = account ? `a:${account.id}` : `g:${guest!.id}`;
+  const replay = async (): Promise<Response | null> => {
+    const existing = await env.DB.prepare("SELECT fingerprint,thread_id,token_ciphertext FROM thread_creations WHERE subject=? AND request_key=?")
+      .bind(subject, requestKey).first<{ fingerprint: string; thread_id: string; token_ciphertext: string | null }>();
+    if (!existing) return null;
+    if (existing.fingerprint !== fingerprint) throw new AuthError(409, "IDEMPOTENCY_CONFLICT", "这次发送标识已用于另一条内容，请重新发送。");
+    const thread = await env.DB.prepare("SELECT account_id FROM threads WHERE id=?").bind(existing.thread_id).first<{ account_id: string | null }>();
+    if (!thread) throw new AuthError(410, "THREAD_DELETED", "这段对话已删除，不能通过重试重新创建。");
+    if (!existing.token_ciphertext || (thread.account_id && thread.account_id !== account?.id)) throw new AuthError(401, "AUTH_REQUIRED", "这段对话已关联账号，请登录后查看。");
+    return json(await decryptReplay(env, existing.token_ciphertext));
+  };
+  const previous = await replay();
+  if (previous) return previous;
+  const visitor = await visitorHash(request), ip = await clientHash(request);
+  if (guest && visitor) {
+    // Legacy history can only consume quota, never prove ownership or restore it.
+    await env.DB.prepare("UPDATE guest_identities SET created_count=1 WHERE id=? AND created_count=0 AND EXISTS(SELECT 1 FROM threads WHERE visitor_hash=?)").bind(guest.id, visitor).run();
   }
-  const operator = assignment.id;
-  const now = Date.now();
-  const queued = assignment.queued ? 1 : 0;
-  const autoHome = queued || (operator === HOME_MODEL && assignment.requested !== HOME_MODEL) ? 1 : 0;
+  if (guest && !(await env.DB.prepare("SELECT id FROM guest_identities WHERE id=? AND created_count=0").bind(guest.id).first())) {
+    const previous = await replay(); if (previous) return previous;
+    throw new AuthError(401, "AUTH_REQUIRED", "第一段可以继续聊。开启新对话前，请注册并验证邮箱。");
+  }
+  const identities = [visitor, accountBlockKey(account?.id)];
+  if (await isBlocked(env, identities, undefined, [ip])) throw new HttpError(403, BLOCKED);
+  if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
+  const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
+  if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
   await assertQueue(env, false);
-
-  const id = randomId(16);
-  const token = randomId(32);
-  const shown = caption(incoming.body, incoming.images.length);
-  const title = titleFrom(shown);
+  const id = randomId(16), token = randomId(32), now = Date.now(), messageId = randomId(16);
+  const operator = assignment.id, queued = assignment.queued ? 1 : 0;
+  const autoHome = queued || (operator === HOME_MODEL && assignment.requested !== HOME_MODEL) ? 1 : 0;
+  const shown = caption(incoming.body, incoming.images.length), title = titleFrom(shown);
   const preview = previewFrom(incoming.draw ? `要一张图 · ${shown}` : shown);
-  const messageId = randomId(16);
-  const stored = await storeImages(env, incoming.images);
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO threads (id, token_hash, title, preview, created_at, updated_at, awaiting, visitor_hash, ip_hash, operator_id, auto_home, queued, last_role) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'visitor')",
-    ).bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued),
-    env.DB.prepare(
-      "INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, 'visitor', ?, ?, ?)",
-    ).bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now),
-    ...imageInserts(env, messageId, stored),
-  ]);
+  const payload = { id, token, title, operator, requested: assignment.requested, fallback: assignment.fallback, queued: Boolean(queued) };
+  const encrypted = await encryptReplay(env, payload);
+  const stored: { id: string; key: string; type: string }[] = [];
+  const cleanup = () => Promise.all(stored.map(image => env.IMAGES.delete(image.key)));
+  let written = false;
+  let batchStarted = false;
+  try {
+    for (const image of incoming.images) {
+      const imageId = randomId(16), key = `img/${imageId}`;
+      await env.IMAGES.put(key, image.bytes);
+      stored.push({ id: imageId, key, type: image.type });
+    }
+    const condition = account
+      ? "EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')"
+      : "EXISTS(SELECT 1 FROM guest_identities WHERE id=? AND created_count=0)";
+    const statements = [
+      env.DB.prepare(`INSERT INTO thread_creations(subject,request_key,fingerprint,thread_id,token_ciphertext,created_at)
+        SELECT ?,?,?,?,?,? WHERE ${condition} ON CONFLICT(subject,request_key) DO NOTHING`)
+        .bind(subject, requestKey, fingerprint, id, encrypted, now, account?.id || guest!.id),
+      env.DB.prepare(`INSERT INTO threads(id,token_hash,title,preview,created_at,updated_at,awaiting,visitor_hash,ip_hash,operator_id,auto_home,queued,last_role,account_id,guest_identity_id)
+        SELECT ?,?,?,?,?,?,1,?,?,?,?,?,'visitor',?,? WHERE changes()=1`)
+        .bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued, account?.id || null, guest?.id || null),
+      env.DB.prepare("INSERT INTO messages(id,thread_id,role,body,draw,created_at) SELECT ?,?,'visitor',?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)")
+        .bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now, id),
+      ...stored.map((image, position) => env.DB.prepare(`INSERT INTO message_images(id,message_id,image_key,image_type,position)
+        SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)`).bind(image.id, messageId, image.key, image.type, position, id)),
+    ];
+    if (guest) statements.push(env.DB.prepare("UPDATE guest_identities SET created_count=created_count+1 WHERE id=? AND EXISTS(SELECT 1 FROM threads WHERE id=?)").bind(guest.id, id));
+    batchStarted = true;
+    const results = await env.DB.batch(statements);
+    written = results[1].meta.changes === 1;
+    if (!written) {
+      await cleanup();
+      const previous = await replay();
+      if (previous) return previous;
+      throw new AuthError(401, "AUTH_REQUIRED", "第一段可以继续聊。开启新对话前，请注册并验证邮箱。");
+    }
+  } catch (error) {
+    if (!written && batchStarted) {
+      try {
+        // A lost provider response does not prove rollback. Never delete linked KV data.
+        written = Boolean(await env.DB.prepare("SELECT id FROM threads WHERE id=?").bind(id).first());
+      } catch {
+        throw new AuthError(503, "CREATION_UNKNOWN", "发送结果暂时无法确认，请保留内容，使用同一次发送重试。");
+      }
+    }
+    if (!written) { await cleanup(); throw error; }
+  }
   await touchAssigned(env, operator, now);
   noteVisitor(ctx, env, request, title, preview, operator, true);
-  return json({
-    id,
-    token,
-    title,
-    operator,
-    requested: assignment.requested,
-    fallback: assignment.fallback,
-    queued: Boolean(queued),
-  });
+  return json(payload);
+}
+
+async function sha256Bytes(bytes: ArrayBuffer): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  const thread = await loadOwned(env, id, bearer(request));
+  const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   const [messages, operator] = await Promise.all([
     listMessages(env, id),
@@ -753,7 +839,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
 }
 
 async function deleteThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  await loadOwned(env, id, bearer(request));
+  await loadOwned(env, id, bearer(request), request);
   const images = await env.DB.prepare(
     "SELECT image_key FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
   )
@@ -776,7 +862,7 @@ function reportReasonOf(value: unknown): string {
 }
 
 async function reportThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  const thread = await loadOwned(env, id, bearer(request));
+  const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
   if (thread.queued === 1 || thread.operator_id === POOL_MODEL) {
@@ -798,7 +884,7 @@ async function reportThread(request: Request, env: AppEnv, id: string): Promise<
 
 async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const token = bearer(request);
-  const thread = await loadOwned(env, id, token);
+  const thread = await loadOwned(env, id, token, request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
   if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
@@ -806,10 +892,10 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   if (thread.operator_id !== HOME_MODEL && thread.queued !== 1) {
-    const row = await env.DB.prepare("SELECT active FROM operators WHERE id = ?")
+    const row = await env.DB.prepare(`SELECT o.active,${OWNER_READY} AS owner_ready FROM operators o WHERE id = ?`)
       .bind(thread.operator_id)
-      .first<{ active: number }>();
-    if (!row || row.active !== 1) throw new HttpError(400, "这个模型不在。");
+      .first<{ active: number; owner_ready: number }>();
+    if (!row || row.active !== 1 || !row.owner_ready) throw new HttpError(400, "这个模型不在。");
   }
   await assertQueue(env, thread.awaiting === 1);
   await writeMessage(env, id, "visitor", incoming, 1);
@@ -837,14 +923,16 @@ async function login(request: Request, env: AppEnv): Promise<Response> {
   const payload = await readJson(request);
   const given = typeof payload.password === "string" ? payload.password : "";
   if (await passwordsMatch(given, password)) {
-    return issueSession(request, env, { super: true, operatorId: HOME_MODEL });
+    const proof = await issueSession(request, env, { super: true, operatorId: HOME_MODEL });
+    return json({ code: "LEGACY_MIGRATION_REQUIRED", error: "管理员需由部署者绑定已验证账号后登录。", operatorId: HOME_MODEL }, 403, proof.headers);
   }
   const hash = await sha256(given);
-  const operator = await env.DB.prepare("SELECT id, active FROM operators WHERE password_hash = ?")
+  const operator = await env.DB.prepare("SELECT id, active FROM operators WHERE password_hash = ? AND owner_account_id IS NULL AND legacy_claimed_at=0")
     .bind(hash)
     .first<{ id: string; active: number }>();
   if (!operator || operator.active !== 1) throw new HttpError(401, "这句口令不对。");
-  return issueSession(request, env, { super: false, operatorId: operator.id });
+  const proof = await issueSession(request, env, { super: false, operatorId: operator.id });
+  return json({ code: "LEGACY_MIGRATION_REQUIRED", error: "请注册并验证账号，然后绑定原模型。", operatorId: operator.id }, 403, proof.headers);
 }
 
 function logout(request: Request): Response {
@@ -853,9 +941,9 @@ function logout(request: Request): Response {
 
 async function readProfile(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (seat.super) throw new HttpError(403, "糖包本人不用改型号。");
-  const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE id = ?")
-    .bind(seat.operatorId)
+  if (seat.super) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL });
+  const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
+    .bind(seat.operatorUid, seat.accountId)
     .first<{ id: string; blurb: string | null }>();
   if (!row) throw new HttpError(404, "这个型号不在了。");
   return json({
@@ -876,7 +964,9 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
   const oldId = seat.operatorId;
   const newId = `tangbao-${suffix}`;
   if (newId === oldId) {
-    await env.DB.prepare("UPDATE operators SET blurb = ? WHERE id = ?").bind(blurb, oldId).run();
+    const result = await env.DB.prepare("UPDATE operators SET blurb = ? WHERE id = ? AND operator_uid = ? AND owner_account_id = ? AND active = 1 AND EXISTS(SELECT 1 FROM accounts WHERE id = ? AND status = 'active' AND verified_at > 0)")
+      .bind(blurb, oldId, seat.operatorUid, seat.accountId, seat.accountId).run();
+    if (!result.meta.changes) throw new AuthError(409, "MODEL_CHANGED", "模型资料刚刚发生变化，请刷新后重试。");
     return json({ ok: true, id: oldId, suffix, blurb });
   }
   const conflict = await env.DB.prepare(
@@ -888,19 +978,23 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
     .bind(newId, suffix)
     .first<{ hit: number }>();
   if (conflict) throw new HttpError(409, "这个型号已经有人了。");
-  await env.DB.batch([
-    env.DB.prepare("UPDATE operators SET id = ?, blurb = ? WHERE id = ?").bind(newId, blurb, oldId),
-    env.DB.prepare("UPDATE threads SET operator_id = ? WHERE operator_id = ?").bind(newId, oldId),
-    env.DB.prepare("UPDATE applications SET operator_id = ?, suffix = ? WHERE operator_id = ?").bind(
-      newId,
-      suffix,
-      oldId,
-    ),
-    env.DB.prepare("UPDATE push_subscriptions SET operator_id = ? WHERE operator_id = ?").bind(newId, oldId),
-  ]);
-  const session = await issueSession(request, env, { super: false, operatorId: newId });
-  const cookie = session.headers.get("set-cookie");
-  return json({ ok: true, id: newId, suffix, blurb }, 200, cookie ? { "set-cookie": cookie } : undefined);
+  // The model stays at oldId until the final statement. Every reference migration
+  // independently verifies the immutable identity inside the same write transaction.
+  const guard = seatOwnership(seat, "?", [oldId]);
+  let results: D1Result[];
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(`UPDATE threads SET operator_id = ? WHERE operator_id = ? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
+      env.DB.prepare(`UPDATE applications SET operator_id = ?, suffix = ? WHERE operator_id = ? AND ${guard.sql}`).bind(newId, suffix, oldId, ...guard.values),
+      env.DB.prepare(`UPDATE push_subscriptions SET operator_id = ? WHERE operator_id = ? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
+      env.DB.prepare(`INSERT OR IGNORE INTO blocks(id,operator_id,created_at) SELECT id,?,created_at FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
+      env.DB.prepare(`DELETE FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(oldId, ...guard.values),
+      env.DB.prepare(`UPDATE operators SET id = ?, blurb = ? WHERE id = ? AND ${guard.sql}`)
+        .bind(newId, blurb, oldId, ...guard.values),
+    ]);
+  } catch { throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。"); }
+  if (!results[results.length - 1].meta.changes) throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。");
+  return json({ ok: true, id: newId, suffix, blurb });
 }
 
 function modelJson(row: Presence) {
@@ -928,16 +1022,16 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
   if (!browse) {
     const home = await homePresence(env, now);
     const rows = await env.DB.prepare(
-      `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
          SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
+         FROM threads t
+         WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
-       WHERE o.active = 1
+       WHERE o.active = 1 AND ${OWNER_READY}
          AND o.last_seen_at >= ?
          AND COALESCE(p.n, 0) < ?
          AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
@@ -947,7 +1041,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
       .all<PresenceRow>();
     const operators = rows.results.map((row) => presenceFromRow(row, now));
     const totalRow = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM operators WHERE active = 1 AND last_seen_at >= ?",
+      `SELECT COUNT(*) AS n FROM operators o WHERE active = 1 AND ${OWNER_READY} AND last_seen_at >= ?`,
     )
       .bind(now - MODEL_RECENT_MS)
       .first<{ n: number }>();
@@ -963,7 +1057,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     });
   }
 
-  const where = ["o.active = 1", "o.last_seen_at >= ?"];
+  const where = ["o.active = 1", OWNER_READY, "o.last_seen_at >= ?"];
   const bindings: unknown[] = [now - MODEL_RECENT_MS];
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -971,13 +1065,13 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     bindings.push(like, like);
   }
   const rows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      WHERE ${where.join(" AND ")}
@@ -1034,42 +1128,49 @@ function reasonOf(value: unknown): string {
 
 type Assignment = { id: string; requested: string; fallback: boolean; queued: boolean };
 
-async function autoModelId(env: AppEnv, now = Date.now()): Promise<string> {
+async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<string | null> = [], ipIdentities: Array<string | null> = []): Promise<string> {
+  const ids = presentIds(...identities);
+  const globalIds = presentIds(...ids, ...ipIdentities);
+  const matches: string[] = [];
+  if (ids.length) matches.push(`(b.operator_id=o.id AND b.id IN (${ids.map(() => "?").join(",")}))`);
+  if (globalIds.length) matches.push(`(b.operator_id='*' AND b.id IN (${globalIds.map(() => "?").join(",")}))`);
+  const blockFilter = matches.length ? `AND NOT EXISTS (SELECT 1 FROM blocks b WHERE ${matches.join(" OR ")})` : "";
   const row = await env.DB.prepare(
     `SELECT o.id
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
-     WHERE o.active = 1
+     WHERE o.active = 1 AND ${OWNER_READY}
        AND o.last_seen_at >= ?
        AND COALESCE(p.n, 0) < ?
        AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
+       ${blockFilter}
      ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
      LIMIT 1`,
   )
-    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT)
+    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
     .first<{ id: string }>();
   return row?.id || HOME_MODEL;
 }
 
-async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
+async function assignOperator(env: AppEnv, value: string, identities: Array<string | null>, ipIdentities: Array<string | null>): Promise<Assignment> {
   const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
   if (requested === HOME_MODEL) {
     return { id: HOME_MODEL, requested, fallback: false, queued: false };
   }
   if (requested) {
-    const explicit = await env.DB.prepare("SELECT id FROM operators WHERE id = ? AND active = 1")
+    const explicit = await env.DB.prepare(`SELECT o.id FROM operators o WHERE o.id = ? AND o.active = 1 AND ${OWNER_READY}`)
       .bind(requested)
       .first<{ id: string }>();
     if (explicit) {
       return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }
-  const chosen = await autoModelId(env);
+  const chosen = await autoModelId(env, Date.now(), identities, ipIdentities);
   if (chosen === HOME_MODEL) {
     return {
       id: POOL_MODEL,
@@ -1087,79 +1188,55 @@ async function assignOperator(env: AppEnv, value: string): Promise<Assignment> {
 }
 
 async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
+  const account = await requireAccount(request, env);
   const ip = await clientHash(request);
   if (!(await allow(env, `apply:${ip}`, 5, HOUR))) throw new HttpError(429, "申请先歇一会儿。");
-  const payload = await readJson(request);
-  const suffix = modelSuffix(payload.suffix);
-  const email = emailOf(payload.email);
-  const blurb = blurbOf(payload.blurb);
-  if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
-  if (!email) throw new HttpError(400, "邮箱要写成能写信的地址。");
+  if (await env.DB.prepare("SELECT id FROM operators WHERE owner_account_id=?").bind(account.id).first()) throw new AuthError(409, "MODEL_LIMIT", "当前账号已经有一个模型。");
+  const payload = await readJson(request), suffix = modelSuffix(payload.suffix), blurb = blurbOf(payload.blurb);
+  if (!suffix || suffix === "pool" || suffix === "vme50-flash") throw new HttpError(400, "型号后面要写成小写字母、数字和短横线，且不能使用站点保留型号。");
   if (!blurb) throw new HttpError(400, "写一句你擅长什么。");
-  const visitor = await visitorHash(request);
-  if (!visitor) throw new HttpError(400, "这个浏览器还认不出你。刷新后再申请。");
-  const existing = await env.DB.prepare(
-    "SELECT id, status, pass_note, reason FROM applications WHERE visitor_hash = ? AND status IN ('pending', 'approved') ORDER BY created_at DESC LIMIT 1",
-  )
-    .bind(visitor)
-    .first<{ id: string; status: string; pass_note: string | null; reason: string | null }>();
+  const existing = await env.DB.prepare("SELECT id,status,reason FROM applications WHERE account_id=? AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1")
+    .bind(account.id).first<{ id: string; status: string; reason: string | null }>();
   if (existing) return json(applicationView(existing));
   const modelId = `tangbao-${suffix}`;
-  if (modelId === HOME_MODEL) throw new HttpError(400, "这个型号已经有人坐着。");
-  const modelTaken = await env.DB.prepare(
-    `SELECT id FROM operators WHERE id = ?
-     UNION SELECT id FROM applications WHERE suffix = ? AND status IN ('pending', 'approved')`,
-  )
-    .bind(modelId, suffix)
-    .first();
-  if (modelTaken) throw new HttpError(400, "这个型号已经有人申请或在用。");
-  const id = randomId(16);
-  await env.DB.prepare(
-    "INSERT INTO applications (id, suffix, email, blurb, status, visitor_hash, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-  )
-    .bind(id, suffix, email, blurb, visitor, Date.now())
-    .run();
+  const id = randomId(16), now = Date.now();
+  try {
+    const result = await env.DB.prepare(`INSERT INTO applications(id,suffix,email,blurb,status,visitor_hash,created_at,account_id)
+      SELECT ?,?,?,?,'pending',?,?,? WHERE NOT EXISTS(SELECT 1 FROM operators WHERE owner_account_id=? OR id=?)
+      AND NOT EXISTS(SELECT 1 FROM applications WHERE suffix=? AND status IN ('pending','approved'))
+      AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')`)
+      .bind(id, suffix, account.email, blurb, await visitorHash(request) || null, now, account.id, account.id, modelId, suffix, account.id).run();
+    if (result.meta.changes !== 1) throw new AuthError(409, "APPLICATION_CONFLICT", "账号已有模型，或这个型号已经有人申请或在用。");
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw new AuthError(409, "APPLICATION_CONFLICT", "申请状态刚刚发生变化，请刷新后查看。");
+  }
   if (await autoApproveEnabled(env)) {
     const approved = await approveModelApplication(env, id);
     noteApply(ctx, env, request, modelId, blurb);
-    return json({ id, status: "approved", password: approved.password });
+    return json({ id, status: "approved", modelId: approved.modelId });
   }
   noteApply(ctx, env, request, modelId, blurb);
   return json({ id, status: "pending" });
 }
 
-function applicationView(row: { id?: string; status: string; pass_note: string | null; reason?: string | null }): {
-  id?: string;
-  status: string;
-  password?: string;
-  reason?: string;
-} {
-  return {
-    id: row.id,
-    status: row.status,
-    password: row.status === "approved" ? row.pass_note || undefined : undefined,
-    reason: row.status === "rejected" ? row.reason || undefined : undefined,
-  };
+function applicationView(row: { id?: string; status: string; reason?: string | null; operator_id?: string | null }) {
+  return { id: row.id, status: row.status, reason: row.status === "rejected" ? row.reason || undefined : undefined, modelId: row.status === "approved" ? row.operator_id || undefined : undefined };
 }
 
 async function myApplication(request: Request, env: AppEnv): Promise<Response> {
-  const visitor = await visitorHash(request);
-  const row = visitor
-    ? await env.DB.prepare(
-        "SELECT id, status, pass_note, reason FROM applications WHERE visitor_hash = ? ORDER BY created_at DESC LIMIT 1",
-      )
-        .bind(visitor)
-        .first<{ id: string; status: string; pass_note: string | null; reason: string | null }>()
-    : null;
+  const account = await requireAccount(request, env);
+  const row = await env.DB.prepare("SELECT id,status,reason,operator_id FROM applications WHERE account_id=? ORDER BY created_at DESC LIMIT 1")
+    .bind(account.id).first<{ id: string; status: string; reason: string | null; operator_id: string | null }>();
   if (!row) throw new HttpError(404, "没有这份申请。");
   return json(applicationView(row));
 }
 
-async function applicationStatus(env: AppEnv, id: string): Promise<Response> {
-  const row = await env.DB.prepare("SELECT status, pass_note, reason FROM applications WHERE id = ?")
-    .bind(id)
-    .first<{ status: string; pass_note: string | null; reason: string | null }>();
-  if (!row) throw new HttpError(404, "没有这份申请。");
+async function applicationStatus(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const row = await env.DB.prepare("SELECT id,status,reason,operator_id,account_id FROM applications WHERE id=?")
+    .bind(id).first<{ id: string; status: string; reason: string | null; operator_id: string | null; account_id: string | null }>();
+  if (!row || (row.account_id !== account.id && !account.roles.includes("admin"))) throw new HttpError(404, "没有这份申请。");
   return json(applicationView(row));
 }
 
@@ -1235,32 +1312,33 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
   });
 }
 
-async function approveModelApplication(env: AppEnv, id: string): Promise<{ modelId: string; password: string }> {
-  const row = await env.DB.prepare("SELECT suffix, blurb, status FROM applications WHERE id = ?")
-    .bind(id)
-    .first<{ suffix: string; blurb: string | null; status: string }>();
+async function approveModelApplication(env: AppEnv, id: string): Promise<{ modelId: string }> {
+  const row = await env.DB.prepare("SELECT suffix,status,account_id FROM applications WHERE id=?").bind(id).first<{ suffix: string; status: string; account_id: string | null }>();
   if (!row) throw new HttpError(404, "没有这份申请。");
-  if (row.status !== "pending") throw new HttpError(400, "这份申请已经处理过。");
-  const modelId = `tangbao-${row.suffix}`;
-  const password = randomId(9);
-  const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO operators (id, password_hash, active, awake, blurb, created_at) VALUES (?, ?, 1, 0, ?, ?)",
-    ).bind(modelId, await sha256(password), row.blurb || "", now),
-    env.DB.prepare("UPDATE applications SET status = 'approved', operator_id = ?, pass_note = ? WHERE id = ?").bind(
-      modelId,
-      password,
-      id,
-    ),
-  ]);
-  return { modelId, password };
+  if (!row.account_id) throw new AuthError(409, "LEGACY_APPLICATION_REVIEW", "旧申请尚未关联已验证账号，需要人工核验后重新提交。");
+  if (row.status !== "pending") throw new AuthError(409, "APPLICATION_PROCESSED", "这份申请已经处理过。");
+  const modelId = `tangbao-${row.suffix}`, now = Date.now();
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(`INSERT INTO operators(id,password_hash,active,awake,blurb,created_at,owner_account_id,legacy_claimed_at,operator_uid)
+        SELECT ?,?,1,0,a.blurb,?,a.account_id,?,? FROM applications a JOIN accounts c ON c.id=a.account_id
+        WHERE a.id=? AND a.status='pending' AND c.verified_at>0 AND c.status='active'
+        AND NOT EXISTS(SELECT 1 FROM operators WHERE owner_account_id=a.account_id)`)
+        .bind(modelId, await sha256(randomId(32)), now, now, randomId(24), id),
+      env.DB.prepare("UPDATE applications SET status='approved',operator_id=?,pass_note=NULL WHERE id=? AND status='pending' AND changes()=1").bind(modelId, id),
+      env.DB.prepare(`INSERT OR IGNORE INTO account_roles(account_id,role) SELECT ?,'operator' WHERE EXISTS(SELECT 1 FROM operators WHERE id=? AND owner_account_id=?)`).bind(row.account_id, modelId, row.account_id),
+    ]);
+    if (results[0].meta.changes !== 1) throw new AuthError(409, "MODEL_LIMIT", "该账号已有模型、已停用或尚未验证，无法审批。");
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw new AuthError(409, "APPLICATION_CONFLICT", "型号或账号归属已发生变化，请刷新后核查。");
+  }
+  return { modelId };
 }
 
 async function approveApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
   await requireSuper(request, env);
-  const approved = await approveModelApplication(env, id);
-  return json({ ok: true, modelId: approved.modelId, password: approved.password });
+  return json({ ok: true, ...await approveModelApplication(env, id) });
 }
 
 async function rejectApplication(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -1271,7 +1349,8 @@ async function rejectApplication(request: Request, env: AppEnv, id: string): Pro
   const payload = await readJson(request);
   const reason = reasonOf(payload.reason);
   if (!reason) throw new HttpError(400, "先写一句没过的理由。");
-  await env.DB.prepare("UPDATE applications SET status = 'rejected', reason = ? WHERE id = ?").bind(reason, id).run();
+  const result = await env.DB.prepare("UPDATE applications SET status = 'rejected', reason = ? WHERE id = ? AND status = 'pending'").bind(reason, id).run();
+  if (result.meta.changes !== 1) throw new AuthError(409, "APPLICATION_PROCESSED", "这份申请已经处理过。");
   return json({ ok: true });
 }
 
@@ -1342,13 +1421,13 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operatorPages = Math.max(1, Math.ceil(operatorTotal / AUDIT_MODEL_PAGE_SIZE));
   const operatorPage = Math.min(operatorPageRequested, operatorPages);
   const operatorRows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, o.last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
        SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-       FROM threads
-       WHERE awaiting = 1 AND queued = 0
+       FROM threads t
+       WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      ${operatorWhere}
@@ -1418,9 +1497,9 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   });
 }
 
-async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<number> {
+async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat): Promise<number> {
   if (operatorId === HOME_MODEL) return 0;
-  const target = await operatorPresence(env, operatorId);
+  const target = await operatorPresence(env, operatorId, Date.now(), seat);
   if (!target.active || target.status !== "online" || target.pending >= PENDING_CAP) return 0;
 
   let slots = PENDING_CAP - target.pending;
@@ -1432,15 +1511,20 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<numb
        AND NOT EXISTS (
          SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.role = 'tangbao'
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM blocks b
+         WHERE ${threadBlockMatch("t", "?")}
+       )
      ORDER BY t.updated_at ASC
      LIMIT ?`,
   )
-    .bind(HOME_MODEL, slots)
+    .bind(HOME_MODEL, blockScope(operatorId), slots)
     .all<{ id: string }>();
   if (!candidates.results.length) return 0;
 
   const now = Date.now();
   const freshAfter = now - ONLINE_TTL;
+  const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   let moved = 0;
   for (const row of candidates.results) {
     if (slots <= 0) break;
@@ -1452,21 +1536,25 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string): Promise<numb
          AND NOT EXISTS (
            SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao'
          )
+         AND NOT EXISTS (
+           SELECT 1 FROM blocks b
+           WHERE ${threadBlockMatch("threads", "?")}
+         )
          AND EXISTS (
            SELECT 1 FROM operators o
-           WHERE o.id = ? AND o.active = 1 AND o.last_seen_at >= ?
+           WHERE o.id = ? AND o.active = 1 AND ${OWNER_READY} AND o.last_seen_at >= ? AND ${ownership.sql}
          )
          AND (
            SELECT COUNT(*) FROM threads t
-           WHERE t.operator_id = ? AND t.awaiting = 1
+           WHERE t.operator_id = ? AND t.awaiting = 1 AND ${unblockedThread("t")}
          ) < ?`,
     )
-      .bind(operatorId, row.id, HOME_MODEL, operatorId, freshAfter, operatorId, PENDING_CAP)
+      .bind(operatorId, row.id, HOME_MODEL, blockScope(operatorId), operatorId, freshAfter, ...ownership.values, operatorId, PENDING_CAP)
       .run();
     if (result.meta.changes !== 1) continue;
     moved += 1;
     slots -= 1;
-    await touchAssigned(env, operatorId, now);
+    await touchAssigned(env, operatorId, now, seat);
   }
   return moved;
 }
@@ -1475,12 +1563,12 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
   await requireSuper(request, env);
   const [countRow, rows] = await Promise.all([
     env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND queued = 1",
+      `SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND queued = 1 AND ${unblockedThread("threads")}`,
     ).first<{ n: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt
        FROM threads
-       WHERE awaiting = 1 AND queued = 1
+       WHERE awaiting = 1 AND queued = 1 AND ${unblockedThread("threads")}
        ORDER BY updated_at ASC
        LIMIT 100`,
     ).all<{ id: string; title: string; preview: string; updatedAt: number }>(),
@@ -1491,22 +1579,23 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const own = seat.operatorId;
+  const ownership = seatOwnership(seat, "threads.operator_id");
   const now = Date.now();
   await touchSeat(env, seat, now);
-  if (!seat.super) await migrateHomeBacklog(env, own);
+  if (!seat.super) await migrateHomeBacklog(env, own, seat);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      "SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? ORDER BY updated_at ASC LIMIT 100",
+      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
     )
-      .bind(own)
+      .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
-       FROM threads WHERE awaiting = 0 AND operator_id = ? ORDER BY updated_at DESC LIMIT 40`,
+       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
     )
-      .bind(own)
+      .bind(own, ...ownership.values)
       .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
-    seat.super ? homePresence(env, now) : operatorPresence(env, own, now),
+    seat.super ? homePresence(env, now) : operatorPresence(env, own, now, seat),
     seat.super
       ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
       : Promise.resolve(null),
@@ -1514,20 +1603,14 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   const status = statusPayload(publicPresence(presence.status));
   const blocked = await env.DB.prepare(
     `SELECT id, title, preview, updated_at AS updatedAt FROM threads
-     WHERE operator_id = ?
-       AND EXISTS (
-         SELECT 1 FROM blocks b
-         WHERE (b.operator_id = ? AND (b.id = threads.token_hash OR b.id = threads.visitor_hash))
-            OR (b.operator_id = '*' AND (
-              b.id = threads.token_hash OR b.id = threads.visitor_hash OR b.id = threads.ip_hash
-            ))
-       )
+     WHERE operator_id = ? AND EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch("threads", "?")}) AND ${ownership.sql}
      ORDER BY updated_at DESC LIMIT 20`,
   )
-    .bind(own, own)
+    .bind(own, own, ...ownership.values)
     .all<{ id: string; title: string; preview: string; updatedAt: number }>();
   const blockedIds = new Set(blocked.results.map((row) => row.id));
   const rows = closed.results;
+  await ensureSeatModel(env, seat);
   return json({
     super: seat.super,
     operatorId: seat.operatorId,
@@ -1542,60 +1625,76 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
 
 async function blockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
+  const ownership = seatOwnership(seat, "threads.operator_id", [], true);
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, visitor_hash, ip_hash, operator_id FROM threads WHERE id = ?",
+    `SELECT id, token_hash, visitor_hash, ip_hash, operator_id, account_id FROM threads WHERE id = ? AND ${ownership.sql}`,
   )
-    .bind(id)
+    .bind(id, ...ownership.values)
     .first<{
       id: string;
       token_hash: string;
       visitor_hash: string | null;
       ip_hash: string | null;
+      account_id: string | null;
       operator_id: string;
     }>();
-  if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
+  if (!thread) {
     throw new HttpError(404, "这屉不在笼里。");
   }
   const scope = seat.super ? GLOBAL_BLOCK : blockScope(thread.operator_id);
   const ids = seat.super
-    ? [thread.token_hash, thread.visitor_hash, thread.ip_hash]
-    : [thread.token_hash, thread.visitor_hash];
-  await rememberBlock(env, ids, scope);
-  await closeBlockedThreads(env, thread, scope);
+    ? [accountBlockKey(thread.account_id), thread.token_hash, thread.visitor_hash, thread.ip_hash]
+    : thread.account_id ? [accountBlockKey(thread.account_id)] : [thread.token_hash, thread.visitor_hash];
+  await rememberBlock(env, ids, scope, seat);
+  await closeBlockedThreads(env, thread, scope, seat);
+  await ensureSeatModel(env, seat);
   return json({ ok: true });
 }
 
 async function unblockThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
+  const ownership = seatOwnership(seat, "threads.operator_id", [], true);
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, visitor_hash, ip_hash, operator_id FROM threads WHERE id = ?",
+    `SELECT id, token_hash, visitor_hash, ip_hash, operator_id, account_id FROM threads WHERE id = ? AND ${ownership.sql}`,
   )
-    .bind(id)
+    .bind(id, ...ownership.values)
     .first<{
       id: string;
       token_hash: string;
       visitor_hash: string | null;
       ip_hash: string | null;
+      account_id: string | null;
       operator_id: string;
     }>();
-  if (!thread || (!seat.super && thread.operator_id !== seat.operatorId)) {
+  if (!thread) {
     throw new HttpError(404, "这屉不在笼里。");
   }
-  await forgetBlock(
-    env,
-    [thread.token_hash, thread.visitor_hash, thread.ip_hash],
-    seat.super ? [] : [thread.operator_id],
-  );
+  const scopes = seat.super ? [] : [blockScope(thread.operator_id)];
+  const writeOwnership = seatOwnership(seat, "blocks.operator_id", [], true);
+  if (thread.account_id) {
+    const marks = scopes.map(() => "?").join(",");
+    await env.DB.prepare(`DELETE FROM blocks WHERE ${seat.super ? "" : `operator_id IN (${marks}) AND `}
+      (id=? OR id IN(SELECT token_hash FROM threads WHERE account_id=?)
+      OR id IN(SELECT visitor_hash FROM threads WHERE account_id=?)
+      ${seat.super ? "OR (operator_id='*' AND id IN(SELECT ip_hash FROM threads WHERE account_id=?))" : ""}) AND ${writeOwnership.sql}`)
+      .bind(...scopes, accountBlockKey(thread.account_id), thread.account_id, thread.account_id, ...(seat.super ? [thread.account_id] : []), ...writeOwnership.values).run();
+  } else if (seat.super) {
+    // Aggregate by visitor, never by shared IP. An IP is only a global-block identity.
+    await env.DB.prepare(`DELETE FROM blocks WHERE id IN (?,?)
+      OR id IN(SELECT token_hash FROM threads WHERE visitor_hash=?)
+      OR (operator_id='*' AND (id=? OR id IN(SELECT ip_hash FROM threads WHERE visitor_hash=?)))`)
+      .bind(thread.token_hash, thread.visitor_hash || null, thread.visitor_hash || null, thread.ip_hash, thread.visitor_hash || null).run();
+  } else await forgetBlock(env, [thread.token_hash, thread.visitor_hash], scopes, seat);
+  await ensureSeatModel(env, seat);
   return json({ ok: true });
 }
 
 async function shelveThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
-  const exists = await env.DB.prepare("SELECT operator_id FROM threads WHERE id = ?")
-    .bind(id)
-    .first<{ operator_id: string }>();
-  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
-  await env.DB.prepare("UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ?").bind(Date.now(), id).run();
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const result = await env.DB.prepare(`UPDATE threads SET awaiting = 0, updated_at = ? WHERE id = ? AND ${ownership.sql}`)
+    .bind(Date.now(), id, ...ownership.values).run();
+  if (!result.meta.changes) throw new HttpError(404, "这屉不在笼里。");
   return json({ ok: true });
 }
 
@@ -1630,12 +1729,15 @@ async function pushSubscribe(request: Request, env: AppEnv): Promise<Response> {
   const p256dh = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { p256dh?: unknown }).p256dh : "");
   const auth = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { auth?: unknown }).auth : "");
   if (!endpoint || !p256dh || !auth) throw new HttpError(400, "这台浏览器的订阅对不上。");
-  await env.DB.prepare(
-    `INSERT INTO push_subscriptions (endpoint, operator_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+  const ownership = seat.super ? { sql: "1=1", values: [] } : seatOwnership(seat, "operators.id");
+  const result = await env.DB.prepare(
+    `INSERT INTO push_subscriptions (endpoint, operator_id, p256dh, auth, created_at)
+     SELECT ?, ${seat.super ? "?" : "operators.id"}, ?, ?, ? ${seat.super ? "" : "FROM operators"} WHERE ${ownership.sql}
      ON CONFLICT(endpoint) DO UPDATE SET operator_id = excluded.operator_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at`,
   )
-    .bind(endpoint, seat.operatorId, p256dh, auth, Date.now())
+    .bind(endpoint, ...(seat.super ? [HOME_MODEL] : []), p256dh, auth, Date.now(), ...ownership.values)
     .run();
+  if (!result.meta.changes) throw new AuthError(409, "MODEL_CHANGED", "模型状态已变化，请刷新后重新订阅。");
   return json({ ok: true });
 }
 
@@ -1644,8 +1746,9 @@ async function pushUnsubscribe(request: Request, env: AppEnv): Promise<Response>
   const payload = await readJson(request);
   const endpoint = pushEndpoint(payload.endpoint);
   if (!endpoint) throw new HttpError(400, "这台浏览器的订阅对不上。");
-  await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND operator_id = ?")
-    .bind(endpoint, seat.operatorId)
+  const ownership = seatOwnership(seat, "push_subscriptions.operator_id");
+  await env.DB.prepare(`DELETE FROM push_subscriptions WHERE endpoint = ? AND ${ownership.sql}`)
+    .bind(endpoint, ...ownership.values)
     .run();
   return json({ ok: true });
 }
@@ -1673,20 +1776,20 @@ async function siteStatus(env: AppEnv): Promise<StatusPayload> {
     homePresence(env, now),
     env.DB.prepare(
       `SELECT
-         COALESCE(SUM(CASE WHEN o.active = 1
+         COALESCE(SUM(CASE WHEN o.active = 1 AND ${OWNER_READY}
            AND o.last_seen_at >= ?
            AND COALESCE(p.n, 0) < ?
            AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
            THEN 1 ELSE 0 END), 0) AS online,
-         COALESCE(SUM(CASE WHEN o.active = 1
+         COALESCE(SUM(CASE WHEN o.active = 1 AND ${OWNER_READY}
            AND o.last_seen_at >= ?
            AND (COALESCE(p.n, 0) >= ? OR (COALESCE(p.n, 0) > 0 AND p.oldest < ?))
            THEN 1 ELSE 0 END), 0) AS busy
        FROM operators o
        LEFT JOIN (
          SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads
-         WHERE awaiting = 1 AND queued = 0
+         FROM threads t
+         WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
          GROUP BY operator_id
        ) p ON p.operator_id = o.id`,
     )
@@ -1712,11 +1815,12 @@ async function siteStatus(env: AppEnv): Promise<StatusPayload> {
 }
 
 async function adminRead(request: Request, env: AppEnv, id: string): Promise<Response> {
-  await requireAdmin(request, env);
+  const seat = await requireSeat(request, env);
+  const ownership = seatOwnership(seat, "threads.operator_id", [], true);
   const thread = await env.DB.prepare(
-    "SELECT id, title, awaiting, operator_id, token_hash, visitor_hash, ip_hash, updated_at AS updatedAt FROM threads WHERE id = ?",
+    `SELECT id, title, awaiting, operator_id, token_hash, visitor_hash, ip_hash, account_id, updated_at AS updatedAt FROM threads WHERE id = ? AND ${ownership.sql}`,
   )
-    .bind(id)
+    .bind(id, ...ownership.values)
     .first<{
       id: string;
       title: string;
@@ -1725,20 +1829,12 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       token_hash: string;
       visitor_hash: string | null;
       ip_hash: string | null;
+      account_id: string | null;
       updatedAt: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
-  const seat = await requireSeat(request, env);
-  if (!seat.super && thread.operator_id !== seat.operatorId) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
-  const scope = blockScope(thread.operator_id);
-  const blocked = await isBlocked(
-    env,
-    scope === GLOBAL_BLOCK
-      ? [thread.token_hash, thread.visitor_hash, thread.ip_hash]
-      : [thread.token_hash, thread.visitor_hash],
-    thread.operator_id,
-  );
+  const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
       id: thread.id,
@@ -1754,29 +1850,43 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
 
 async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
-  const exists = await env.DB.prepare("SELECT operator_id FROM threads WHERE id = ?")
-    .bind(id)
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const exists = await env.DB.prepare(`SELECT operator_id FROM threads WHERE id = ? AND ${ownership.sql}`)
+    .bind(id, ...ownership.values)
     .first<{ operator_id: string }>();
-  if (!exists || exists.operator_id !== seat.operatorId) throw new HttpError(403, "这笼不是你的。");
+  if (!exists) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
   await writeMessage(env, id, "tangbao", incoming, 0);
-  await touchReply(env, seat.operatorId, Date.now());
+  await touchReply(env, seat, Date.now());
   return json({ ok: true });
 }
 
-async function serveImage(env: AppEnv, id: string): Promise<Response> {
-  const row = await env.DB.prepare("SELECT image_key, image_type FROM message_images WHERE id = ?")
-    .bind(id)
-    .first<{ image_key: string; image_type: string }>();
+async function serveImage(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const row = await env.DB.prepare(`SELECT i.image_key,i.image_type,t.id AS thread_id,t.token_hash,t.account_id,t.operator_id
+    FROM message_images i JOIN messages m ON m.id=i.message_id JOIN threads t ON t.id=m.thread_id WHERE i.id=?`)
+    .bind(id).first<{ image_key: string; image_type: string; thread_id: string; token_hash: string; account_id: string | null; operator_id: string }>();
   if (!row) throw new HttpError(404, "这张图不在笼里。");
+  let authorized = false;
+  if (row.account_id) {
+    const account = await getAccount(request, env);
+    authorized = Boolean(account?.verified && account.id === row.account_id);
+  } else {
+    const url = new URL(request.url), expires = Number(url.searchParams.get("e")), signature = url.searchParams.get("s") || "";
+    if (Number.isSafeInteger(expires) && expires > Date.now() && expires <= Date.now() + 5 * 60_000) authorized = safeEqual(signature, await imageSignature(env, id, row.token_hash, expires));
+    const token = bearer(request);
+    if (!authorized && token) authorized = safeEqual(await sha256(token), row.token_hash);
+  }
+  if (!authorized) {
+    try {
+      const seat = await requireSeat(request, env);
+      const ownership = seatOwnership(seat, "threads.operator_id", [], true);
+      authorized = Boolean(await env.DB.prepare(`SELECT id FROM threads WHERE id = ? AND ${ownership.sql}`).bind(row.thread_id, ...ownership.values).first());
+    } catch { /* Unauthenticated image URLs do not reveal parent metadata. */ }
+  }
+  if (!authorized) throw new AuthError(401, "IMAGE_AUTH_REQUIRED", "请从有权访问的对话中重新打开图片。");
   const bytes = await env.IMAGES.get(row.image_key, "arrayBuffer");
   if (!bytes) throw new HttpError(404, "这张图不在笼里。");
-  return new Response(bytes, {
-    headers: {
-      "content-type": row.image_type || "application/octet-stream",
-      "cache-control": "private, max-age=86400",
-    },
-  });
+  return new Response(bytes, { headers: { "content-type": row.image_type || "application/octet-stream", "cache-control": "private, no-store" } });
 }
 
 async function listMessages(env: AppEnv, threadId: string) {
@@ -1786,7 +1896,8 @@ async function listMessages(env: AppEnv, threadId: string) {
     .bind(threadId)
     .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
   const ids = messages.results.map((message) => message.id);
-  const grouped = new Map<string, { id: string; type: string }[]>();
+  const grouped = new Map<string, { id: string; type: string; url: string }[]>();
+  const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
   if (ids.length) {
     const marks = ids.map(() => "?").join(", ");
     const images = await env.DB.prepare(
@@ -1796,7 +1907,9 @@ async function listMessages(env: AppEnv, threadId: string) {
       .all<{ id: string; messageId: string; imageType: string }>();
     for (const image of images.results) {
       const list = grouped.get(image.messageId) ?? [];
-      list.push({ id: image.id, type: image.imageType });
+      const expires = Date.now() + 5 * 60_000;
+      const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
+      list.push({ id: image.id, type: image.imageType, url });
       grouped.set(image.messageId, list);
     }
   }
@@ -1898,10 +2011,9 @@ async function presenceHistory(env: AppEnv) {
   };
 }
 
-async function loadOwned(env: AppEnv, id: string, token: string) {
-  if (!token) throw new HttpError(401, "这把钥匙对不上这段对话。");
+async function loadOwned(env: AppEnv, id: string, token: string, request: Request) {
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at, account_id FROM threads WHERE id = ?",
   )
     .bind(id)
     .first<{
@@ -1911,16 +2023,24 @@ async function loadOwned(env: AppEnv, id: string, token: string) {
       awaiting: number;
       visitor_hash: string | null;
       ip_hash: string | null;
+      account_id: string | null;
       operator_id: string;
       queued: number;
       reported_at: number;
     }>();
+  if (thread?.account_id) {
+    const account = await requireAccount(request, env);
+    if (account.id !== thread.account_id) throw new AuthError(403, "THREAD_FORBIDDEN", "这段对话属于另一个账号。");
+    return thread;
+  }
   const hash = await sha256(token);
-  if (!thread || !safeEqual(hash, thread.token_hash)) {
+  if (!token || !thread || !safeEqual(hash, thread.token_hash)) {
     throw new HttpError(401, "这把钥匙对不上这段对话。");
   }
   return thread;
 }
+
+function accountBlockKey(id?: string | null): string | null { return id ? `account:${id}` : null; }
 
 function presentIds(...ids: Array<string | null | undefined>): string[] {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
@@ -1932,41 +2052,61 @@ function blockScope(operatorId: string): string {
   return operatorId === HOME_MODEL || operatorId === POOL_MODEL ? GLOBAL_BLOCK : operatorId;
 }
 
-async function isBlocked(
+// Model blocks use conversation/visitor/account identity. Only global blocks match IPs.
+function threadBlockMatch(thread = "t", operator = `${thread}.operator_id`): string {
+  const ids = `${thread}.token_hash,${thread}.visitor_hash,'account:'||${thread}.account_id`;
+  return `((b.operator_id=${operator} AND b.id IN (${ids}))
+    OR (b.operator_id='*' AND b.id IN (${ids},${thread}.ip_hash)))`;
+}
+
+function unblockedThread(thread = "t", operator = `${thread}.operator_id`): string {
+  return `NOT EXISTS (SELECT 1 FROM blocks b WHERE ${threadBlockMatch(thread, operator)})`;
+}
+
+async function blockingScope(
   env: AppEnv,
   ids: Array<string | null | undefined>,
   operatorId?: string,
-): Promise<boolean> {
+  ipIds: Array<string | null | undefined> = [],
+): Promise<string | null> {
   const fresh = presentIds(...ids);
-  if (!fresh.length) return false;
-  const marks = fresh.map(() => "?").join(", ");
+  const globalIds = presentIds(...fresh, ...ipIds);
   const scope = operatorId ? blockScope(operatorId) : "";
-  const scopeWhere = scope
-    ? "AND (operator_id = ? OR operator_id = '*')"
-    : "AND operator_id = '*'";
-  const bindings = scope ? [...fresh, scope] : fresh;
-  const row = await env.DB.prepare(
-    `SELECT id FROM blocks WHERE id IN (${marks}) ${scopeWhere} LIMIT 1`,
-  )
-    .bind(...bindings)
-    .first();
-  return Boolean(row);
+  const matches: string[] = [], values: unknown[] = [];
+  if (scope && scope !== GLOBAL_BLOCK && fresh.length) {
+    matches.push(`(operator_id=? AND id IN (${fresh.map(() => "?").join(",")}))`);
+    values.push(scope, ...fresh);
+  }
+  if (globalIds.length) {
+    matches.push(`(operator_id='*' AND id IN (${globalIds.map(() => "?").join(",")}))`);
+    values.push(...globalIds);
+  }
+  if (!matches.length) return null;
+  const row = await env.DB.prepare(`SELECT operator_id FROM blocks WHERE ${matches.join(" OR ")}
+    ORDER BY CASE WHEN operator_id='*' THEN 0 ELSE 1 END LIMIT 1`).bind(...values).first<{ operator_id: string }>();
+  return row?.operator_id || null;
+}
+
+async function isBlocked(env: AppEnv, ids: Array<string | null | undefined>, operatorId?: string, ipIds: Array<string | null | undefined> = []): Promise<boolean> {
+  return Boolean(await blockingScope(env, ids, operatorId, ipIds));
 }
 
 async function rememberBlock(
   env: AppEnv,
   ids: Array<string | null | undefined>,
   operatorId = GLOBAL_BLOCK,
+  seat?: Seat,
 ): Promise<void> {
   const fresh = presentIds(...ids);
   if (!fresh.length) return;
   const scope = blockScope(operatorId);
   const now = Date.now();
+  const ownership = seat ? seatOwnership(seat, "?", [scope], true) : { sql: "1=1", values: [] };
   await env.DB.batch(
     fresh.map((id) =>
       env.DB.prepare(
-        "INSERT INTO blocks (id, operator_id, created_at) VALUES (?, ?, ?) ON CONFLICT(id, operator_id) DO NOTHING",
-      ).bind(id, scope, now),
+        `INSERT INTO blocks (id, operator_id, created_at) SELECT ?, ?, ? WHERE ${ownership.sql} ON CONFLICT(id, operator_id) DO NOTHING`,
+      ).bind(id, scope, now, ...ownership.values),
     ),
   );
 }
@@ -1975,40 +2115,49 @@ async function forgetBlock(
   env: AppEnv,
   ids: Array<string | null | undefined>,
   operatorIds: string[],
+  seat?: Seat,
 ): Promise<void> {
   const fresh = presentIds(...ids);
   if (!fresh.length) return;
   const marks = fresh.map(() => "?").join(", ");
   if (!operatorIds.length) {
+    if (!seat?.super) throw new AuthError(403, "ADMIN_REQUIRED", "只有管理员可以解除全部范围的封禁。");
     await env.DB.prepare(`DELETE FROM blocks WHERE id IN (${marks})`).bind(...fresh).run();
     return;
   }
   const scopes = [...new Set(operatorIds.map(blockScope))];
   if (!scopes.length) return;
   const scopeMarks = scopes.map(() => "?").join(", ");
+  const ownership = seat ? seatOwnership(seat, "blocks.operator_id", [], true) : { sql: "1=1", values: [] };
   await env.DB.prepare(
-    `DELETE FROM blocks WHERE id IN (${marks}) AND operator_id IN (${scopeMarks})`,
+    `DELETE FROM blocks WHERE id IN (${marks}) AND operator_id IN (${scopeMarks}) AND ${ownership.sql}`,
   )
-    .bind(...fresh, ...scopes)
+    .bind(...fresh, ...scopes, ...ownership.values)
     .run();
 }
 
 async function closeBlockedThreads(
   env: AppEnv,
-  thread: { token_hash: string; visitor_hash: string | null; ip_hash: string | null },
+  thread: { token_hash: string; visitor_hash: string | null; ip_hash: string | null; account_id?: string | null },
   operatorId: string,
+  seat?: Seat,
 ): Promise<void> {
   const scope = blockScope(operatorId);
   const scoped = scope !== GLOBAL_BLOCK;
+  const identity = scoped
+    ? thread.account_id ? "account_id = ?" : "(token_hash = ? OR visitor_hash = ?)"
+    : "(token_hash = ? OR visitor_hash = ? OR ip_hash = ? OR account_id = ?)";
+  const ownership = seat ? seatOwnership(seat, "threads.operator_id", [], true) : { sql: "1=1", values: [] };
   const sql = `UPDATE threads
     SET awaiting = 0
     WHERE awaiting = 1
       ${scoped ? "AND operator_id = ?" : ""}
-      AND (token_hash = ? OR visitor_hash = ? OR ip_hash = ?)`;
-  const bindings: unknown[] = scoped
-    ? [scope, thread.token_hash, thread.visitor_hash, thread.ip_hash]
-    : [thread.token_hash, thread.visitor_hash, thread.ip_hash];
-  await env.DB.prepare(sql).bind(...bindings).run();
+      AND ${identity} AND ${ownership.sql}`;
+  const identities = scoped
+    ? thread.account_id ? [thread.account_id] : [thread.token_hash, thread.visitor_hash]
+    : [thread.token_hash, thread.visitor_hash, thread.ip_hash, thread.account_id || null];
+  const bindings = scoped ? [scope, ...identities] : identities;
+  await env.DB.prepare(sql).bind(...bindings, ...ownership.values).run();
 }
 
 async function visitorHash(request: Request): Promise<string> {
@@ -2019,73 +2168,80 @@ async function visitorHash(request: Request): Promise<string> {
 
 async function attachIdentity(
   env: AppEnv,
-  thread: { id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null },
+  thread: { id: string; token_hash: string; visitor_hash: string | null; ip_hash: string | null; account_id?: string | null },
   request: Request,
   operatorId: string,
 ): Promise<{ blocked: boolean }> {
   const visitor = await visitorHash(request);
   const ip = await clientHash(request);
-  const scope = blockScope(operatorId);
-  const ids =
-    scope === GLOBAL_BLOCK
-      ? [thread.token_hash, thread.visitor_hash, thread.ip_hash, visitor, ip]
-      : [thread.token_hash, thread.visitor_hash, visitor];
-  const blocked = await isBlocked(env, ids, operatorId);
-  if (blocked) {
-    await rememberBlock(env, ids, operatorId);
-    await closeBlockedThreads(env, thread, operatorId);
+  const ids = [accountBlockKey(thread.account_id), thread.token_hash, thread.visitor_hash, ...(thread.account_id ? [] : [visitor])];
+  const scope = await blockingScope(env, ids, operatorId, [thread.ip_hash, ip]);
+  if (scope) {
+    const identityBlocked = scope !== GLOBAL_BLOCK || await isBlocked(env, ids);
+    if (identityBlocked) {
+      const remembered = thread.account_id ? [accountBlockKey(thread.account_id)] : ids;
+      await rememberBlock(env, remembered, scope);
+      await closeBlockedThreads(env, thread, scope);
+    } else {
+      // A shared-IP hit is temporary network scope, not proof that this visitor/account is banned.
+      await env.DB.prepare("UPDATE threads SET awaiting = 0 WHERE id = ?").bind(thread.id).run();
+    }
   }
-  if ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash)) {
+  if (!thread.account_id && ((visitor && !thread.visitor_hash) || (ip && !thread.ip_hash))) {
     await env.DB.prepare(
       "UPDATE threads SET visitor_hash = COALESCE(visitor_hash, ?), ip_hash = COALESCE(ip_hash, ?) WHERE id = ?",
     )
       .bind(visitor || null, ip || null, thread.id)
       .run();
   }
-  return { blocked };
+  return { blocked: Boolean(scope) };
 }
 
 async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> {
   if (alreadyWaiting) return;
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1").first<{ n: number }>();
+  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND ${unblockedThread("threads")}`).first<{ n: number }>();
   if (Number(row?.n ?? 0) >= QUEUE_CAP) {
     throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
   }
 }
 
 async function allow(env: AppEnv, bucket: string, limit: number, windowMs: number): Promise<boolean> {
-  const now = Date.now();
-  const row = await env.DB.prepare("SELECT hits, reset_at FROM rate_buckets WHERE id = ?")
-    .bind(bucket)
-    .first<{ hits: number; reset_at: number }>();
-  if (!row || row.reset_at <= now) {
-    await env.DB.prepare(
-      "INSERT INTO rate_buckets (id, hits, reset_at) VALUES (?, 1, ?) ON CONFLICT(id) DO UPDATE SET hits = 1, reset_at = excluded.reset_at",
-    )
-      .bind(bucket, now + windowMs)
-      .run();
-    return true;
-  }
-  if (row.hits >= limit) return false;
-  await env.DB.prepare("UPDATE rate_buckets SET hits = hits + 1 WHERE id = ?").bind(bucket).run();
-  return true;
+  return consumeRate(env, bucket, limit, windowMs);
 }
 
-type Seat = { super: boolean; operatorId: string };
+type LegacySeat = { super: boolean; operatorId: string };
+type Seat = LegacySeat & { accountId: string; operatorUid: string | null };
+
+function seatOwnership(seat: Seat, operatorExpression: string, expressionValues: unknown[] = [], adminAll = false): { sql: string; values: unknown[] } {
+  if (seat.super) return adminAll ? { sql: "1=1", values: [] } : { sql: `${operatorExpression} = ?`, values: [...expressionValues, HOME_MODEL] };
+  return {
+    sql: `EXISTS (SELECT 1 FROM operators seat_operator JOIN accounts seat_account ON seat_account.id = seat_operator.owner_account_id
+      WHERE seat_operator.id = ${operatorExpression} AND seat_operator.operator_uid = ? AND seat_operator.owner_account_id = ?
+        AND seat_operator.active = 1 AND seat_account.status = 'active' AND seat_account.verified_at > 0)`,
+    values: [...expressionValues, seat.operatorUid, seat.accountId],
+  };
+}
+
+async function ensureSeatModel(env: AppEnv, seat: Seat): Promise<void> {
+  if (seat.super) return;
+  const ownership = seatOwnership(seat, "?", [seat.operatorId]);
+  const current = await env.DB.prepare(`SELECT 1 AS current WHERE ${ownership.sql}`).bind(...ownership.values).first();
+  if (!current) throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。");
+}
 
 async function requireSeat(request: Request, env: AppEnv): Promise<Seat> {
-  const secret = env.ADMIN_SECRET;
-  if (!secret) throw new HttpError(500, "笼屉没盖盖子。");
-  const raw = readCookie(request.headers.get("cookie"), "tb_desk");
-  const seat = raw ? await readSession(secret, raw) : null;
-  if (!seat) throw new HttpError(401, "先掀开笼屉。");
-  if (!seat.super) {
-    const row = await env.DB.prepare("SELECT active FROM operators WHERE id = ?")
-      .bind(seat.operatorId)
-      .first<{ active: number }>();
-    if (!row || row.active !== 1) throw new HttpError(401, "这个模型停了。");
+  const account = await getAccount(request, env);
+  if (!account) {
+    if (await legacySeat(request, env)) throw new AuthError(403, "LEGACY_MIGRATION_REQUIRED", "请先建立并验证账号、绑定原模型后继续使用后台。");
+    throw new AuthError(401, "AUTH_REQUIRED", "请先用邮箱和密码登录。");
   }
-  return seat;
+  if (!account.verified) throw new AuthError(403, "EMAIL_UNVERIFIED", "请先验证邮箱。");
+  if (account.roles.includes("admin")) return { super: true, operatorId: HOME_MODEL, accountId: account.id, operatorUid: null };
+  const operator = await env.DB.prepare("SELECT id,active,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; active: number; operator_uid: string | null }>();
+  if (!operator || !account.roles.includes("operator")) throw new AuthError(403, "OPERATOR_REQUIRED", "通过申请或绑定已有模型后，才能进入后台。");
+  if (operator.active !== 1) throw new AuthError(403, "MODEL_DISABLED", "这个模型已停用，普通聊天仍可使用。");
+  if (!operator.operator_uid) throw new AuthError(409, "MODEL_IDENTITY_REQUIRED", "模型身份尚未准备好，请联系管理员。");
+  return { super: false, operatorId: operator.id, accountId: account.id, operatorUid: operator.operator_uid };
 }
 
 async function requireSuper(request: Request, env: AppEnv): Promise<Seat> {
@@ -2094,7 +2250,7 @@ async function requireSuper(request: Request, env: AppEnv): Promise<Seat> {
   return seat;
 }
 
-async function readSession(secret: string, cookie: string): Promise<Seat | null> {
+async function readSession(secret: string, cookie: string): Promise<LegacySeat | null> {
   const sigAt = cookie.lastIndexOf(".");
   if (sigAt <= 0) return null;
   const sig = cookie.slice(sigAt + 1);
@@ -2113,7 +2269,7 @@ async function readSession(secret: string, cookie: string): Promise<Seat | null>
   return { super: kind === "s", operatorId };
 }
 
-async function issueSession(request: Request, env: AppEnv, seat: Seat): Promise<Response> {
+async function issueSession(request: Request, env: AppEnv, seat: LegacySeat): Promise<Response> {
   const secret = env.ADMIN_SECRET;
   if (!secret) throw new HttpError(500, "笼屉没盖盖子。");
   const exp = String(Date.now() + WEEK_SECONDS * 1000);

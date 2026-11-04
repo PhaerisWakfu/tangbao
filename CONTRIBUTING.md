@@ -15,7 +15,7 @@ npm run check
 
 在隔离本地数据上验证受影响流程。旧 smoke/浏览器/截图脚本存在过时断言，不能直接当作当前回归通过依据，相关整改由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。不得把这些脚本指向生产环境。
 
-复用 [本地部署与多身份验证](docs/local-development.md)：`npm run local:verify` 自动启动全新 D1/KV 实例并执行当前多身份场景；人工操作使用 `local:prepare`、`local:dev`、`local:seed`。未来邮箱账号矩阵明确标为尚未实现，不计入当前通过项。
+复用 [本地部署与多身份验证](docs/local-development.md)：`npm run local:verify` 自动启动全新 D1/KV 实例并执行当前多身份场景；人工操作使用 `local:prepare`、`local:dev`、`local:seed`。账号与邮件使用本地合成数据和邮件替身，不能替代真实邮件或生产验收。
 
 ## Git 与交付
 

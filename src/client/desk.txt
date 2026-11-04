@@ -13,8 +13,8 @@ const count = $("#count");
 const loginErr = $("#login-err");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
-const profileOpen = $("#profile-open");
 const profileForm = $("#profile-form");
+let profileRequested = new URLSearchParams(location.search).get("profile") === "1";
 const profileSuffix = $("#profile-suffix");
 const profileBlurb = $("#profile-blurb");
 const profileErr = $("#profile-err");
@@ -39,17 +39,22 @@ let timer = 0;
 let pendingImages = [];
 let readonly = false;
 let seat = { super: false, operatorId: "" };
-const issued = new Map();
+let deskAccountId = null;
+let deskSyncSequence = 0;
+let loggedOut = TangbaoAccount.logoutPending;
 const MAX_IMAGES = 6;
 
 class ApiError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
 async function api(path, options = {}) {
+  if (loggedOut) throw new ApiError("此设备已退出，请重新登录。", 401, "LOCAL_LOGOUT");
+  const accountId = TangbaoAccount.account?.id || null;
   const form = options.body instanceof FormData;
   let response;
   try {
@@ -63,7 +68,9 @@ async function api(path, options = {}) {
     throw new ApiError("笼屉晃了一下。", 0);
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(data.error || "笼屉晃了一下。", response.status);
+  if (loggedOut) throw new ApiError("此设备已退出，请重新登录。", 401, "LOCAL_LOGOUT");
+  if (accountId !== (TangbaoAccount.account?.id || null)) throw new ApiError("账号已切换，请重新打开。", 401, "AUTH_CONTEXT_CHANGED");
+  if (!response.ok) throw new ApiError(data.error || "笼屉晃了一下。", response.status, data.code);
   return data;
 }
 
@@ -243,7 +250,7 @@ function renderThread(data) {
         wrap.append(text);
       }
     }
-    const sources = (message.images || []).map((image) => `/api/images/${image.id}`);
+    const sources = (message.images || []).map((image) => image.url || `/api/images/${image.id}`);
     if (sources.length) {
       const shots = document.createElement("div");
       shots.className = "shots";
@@ -275,9 +282,13 @@ async function loadQueue() {
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
-  profileOpen.hidden = seat.super;
   renderQueue(data);
   paintTitle();
+  if (profileRequested) {
+    profileRequested = false;
+    if (location.search) window.history.replaceState(null, "", "/desk");
+    if (!seat.super) void openProfilePane();
+  }
 }
 
 async function loadProfile() {
@@ -286,6 +297,16 @@ async function loadProfile() {
   const data = await api("/api/admin/profile");
   profileSuffix.value = data.suffix || "";
   profileBlurb.value = data.blurb || "";
+}
+
+async function openProfilePane() {
+  if (seat.super) return;
+  showPane("profile");
+  try {
+    await loadProfile();
+  } catch (err) {
+    profileErr.textContent = err.message;
+  }
 }
 
 async function saveProfile(event) {
@@ -339,7 +360,9 @@ async function openSlip(id, fromAudit) {
   selected = id;
   replyErr.textContent = "";
   try {
-    renderThread(await api(`/api/admin/threads/${id}`));
+    const data = await api(`/api/admin/threads/${id}`);
+    if (selected !== id) return;
+    renderThread(data);
     await loadQueue();
   } catch (err) {
     replyErr.textContent = err.message;
@@ -359,28 +382,28 @@ function arm() {
 }
 
 async function tick() {
+  const account = TangbaoAccount.account;
+  if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
   try {
     await loadQueue();
     if (selected && !$("#pane-thread").hidden) renderThread(await api(`/api/admin/threads/${selected}`));
     if (!$("#pane-apply").hidden) await loadApplications();
     if (!$("#pane-audit").hidden) await loadAudit();
   } catch (err) {
-    if (err instanceof ApiError && err.statusCode === 401) {
-      showDesk(false);
+    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
+      resetDeskView();
+      loginErr.textContent = err.message;
+      $("#gate-note").textContent = "当前账号暂时无法进入笼屉，请根据提示处理。";
+      await TangbaoAccount.refresh().catch(() => null);
       return;
     }
   }
   arm();
 }
 
-profileOpen.addEventListener("click", async () => {
-  if (seat.super) return;
-  showPane("profile");
-  try {
-    await loadProfile();
-  } catch (err) {
-    profileErr.textContent = err.message;
-  }
+$("#profile-back").addEventListener("click", () => {
+  if (location.search) window.history.replaceState(null, "", "/desk");
+  showPane("thread");
 });
 
 profileForm.addEventListener("submit", saveProfile);
@@ -437,18 +460,56 @@ $("#shelve").addEventListener("click", async () => {
 let replying = false;
 let replyGuard = { key: "", at: 0 };
 
-$("#login").addEventListener("submit", async (event) => {
-  event.preventDefault();
+function resetDeskView() {
+  clearTimeout(timer); applyToken++; auditToken++;
+  selected = null; shown = ""; readonly = false;
+  seat = { super: false, operatorId: "" };
+  thread.replaceChildren(); pile.replaceChildren();
+  $("#applications").replaceChildren(); $("#audit").replaceChildren(); $("#pool-list").replaceChildren();
+  $("#slip-title").textContent = "还没选消息"; $("#slip-meta").textContent = "";
+  reply.hidden = true; answer.value = "";
+  for (const image of pendingImages) URL.revokeObjectURL(image.url);
+  pendingImages = []; showAttach();
+  $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
+  $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
+  showPane("thread"); showDesk(false);
+}
+
+async function syncDeskAccount() {
+  if (loggedOut) return;
+  const sequence = ++deskSyncSequence;
+  const account = TangbaoAccount.account;
+  const accountId = account?.id || null;
+  if (deskAccountId !== accountId) { deskAccountId = accountId; resetDeskView(); }
   loginErr.textContent = "";
-  try {
-    await api("/api/admin/login", { method: "POST", body: { password: $("#password").value } });
-    $("#password").value = "";
-    await loadQueue();
-    arm();
-  } catch (err) {
-    loginErr.textContent = err.message;
+  const note = $("#gate-note");
+  $("#desk-login").textContent = account ? account.verified ? "管理当前账号" : "验证邮箱" : "邮箱账号登录";
+  $("#desk-claim").hidden = Boolean(account?.operatorId || account?.roles?.includes("admin"));
+  if (account?.verified && (account.operatorId || account.roles?.includes("admin"))) {
+    note.textContent = "正在进入笼屉…";
+    await tick();
+    return;
   }
+  resetDeskView();
+  note.textContent = account ? account.verified ? "此账号尚未获得模型资格。可以申请成为 AI，或绑定已有模型。" : "请先验证邮箱，再申请成为 AI 或绑定已有模型。" : "请使用邮箱账号登录。原模型运营者需要将旧模型绑定到已验证账号。";
+  try {
+    const legacy = await api("/api/account/legacy-seat");
+    if (sequence !== deskSyncSequence) return;
+    if (legacy?.admin) note.textContent = "检测到旧管理员登录。管理员迁移需由站点维护者在受控部署流程中完成，不能通过公开绑定获得管理权限。";
+    else if (legacy?.operatorId) note.textContent = `检测到旧模型 ${legacy.operatorId}。旧登录只用于迁移提示；请登录并验证邮箱，再用原模型旧口令完成绑定。`;
+  } catch (err) { if (sequence === deskSyncSequence && err.statusCode !== 401) loginErr.textContent = err.message; }
+}
+
+$("#desk-login").addEventListener("click", async () => {
+  await TangbaoAccount.open({ mode: TangbaoAccount.account ? TangbaoAccount.account.verified ? "manage" : "verify" : "login", requireVerified: true });
+  await syncDeskAccount();
 });
+$("#desk-claim").addEventListener("click", async () => {
+  await TangbaoAccount.open({ mode: "claim", requireVerified: true });
+  await syncDeskAccount();
+});
+window.addEventListener("tb:account-change", () => { void syncDeskAccount(); });
+window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });
 
 $("#look").addEventListener("click", () => {
   void tick();
@@ -617,8 +678,7 @@ function applicationCard(item) {
     approve.addEventListener("click", async () => {
       if (!confirmClick(approve, "通过", "确定通过")) return;
       try {
-        const result = await api(`/api/admin/applications/${item.id}/approve`, { method: "POST" });
-        issued.set(item.id, result.password);
+        await api(`/api/admin/applications/${item.id}/approve`, { method: "POST" });
         await loadApplications(true);
       } catch (err) {
         paperNote(paper, err.message);
@@ -671,21 +731,10 @@ function applicationCard(item) {
 
   paper.append(body, side);
 
-  const password = issued.get(item.id);
-  if (password) {
-    const once = document.createElement("p");
-    once.className = "once";
-    const label = document.createElement("span");
-    label.className = "once-label";
-    label.textContent = "口令";
-    const pass = document.createElement("span");
-    pass.className = "pass";
-    pass.textContent = password;
-    const note = document.createElement("span");
-    note.className = "once-note";
-    note.textContent = "只在这张批条上出现一次。对方在首页也能看到；到 /desk 用它掀开笼屉。";
-    once.append(label, pass, note);
-    paper.append(once);
+  if (item.status === "approved") {
+    const note = document.createElement("p"); note.className = "once-note";
+    note.textContent = item.accountId || item.account_id ? "已关联申请账号，使用邮箱账号进入笼屉。" : "历史申请：模型归属需通过旧口令绑定已验证账号。";
+    paper.append(note);
   }
 
   return paper;
@@ -1435,4 +1484,4 @@ document.addEventListener("visibilitychange", () => {
   if (!desk.hidden) void tick();
 });
 
-void tick();
+void TangbaoAccount.ready.then(syncDeskAccount);

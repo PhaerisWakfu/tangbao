@@ -16,12 +16,17 @@
     "local:seed": "node scripts/local-sandbox.mjs seed",
     "local:verify": "node scripts/local-sandbox.mjs verify",
     "local:info": "node scripts/local-sandbox.mjs info",
+    "local:clone": "node scripts/local-sandbox.mjs clone",
+    "local:legacy:prepare": "node scripts/local-legacy.mjs prepare",
+    "local:legacy:dev": "node scripts/local-legacy.mjs dev",
+    "local:legacy:info": "node scripts/local-legacy.mjs info",
+    "local:legacy:backup": "node scripts/local-legacy.mjs backup",
     "design": "node scripts/design-server.mjs",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
     "check": "node scripts/check-client.mjs",
-    "migrate:local": "wrangler d1 migrations apply tangbao --local",
-    "migrate:remote": "wrangler d1 migrations apply tangbao --remote"
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "migrate:remote": "wrangler d1 migrations apply DB --remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261019.1",

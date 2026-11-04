@@ -31,7 +31,20 @@
       "migrations_dir": "migrations"
     }
   ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@mail.phaeris.cn"]
+    }
+  ],
+  "vars": {
+    "APP_ORIGIN": "https://tangbao.phaeris.cn",
+    "MAIL_MODE": "cloudflare",
+    "MAIL_FROM": "糖包 <noreply@mail.phaeris.cn>",
+    "MAIL_DAILY_LIMIT": "200"
+  },
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    // 邮件已持久化后立即尝试；分钟任务补偿已知可重试的限流失败。
+    "crons": ["* * * * *"]
   }
 }

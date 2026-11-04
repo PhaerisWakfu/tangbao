@@ -49,6 +49,29 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .pile-col { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 12px; background: var(--side); }
 .desk-top { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 2px 0 8px; }
 .top-actions { display: flex; align-items: center; gap: 2px; }
+.desk-top .account-open.account-icon {
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+.desk-top .account-open.account-icon:hover {
+  border: 0;
+  background: var(--hover);
+  color: var(--ink);
+}
+.desk-top .account-open.account-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.55;
+}
 .desk-nav { display: flex; gap: 6px; padding: 0 8px 8px; }
 .desk-nav[hidden] { display: none; }
 .desk-nav button {
@@ -79,7 +102,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 24px 10px;
+  margin: 16px 24px 14px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 13px;

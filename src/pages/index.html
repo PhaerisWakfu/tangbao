@@ -13,6 +13,7 @@
   <link rel="preload" href="/assets/tb-serif.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/katex/katex.min.css">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/account.css">
 </head>
 <body data-state="empty" data-presence="awake">
   <script>
@@ -43,12 +44,29 @@
     <aside class="side" id="side">
       <div class="side-top">
         <a class="brand" href="/"><svg class="mark"><use href="#pleat"/></svg>糖包</a>
-        <button class="icon-btn only-narrow" type="button" id="close-side" aria-label="收起侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+        <div class="side-top-actions">
+          <button class="icon-btn only-narrow" type="button" id="close-side" aria-label="收起侧栏"><svg class="i"><use href="#i-side"/></svg></button>
+        </div>
       </div>
       <button class="new" type="button" id="new"><span class="plus"><svg class="i"><use href="#i-plus"/></svg></span>新对话</button>
       <nav class="hist" id="history" aria-label="对话"></nav>
       <div class="side-foot">
-        <a href="/about"><svg class="mark" aria-hidden="true"><use href="#pleat"/></svg><span><b>关于模型</b><small>规格卡</small></span></a>
+        <div class="account-entry">
+          <button class="account-entry-avatar" type="button" data-account-open data-account-avatar aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5.3 20c0-3.5 3-6 6.7-6s6.7 2.5 6.7 6"/></svg>
+          </button>
+          <button class="account-entry-name" type="button" data-account-open data-account-name aria-haspopup="dialog" aria-label="登录或注册糖包账号" title="登录或注册糖包账号">登录 / 注册</button>
+          <button class="account-entry-gear" type="button" id="account-gear" aria-label="更多账号设置" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <div class="account-menu" id="account-menu" role="menu" hidden>
+            <a class="account-menu-item" href="/about" role="menuitem">
+              <span class="account-menu-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M10 5.3C8.8 4.4 7.2 4 5 4v10.8c2.2 0 3.8.4 5 1.2 1.2-.8 2.8-1.2 5-1.2V4c-2.2 0-3.8.4-5 1.3Z"/><path d="M10 5.3v10.7"/></svg></span>
+              <span>关于模型</span>
+              <small>规格卡</small>
+            </a>
+          </div>
+        </div>
       </div>
     </aside>
     <button class="scrim" type="button" id="scrim" aria-label="关闭侧栏"></button>
@@ -137,6 +155,24 @@
     </div>
   </div>
 
+  <div class="apply claim-prompt" id="claim-prompt" hidden>
+    <div class="apply-card claim-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
+      <header>
+        <div>
+          <p class="claim-kicker">匿名历史</p>
+          <h2 id="claim-title">要把旧对话带进账号吗？</h2>
+        </div>
+        <button type="button" id="claim-prompt-close" aria-label="关闭">×</button>
+      </header>
+      <p class="claim-lead">当前浏览器还有 <b id="claim-prompt-count">0</b> 段匿名对话，可以关联到当前账号。</p>
+      <p class="claim-note">逐条选择，或一次全部关联。关联后只可用当前账号访问，原匿名凭证失效；关联完成后可在其他设备查看。</p>
+      <div class="claim-actions">
+        <button class="claim-later" type="button" id="claim-prompt-later">逐条选择</button>
+        <button class="claim-all" type="button" id="claim-prompt-all">全部关联</button>
+      </div>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
@@ -144,6 +180,7 @@
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/account.js"></script>
   <script src="/assets/app.js"></script>
 </body>
 </html>

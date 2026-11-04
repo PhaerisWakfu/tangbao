@@ -2,6 +2,22 @@ ADMIN_PASSWORD=change-me
 ADMIN_SECRET=change-me-to-a-long-random-string
 FEISHU_WEBHOOK=
 
+# 账号与事务邮件：本地默认禁用；local:* 沙箱自动生成独立测试密钥
+MAIL_MODE=disabled
+MAIL_FROM=糖包 <noreply@mail.phaeris.cn>
+APP_ORIGIN=https://tangbao.phaeris.cn
+MAIL_DAILY_LIMIT=200
+EMAIL_CODE_PEPPER=
+MAIL_PAYLOAD_KEY=
+# EMAIL 为 Cloudflare 原生邮件绑定，不是字符串 API key；见 docs/accounts.md
+# 线上由部署者配置 EMAIL，无需在 vars 中存发信 Token。
+# Secrets 在 Cloudflare Worker 设置/密钥或 wrangler secret put 中录入，不提交此处的真实值。
+# 现有站升级时保留 ADMIN_SECRET；仅全新隔离环境生成新的 ADMIN_SECRET。
+MAINTENANCE=0
+# 可选：接入 Cloudflare 可信邮件投递事件队列后设置
+MAIL_EVENTS_QUEUE=
+MAIL_EVENTS_ACCOUNT_ID=
+
 # 可选：浏览器推送
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
