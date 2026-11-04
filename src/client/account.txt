@@ -94,7 +94,7 @@
         : button.querySelector("[data-account-name]");
       if (nameSlot) {
         nameSlot.textContent = account ? account.email.split("@")[0] || "账号" : "登录 / 注册";
-      } else if (!button.classList.contains("account-icon") && !button.hasAttribute("data-account-avatar")) {
+      } else if (!button.classList.contains("account-icon") && !button.hasAttribute("data-account-avatar") && !button.hasAttribute("data-account-static")) {
         button.textContent = account ? account.email + (account.verified ? "" : " · 待验证") : "登录 / 注册";
       }
     }

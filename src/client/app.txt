@@ -23,6 +23,8 @@ const modelBtn = $("#model");
 const modelSearch = $("#model-search");
 const history = $("#history");
 const titleEl = $("#title");
+const claimPrompt = $("#claim-prompt");
+const claimPromptCount = $("#claim-prompt-count");
 const accountGear = $("#account-gear");
 const accountMenu = $("#account-menu");
 
@@ -391,22 +393,16 @@ function renderHistory() {
       }
       row.append(remove); history.append(row);
       if (!thread.owned && TangbaoAccount.account?.verified) {
-        const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
+        const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim history-claim-one"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
         claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
       }
     }
     if (label === "账号对话" && ownedHasMore) {
-      const more = document.createElement("button"); more.type = "button"; more.className = "history-claim";
+      const more = document.createElement("button"); more.type = "button"; more.className = "history-claim history-claim-more";
       more.textContent = ownedLoading ? "正在加载…" : "加载更多账号对话"; more.disabled = ownedLoading;
       more.addEventListener("click", () => { void loadOwnedThreads(true).catch((err) => showSys(err.message)); });
       history.append(more);
     }
-  }
-  if (TangbaoAccount.account?.verified && store.threads.length) {
-    const bar = document.createElement("div"); bar.className = "history-claim-bar";
-    const note = document.createElement("p"); note.textContent = "关联后只可用当前账号访问，原匿名凭证失效。";
-    const claimAll = document.createElement("button"); claimAll.type = "button"; claimAll.className = "history-claim"; claimAll.textContent = "关联全部匿名对话"; claimAll.disabled = claiming;
-    claimAll.addEventListener("click", () => void claimThreads(store.threads.slice())); bar.append(note, claimAll); history.append(bar);
   }
 }
 
@@ -448,11 +444,11 @@ async function loadOwnedThreads(append = false) {
   }
 }
 
-async function claimThreads(threads) {
+async function claimThreads(threads, options = {}) {
   if (claiming || !TangbaoAccount.account?.verified) return;
   const accountId = TangbaoAccount.account.id;
   const label = threads.length > 1 ? `将这 ${threads.length} 段匿名对话关联到 ${TangbaoAccount.account.email}？` : `将这段匿名对话关联到 ${TangbaoAccount.account.email}？`;
-  if (!window.confirm(label + "关联后原匿名访问凭证失效。")) return;
+  if (!options.skipConfirm && !window.confirm(label + "关联后原匿名访问凭证失效。")) return;
   claiming = true; renderHistory();
   let completed = 0;
   try {
@@ -471,6 +467,55 @@ async function claimThreads(threads) {
   finally { claiming = false; renderHistory(); }
 }
 
+let claimPromptTimer = 0;
+
+function claimPromptKey() {
+  const account = TangbaoAccount.account;
+  if (!account?.id || !store.threads.length) return "";
+  const ids = store.threads.map((thread) => thread.id).sort();
+  return `tangbao.claimPrompt.v1.${account.id}.${ids.join(".")}`;
+}
+
+function closeClaimPrompt() {
+  if (!claimPrompt) return;
+  claimPrompt.hidden = true;
+}
+
+function scheduleClaimPrompt(delay = 700) {
+  clearTimeout(claimPromptTimer);
+  claimPromptTimer = window.setTimeout(showClaimPrompt, delay);
+}
+
+function showClaimPrompt() {
+  if (!claimPrompt || !TangbaoAccount.account?.verified || !store.threads.length) return;
+  if (document.querySelector(".account-dialog")?.open) {
+    scheduleClaimPrompt(700);
+    return;
+  }
+  const key = claimPromptKey();
+  if (!key) return;
+  try {
+    if (localStorage.getItem(key) === "1") return;
+  } catch {}
+  claimPromptCount.textContent = String(store.threads.length);
+  claimPrompt.hidden = false;
+  try { localStorage.setItem(key, "1"); } catch {}
+  claimPrompt.querySelector("#claim-prompt-all")?.focus();
+}
+
+async function promptClaimAll() {
+  if (claiming || !store.threads.length) return;
+  closeClaimPrompt();
+  await claimThreads(store.threads.slice(), { skipConfirm: true });
+}
+
+claimPrompt?.addEventListener("click", (event) => {
+  if (event.target === claimPrompt) closeClaimPrompt();
+});
+$("#claim-prompt-close")?.addEventListener("click", closeClaimPrompt);
+$("#claim-prompt-later")?.addEventListener("click", closeClaimPrompt);
+$("#claim-prompt-all")?.addEventListener("click", () => void promptClaimAll());
+
 async function syncAccountHistory() {
   if (loggedOut) return;
   const nextId = TangbaoAccount.account?.id || null;
@@ -485,6 +530,7 @@ async function syncAccountHistory() {
   renderHistory();
   try { await loadOwnedThreads(); }
   catch (err) { showSys(err.message || "账号历史暂时无法读取，请稍后刷新。"); }
+  scheduleClaimPrompt();
 }
 window.addEventListener("tb:account-change", () => { void syncAccountHistory(); });
 window.addEventListener("tb:logout", () => {
@@ -927,6 +973,10 @@ $("#viewer").addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (claimPrompt && !claimPrompt.hidden) {
+    closeClaimPrompt();
+    return;
+  }
   if (!$("#viewer").hidden) {
     closeViewer();
     return;
