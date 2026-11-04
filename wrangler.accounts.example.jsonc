@@ -1,10 +1,10 @@
 {
-  // Copy to ignored wrangler.production.jsonc, then replace ALL placeholders.
+  // Copy to ignored wrangler.accounts-test.jsonc (test) or
+  // wrangler.production.jsonc (production), then replace ALL placeholders.
   // For a private test Worker, use its own name, URL, D1 and KV.
   // No passwords, API tokens, peppers or encryption keys belong in this file.
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "replace-worker-name",
-  "account_id": "00000000000000000000000000000000",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],

@@ -80,40 +80,11 @@ npm run dev
 
 当前项目按 Workers Paid + D1 + KV 部署。免费 Workers 的每日请求额度可能不够持续轮询。
 
-**从旧版升级前，先看[部署者交接、SQL 与上线验收](docs/accounts-rollout.md#代码先提交部署者随后联调)。** 账号迁移不随 Git 提交自动执行；先核对自动部署设置，再安排维护窗口、最新备份、新目标库及配套代码切换。历史图片 KV 必须保留，不能用本地测试库覆盖生产。
+**部署者从这一份[部署、数据迁移与验收手册](docs/accounts-rollout.md)开始。** 手册按“新建独立测试 Worker/D1/KV → 原生邮件及账号验收 → 正式停写、备份、迁移、切换 → 回退”给出命令、检查标准和回传清单。
 
-1. 登录 Cloudflare：
+邮件直接使用 Cloudflare Worker 的 `EMAIL` 绑定和 `env.EMAIL.send()`，不用向开发者提供 Account ID/API Token。验证码 pepper 和邮件内容加密密钥仍需保存为 Worker Secrets，模板与录入位置见手册。
 
-```bash
-npx wrangler login
-```
-
-2. 创建自己的资源：
-
-```bash
-npx wrangler d1 create tangbao
-npx wrangler kv namespace create IMAGES
-```
-
-3. 复制 `wrangler.accounts.example.jsonc` 为不提交的 `wrangler.production.jsonc`，填写实际 Worker、域名、`APP_ORIGIN`、D1/KV 名称和 ID。
-
-   这些 ID 不是密钥，但每个部署者都应该换成自己的资源。
-
-4. 备份并核对目标数据库，再应用尚未执行的迁移，逐项添加服务端 secrets：
-
-```bash
-npx wrangler d1 migrations list DB --remote --config wrangler.production.jsonc
-npx wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc
-# 只有全新 Worker 才生成独立 ADMIN_SECRET，原站升级保留原值。
-npx wrangler secret put EMAIL_CODE_PEPPER --config wrangler.production.jsonc
-npx wrangler secret put MAIL_PAYLOAD_KEY --config wrangler.production.jsonc
-# 按交接手册完成资源/维护/访问限制核对后，再部署选定目标。
-npx wrangler deploy --config wrangler.production.jsonc
-```
-
-不要提交 `.dev.vars` 或 `wrangler.production.jsonc`，也不要上传本地禁用/测试配置。原生 `EMAIL` 绑定运行时不需要发信 API Key；部署 Token 放本机/CI Secrets，邮件 pepper 和加密密钥放 Worker Secrets。发信前确认域名已启用、DNS 已配置，以及正式 `APP_ORIGIN`、发件地址、`MAIL_MODE=cloudflare` 一致。
-
-模板默认维护开启，业务 API、注册和验证均暂停；在覆盖全部入口的受限站点中关闭维护后，才能正常注册、真实邮箱验证并受控引导首个管理员。完整步骤、配置位置、上线验证和回退见[发布交接手册](docs/accounts-rollout.md)。生产发送、收件箱送达、真实回执及历史图片需部署者另行验收。
+账号 migration 不随 Git 提交自动执行。准备好数据前先核对 Git 自动部署；测试站使用独立数据，历史图片 KV 与原引用必须保留。真实发信、历史图片及云端切换由部署者实际验收，本地通过不替代这些结果。
 
 ## 检查
 

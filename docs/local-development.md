@@ -139,15 +139,25 @@ npm run local:legacy:backup -- --instance manual-legacy
 
 所有产物均忽略、不提交。报告明确保留 Turso 真实运行、真实 Cloudflare 邮件送达/退信、生产 HTTPS/边缘缓存、高并发容量和生产迁移等未测边界。浏览器验收另留证，不由 HTTP 场景代替。
 
+## 用已有 D1 备份建立本地副本
+
+本地导入不需要登录 Cloudflare。使用完整结构及数据 SQL、真实已执行迁移 JSON 和全新实例名；取得云端备份的命令见 [部署交接手册](accounts-rollout.md#二导入测试副本执行新增迁移)。
+
+```sh
+npm run local:clone -- --instance accounts-copy --port 8896 --snapshot ./private-assets/account-copy/source.sql --baseline ./private-assets/account-copy/baseline.json
+npm run local:dev -- --instance accounts-copy
+npm run local:info -- --instance accounts-copy
+```
+
+`local:clone` 保留原 SQL，在全新本地 D1 中导入、核对迁移记录，再补尚未执行的 SQL；不猜版本、不覆盖已有实例。报告在实例的 `clone-report.json`。失败保留现场并禁止启动，重试使用新实例名。导入用锁定 Wrangler 的 SQLite 分句器，先建齐表/索引，再导入数据，最后恢复触发器；未知格式停止，不按分号拆字符串或重放历史审计动作。
+
+副本使用独立密钥，撤销复制的账号会话、认领证明及邮件挑战，清除旧 outbox 密文、取消待发任务；远程 D1/KV、真实邮件、飞书和 Web Push 均关闭。不要在真实数据副本运行 `local:seed`；新账号直接从产品页注册，验证码从本地面板查看。旧模型用本人原口令认领；旧匿名历史仍需原浏览器 token，不能按 IP 或历史申请邮箱分配。
+
+SQL 只有图片引用，KV 文件需要独立副本；不为补图回连生产 KV，缺文件时明确标记图片未验收。本地 D1 文件不能直接绑定给云端 Worker，最终部署另建云端 D1 并使用停写后的最新数据。副本演练通过不能当作真实邮箱、真实 KV 或云端迁移已通过。
+
 ## 上线与回退
 
-需要拿现有数据演练时，先用 `local:clone` 导入副本，具体输入、备份获取和切换步骤见 [账号迁移与小范围试用](accounts-rollout.md)。它与生成合成数据的 `local:seed` 用途不同。
-
-生产使用 Cloudflare Email Sending、每日 200 封预算、不设置月度限制；详见 [账号设计](accounts.md)。真实发信由指定受控地址单独验收，发送受理不等于进收件箱。
-
-部署者准备生产时，先在本地检出待发布版本并核对 `wrangler.jsonc` 中 `DB` 的数据库名称/ID，以及 `EMAIL` 的发件地址。新增 `EMAIL_CODE_PEPPER`、`MAIL_PAYLOAD_KEY` 两个 Worker secret，分别使用密码管理器生成至少 32 字节的独立随机值，不填进 Git 或聊天；已有 `ADMIN_SECRET` 也需为足够长的随机值。可在 Cloudflare 的 Worker → 设置 → 变量与机密中添加，或使用 `npx wrangler secret put <名称> --config wrangler.jsonc` 的交互输入。密钥轮换需要另做验证码/outbox/旧凭据恢复安排，不把更换密钥当作普通重启。
-
-D1 迁移使用稳定 binding `DB`，不要沿用旧 `migrate:*` 脚本中的数据库别名。部署者核对和备份目标数据库后，可先用 `npx wrangler d1 migrations list DB --config wrangler.jsonc --remote` 查看待执行文件，再用 `npx wrangler d1 migrations apply DB --config wrangler.jsonc --remote` 应用尚未执行的迁移；随后部署对应版本。本文只是操作说明，本地 demo 不会执行这些远程命令。
+云端原生邮件、独立试运行、Secret 配置、管理员引导、D1/KV 迁移和回退统一按 [部署交接手册](accounts-rollout.md) 执行。本地回归工具保持模拟邮件，不再提供本机 Token/Account ID 远程发信路径。
 
 管理员引导复用 `scripts/bootstrap-admin.mjs`。先通过产品页注册并验证账号，取得目标账号 ID，再明确指定配置和本地/远程目标。脚本默认只生成可审阅 SQL，不执行；例如本地预览：
 

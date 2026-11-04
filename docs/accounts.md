@@ -69,11 +69,11 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
-当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key。部署者的 Wrangler 登录或 CI Token 用于发布/管理资源，不是邮件业务配置；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 则是站点自身的 Worker Secrets。外部应用走 REST API 才需要发信 Token/Account ID，本版没有启用该 REST 适配器。部署顺序、Secrets 放置、管理员引导和验收见[发布交接](accounts-rollout.md#代码先提交部署者随后联调)。
+当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key，也不要求向开发者提供 Cloudflare Account ID 或 API Token。部署者用自己的 Wrangler 登录完成发布；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 是站点保护验证码和邮件内容所需的 Worker Secrets。部署顺序、Secrets 放置、管理员引导和完整验收见[部署交接手册](accounts-rollout.md)。
 
 与 [Send emails 入门指南的 Workers 栏](https://developers.cloudflare.com/email-service/get-started/send-emails/) 对照：`wrangler.jsonc` 配置 `send_email` 的 `EMAIL` 绑定，`src/email.ts` 调用 `env.EMAIL.send({to, from, subject, text, headers})`，保存返回的 `messageId`。验证码先进入持久 outbox 再调用该绑定；纯文本邮件无需额外提供 HTML。
 
-教程的 `remote: true` 用于本地 `wrangler dev` 连接 Cloudflare 真实邮件服务，需要对应账号授权；部署后的 Worker 直接使用原生绑定。`local:*` 验收工具另行强制本地模式、移除远程邮件绑定并使用模拟邮件箱，不能仅修改根配置的 `remote` 就让该沙箱实发。真实联调按发布交接建立独立云端试运行站；若另设本地真实发信配置，只对 `EMAIL` 启用远程绑定，D1/KV 仍保持本地，不能整体改成远程运行。
+真实邮件统一由部署者在 Cloudflare 上的独立试运行 Worker 验证，不再准备本机远程发信配置。部署后的 Worker 直接使用原生 `EMAIL` 绑定，无需教程中用于本地远程开发的 `remote: true`。`local:*` 工具保留独立 D1/KV 和模拟邮件箱，用于本地回归；它不会向真实邮箱发信。
 
 ```text
 MAIL_MODE=disabled                 # disabled | test | cloudflare
@@ -118,4 +118,4 @@ Worker 配置每分钟运行补偿任务，在 10 分钟验证码有效期内处
 浏览器另验 390px/1440px、昼夜主题、键盘、中文输入法、草稿和附件恢复、长期登录与退出清理。受控真实发信另验收件箱、垃圾箱和退信，不以本地替身或供应商受理替代实际送达。当前实现、检查、提交、部署、验收及未测项以 #5–#9 的交付记录为准。
 
 
-本地副本导入、真实邮件联调及配套上线顺序见 [账号迁移与小范围试用](accounts-rollout.md)。
+真实邮件联调、完整验收与配套上线顺序见 [部署交接手册](accounts-rollout.md)；本地副本导入见 [本地部署手册](local-development.md#用已有-d1-备份建立本地副本)。
