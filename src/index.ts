@@ -2398,8 +2398,12 @@ async function requireSeat(request: Request, env: AppEnv): Promise<Seat> {
   }
   if (!account.verified) throw new AuthError(403, "EMAIL_UNVERIFIED", "请先验证邮箱。");
   if (account.roles.includes("admin")) {
-    const owned = await env.DB.prepare("SELECT id,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; operator_uid: string | null }>();
-    return { super: true, operatorId: owned?.id || "", accountId: account.id, operatorUid: owned?.operator_uid || null };
+    const [owned, homeOwner] = await Promise.all([
+      env.DB.prepare("SELECT id,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; operator_uid: string | null }>(),
+      env.DB.prepare("SELECT value FROM settings WHERE key = 'home_owner_account_id'").first<{ value: string }>(),
+    ]);
+    const operatorId = homeOwner?.value === account.id ? HOME_MODEL : owned?.id || "";
+    return { super: true, operatorId, accountId: account.id, operatorUid: owned?.operator_uid || null };
   }
   const operator = await env.DB.prepare("SELECT id,active,operator_uid FROM operators WHERE owner_account_id=?").bind(account.id).first<{ id: string; active: number; operator_uid: string | null }>();
   if (!operator || !account.roles.includes("operator")) throw new AuthError(403, "OPERATOR_REQUIRED", "通过申请或绑定已有模型后，才能进入后台。");

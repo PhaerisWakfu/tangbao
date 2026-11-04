@@ -6,7 +6,7 @@ import {
 
 export { authNow, randomToken, sha256, encryptPayload, decryptPayload, processMailOutbox } from "./email";
 export type AuthEnv = MailEnv;
-export type Account = { id: string; email: string; verified: boolean; status: string; roles: string[]; operatorId: string | null };
+export type Account = { id: string; email: string; verified: boolean; status: string; roles: string[]; operatorId: string | null; home?: boolean };
 export class AuthError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
@@ -126,11 +126,12 @@ async function accountById(env: AuthEnv, id: string): Promise<Account | null> {
   const row = await env.DB.prepare("SELECT id, email, verified_at, status FROM accounts WHERE id = ?").bind(id)
     .first<{ id: string; email: string; verified_at: number; status: string }>();
   if (!row) return null;
-  const [roles, operator] = await Promise.all([
+  const [roles, operator, homeOwner] = await Promise.all([
     env.DB.prepare("SELECT role FROM account_roles WHERE account_id = ? ORDER BY role").bind(id).all<{ role: string }>(),
     env.DB.prepare("SELECT id FROM operators WHERE owner_account_id = ?").bind(id).first<{ id: string }>(),
+    env.DB.prepare("SELECT value FROM settings WHERE key = 'home_owner_account_id'").first<{ value: string }>(),
   ]);
-  return { id: row.id, email: row.email, verified: row.verified_at > 0, status: row.status, roles: roles.results.map(item => item.role), operatorId: operator?.id || null };
+  return { id: row.id, email: row.email, verified: row.verified_at > 0, status: row.status, roles: roles.results.map(item => item.role), operatorId: operator?.id || null, home: homeOwner?.value === id };
 }
 
 export async function getAccount(request: Request, env: AuthEnv): Promise<Account | null> {

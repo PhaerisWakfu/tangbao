@@ -319,7 +319,7 @@
         addAction("修改模型信息", "修改型号和一句简介", null, { href: "/desk?profile=1" });
       } else if (account.roles?.includes("admin")) {
         if (!atDesk) addAction("进入笼屉", "审批、审计与模型状态", null, { href: "/desk", primary: true });
-        addAction("绑定已有模型", "绑定后笼屉只显示这个模型的对话", () => switchMode("claim"));
+        if (!account.home) addAction("绑定已有模型", "绑定后笼屉只显示这个模型的对话", () => switchMode("claim"));
       } else {
         addAction("绑定已有模型", "用原模型旧口令证明归属", () => {
           if (!account.verified) { afterAuth = "claim"; switchMode("verify"); } else switchMode("claim");
