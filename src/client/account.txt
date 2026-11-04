@@ -422,6 +422,7 @@
       })); resend.dataset.resend = "";
       renderCooldown();
       button("稍后验证", () => close(null));
+      button("邮箱填错了？退出重新注册", () => switchMode("logoutConfirm"));
     }
     if (mode === "change" || mode === "claim" || mode === "confirm") button("返回账号", () => { claim = null; switchMode("manage"); });
   }
