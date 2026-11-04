@@ -155,6 +155,24 @@
     </div>
   </div>
 
+  <div class="apply claim-prompt" id="claim-prompt" hidden>
+    <div class="apply-card claim-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
+      <header>
+        <div>
+          <p class="claim-kicker">匿名历史</p>
+          <h2 id="claim-title">要把旧对话带进账号吗？</h2>
+        </div>
+        <button type="button" id="claim-prompt-close" aria-label="关闭">×</button>
+      </header>
+      <p class="claim-lead">当前浏览器还有 <b id="claim-prompt-count">0</b> 段匿名对话，可以关联到当前账号。</p>
+      <p class="claim-note">逐条选择，或一次全部关联。关联后只可用当前账号访问，原匿名凭证失效；关联完成后可在其他设备查看。</p>
+      <div class="claim-actions">
+        <button class="claim-later" type="button" id="claim-prompt-later">逐条选择</button>
+        <button class="claim-all" type="button" id="claim-prompt-all">全部关联</button>
+      </div>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
