@@ -21,10 +21,10 @@ Issue 读取、阶段更新、关系维护和交付回填统一优先用 `gh iss
 
 ## 工作位置和改动
 
-- 每个 Epic 单独使用并复用其功能分支，默认 codex/epic-<父Issue编号>-<名称>，默认基线 main；先查已有分支并记录基线。同一 Epic 子项共用，不将两个 Epic 混入一条分支。独立工具/文档 Task 在 Issue 记录实际分支。
+- 每个 Epic 单独使用并复用其功能分支，默认 `feat/epic-<父Issue编号>-<slug>`，默认基线 `main`；先查已有分支并记录基线。同一 Epic 子项共用，不将两个 Epic 混入一条分支。独立工具/文档 Task 使用 `chore/<slug>` 或 `docs/<slug>`，并在 Issue 记录实际分支。
 - 分支操作服从本次明确指令及适用规则。切换前检查脏文件和运行实例，保留并隔离无关工作；只停止本任务启动且会受影响的实例。不同 instance 隔离数据，不隔离同一 checkout 的源码版本。
 - 围绕验收结果做最小可审阅改动。检查共享代码的相关消费者；鉴权、账号归属和匿名额度由服务端执行；数据结构使用顺序 migration，并检查 D1/Turso 原子性和返回值差异。
-- 新发现的独立 Bug 建立或关联 bug Issue，按 bugfix 流程在 rick-dev 处理，记录带回本 Epic 的依赖/提交；不顺带吸收无关修复。公开安全问题按 SECURITY.md 脱敏。
+- 新发现的独立 Bug 建立或关联 bug Issue，按 bugfix 流程使用 `fix/<issue>-<slug>` 或紧急 `hotfix/<version>-<slug>` 处理，记录带回本 Epic 的依赖/提交；不顺带吸收无关修复。公开安全问题按 SECURITY.md 脱敏。
 
 ## 验证和交付
 

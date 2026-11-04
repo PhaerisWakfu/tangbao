@@ -1,15 +1,15 @@
 ---
 name: bugfix
-description: 调查并修复糖包项目的缺陷，通过 GitHub CLI（gh）维护 Bug Issue，在 rick-dev 定位根因、实施修复、回归并回填验收证据。用于异常反馈、Bug 排查和修复；新增能力及产品范围设计分别使用 develop 或 requirement。
+description: 调查并修复糖包项目的缺陷，通过 GitHub CLI（gh）维护 Bug Issue，在 fix/ 或 hotfix/ 分支定位根因、实施修复、回归并回填验收证据。用于异常反馈、Bug 排查和修复；新增能力及产品范围设计分别使用 develop 或 requirement。
 metadata:
-  short-description: "调查糖包项目缺陷，维护 Bug Issue，在 rick-dev 修复并记录根因、回归和验收状态"
+  short-description: "调查糖包项目缺陷，维护 Bug Issue，在 fix/ 或 hotfix/ 分支修复并记录根因、回归和验收状态"
 ---
 
 # 缺陷修复
 
 输入为异常反馈或已有 Bug Issue；输出为证据支持的调查结论、适用的修复与回归记录。未复现、仅静态发现和已修复是不同结论。
 
-调用示例：使用 `$bugfix` 调查并修复当前缺陷，维护 Bug Issue，在 rick-dev 完成针对性回归和结果回填。
+调用示例：使用 `$bugfix` 调查并修复当前缺陷，维护 Bug Issue，在 fix/<issue>-<slug> 或 hotfix/<version>-<slug> 完成针对性回归和结果回填。
 
 Bug 查重、创建、编辑、标签/指派、原生关系及回归回填统一优先用 `gh issue`，缺少子命令的能力用 `gh api`；认证、长正文写入和写后回读遵循 [CLI 操作规则](../../../docs/issue-workflow.md#github-cli-操作)。CLI 写入失败先核实权限和实际结果，不直接改用浏览器来掩盖失败。
 
@@ -21,7 +21,7 @@ Bug 查重、创建、编辑、标签/指派、原生关系及回归回填统一
 
 ## 定位和修复
 
-- Bug 修复使用 Ricky 专属 rick-dev，名称不加 codex/。先检查本地/远程同名分支，按项目规则及本次用户明确指令选择工作位置，记录基线；不得在分支不符时悄悄改代码或改写规则。
+- 普通 Bug 使用 `fix/<issue>-<slug>`；线上紧急修复使用 `hotfix/<version>-<slug>`。先检查本地/远程同名分支，按项目规则及本次用户明确指令选择工作位置，记录基线；不得在分支不符时悄悄改代码或改写规则。
 - 切换前检查脏文件和此 checkout 的运行实例，保留无关修改，不自动 stash/reset/强推或合并并行工作。只停止本任务启动且会受影响的实例；数据 instance 不能隔离源码版本。
 - 按本地手册用隔离合成场景复现。保留重要的首次失败、重跑条件及环境差异。无法复现时继续有依据的静态定位和证据收集，在 Issue 写明下一步；不能把未复现直接写成已解决。
 - 找到拥有该规则的代码，先形成证据支持的根因、修复方案和回归范围，更新 Issue 为开发中。检查相关消费者，不只修单个页面；权限和数据一致性在服务端保证。

@@ -19,7 +19,18 @@ npm run check
 
 ## Git 与交付
 
-每个 Epic 使用独立功能分支，功能子任务复用父 Epic 分支；Bug 修复使用 Ricky 专属的 `rick-dev`。分支命名、基线及例外在对应 Issue 明确记录，详见 [Issue 工作流程](docs/issue-workflow.md)。保留他人的未提交改动，不扩大本次提交范围。
+分支使用短生命周期命名，统一小写和短横线，不使用个人名、工具名前缀：
+
+```text
+feat/<issue>-<slug>        功能
+fix/<issue>-<slug>         普通缺陷
+hotfix/<version>-<slug>    线上紧急修复
+chore/<slug>               工程维护
+docs/<slug>                文档
+refactor/<slug>            重构
+```
+
+Epic 使用 `feat/epic-<父 Issue 编号>-<slug>`，功能子任务复用父 Epic 分支；其余任务一 Issue 一分支，从 `main` 拉出，合并后删除。分支命名、基线及例外在对应 Issue 明确记录，详见 [Issue 工作流程](docs/issue-workflow.md)。保留他人的未提交改动，不扩大本次提交范围。
 
 Git 提交以中文为主，首行标题后必须空一行，再用正文说明改动、影响范围或验证结果，并以 `Refs #编号` 关联 Issue；不得只写单行标题。
 
