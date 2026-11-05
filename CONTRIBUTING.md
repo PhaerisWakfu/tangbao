@@ -36,6 +36,19 @@ Git 提交以中文为主，首行标题后必须空一行，再用正文说明�
 
 PR 使用仓库模板，提交后把分支、变更与验证记录回填 Issue。代码完成、提交、推送、发布和验收分别记录，验收完成前不自动关闭 Issue。
 
+## 分支清理
+
+合并到 `main` 后及时删除自己的功能或修复分支，避免远端堆积。删除前先确认分支已经完全合并：
+
+```bash
+git fetch origin --prune
+git branch -r --merged origin/main
+git merge-base --is-ancestor origin/<branch> origin/main
+git push origin --delete <branch>
+```
+
+只删除**自己创建且已合并**的分支。`main`、未合并分支和他人分支必须保留；删除他人分支前先取得对方确认。本地对应分支用 `git branch -d` 清理，不要用 `-D` 删除未合并分支。
+
 ## 版本与发布 tag
 
 生产发布使用 annotated tag，按语义化版本递增，标记实际发布的 `main` 提交：
