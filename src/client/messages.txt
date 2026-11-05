@@ -57,8 +57,7 @@ window.TangbaoMessagePages = class {
   }
   static async imageSource(src, token) {
     const url = new URL(src, location.origin);
-    const expires = Number(url.searchParams.get("e"));
-    if (!expires || expires > Date.now()) return src;
+    if (!url.searchParams.has("e")) return src;
     if (url.origin !== location.origin || !url.pathname.startsWith("/api/images/")) throw new Error("图片地址不正确。");
     const response = await fetch(src, { credentials: "same-origin", headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!response.ok) throw new Error("图片暂时无法打开，请回到有权访问的对话重试。");

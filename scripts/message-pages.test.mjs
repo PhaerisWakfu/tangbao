@@ -63,3 +63,8 @@ test("a successful poll cannot hide an older-page failure", async () => {
   await pages.load("a", "/a"); await assert.rejects(pages.load("a", "/a", {}, "older"));
   await pages.load("a", "/a"); assert.equal(pages.error, "older failed");
 });
+test("signed image opening uses existing authorization even when the browser clock is behind", async () => {
+  let calls = 0;
+  const { Class } = pager(async () => {}, { Date: { now: () => 0 }, URL: class extends URL { static createObjectURL() { return "blob:clock-independent"; } }, fetch: async () => { calls++; return { ok: true, blob: async () => ({}) }; } });
+  assert.equal(await Class.imageSource("/api/images/test?e=1&s=expired-on-server", "thread-token"), "blob:clock-independent"); assert.equal(calls, 1);
+});
