@@ -52,6 +52,7 @@ let messages = [];
 let messagesThreadId = null;
 let messagesHasMore = false;
 let messagesLoading = false;
+let accountUnread = 0;
 let openAwaiting = true;
 let painted = "";
 let timer = 0;
@@ -383,6 +384,49 @@ async function loadOlderMessages() {
   }
 }
 
+function updateUserTitle() {
+  document.title = accountUnread > 0 ? "(新消息) 糖包" : "糖包";
+}
+
+async function markAccountRead(thread) {
+  if (!thread?.owned) return;
+  try {
+    await api(`/api/account/threads/${thread.id}/read`, { method: "POST" });
+  } catch {
+    return;
+  }
+  if (thread.unread) {
+    thread.unread = false;
+    accountUnread = Math.max(0, accountUnread - 1);
+    updateUserTitle();
+    renderHistory();
+  }
+}
+
+async function refreshUnread() {
+  const account = TangbaoAccount.account;
+  if (!account?.verified) {
+    accountUnread = 0;
+    updateUserTitle();
+    return;
+  }
+  try {
+    const data = await api("/api/account/unread");
+    const ids = new Set((data.threads || []).map((item) => item.id));
+    accountUnread = Number(data.count) || 0;
+    for (const thread of ownedThreads) thread.unread = ids.has(thread.id);
+    if (current?.owned && ids.has(current.id) && document.visibilityState === "visible") {
+      current.unread = false;
+      accountUnread = Math.max(0, accountUnread - 1);
+      void markAccountRead(current);
+    }
+    renderHistory();
+    updateUserTitle();
+  } catch {
+    // 下一轮再查，不打断聊天。
+  }
+}
+
 function historyModel(thread) {
   if (thread.queued || thread.operator === "tangbao-pool") return "Auto";
   if (!thread.operator) return "";
@@ -434,6 +478,14 @@ function renderHistory() {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
       if (thread.pinned) row.dataset.pinned = "true";
+      if (thread.unread) {
+        const dot = document.createElement("span");
+        dot.className = "hist-unread-dot";
+        dot.setAttribute("role", "img");
+        dot.setAttribute("aria-label", "有新回复");
+        dot.title = "有新回复";
+        row.append(dot);
+      }
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
       link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
       row.append(link);
@@ -731,6 +783,7 @@ async function syncAccountHistory() {
   renderHistory();
   try { await loadOwnedThreads(); }
   catch (err) { showSys(err.message || "账号历史暂时无法读取，请稍后刷新。"); }
+  void refreshUnread();
   scheduleClaimPrompt();
 }
 window.addEventListener("tb:account-change", () => { void syncAccountHistory(); });
@@ -739,6 +792,7 @@ window.addEventListener("tb:logout", () => {
   clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
   current = null; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; store = { threads: [], activeId: null };
   messages = []; messagesThreadId = null; messagesHasMore = false; messagesLoading = false;
+  accountUnread = 0; updateUserTitle();
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
@@ -849,6 +903,7 @@ function arm() {
 async function tick() {
   try {
     await loadModels(false);
+    await refreshUnread();
     await refresh();
   } catch {
     // 下一轮再看。失败不改掉已经写在页面上的话。
@@ -865,6 +920,12 @@ async function openThread(id) {
   if (!found) return;
   viewVersion++;
   current = found;
+  if (found.owned) void markAccountRead(found);
+  else {
+    found.unread = false;
+    found.lastReadAt = found.updatedAt || Date.now();
+    saveStore();
+  }
   messages = [];
   messagesThreadId = id;
   messagesHasMore = false;
@@ -1593,6 +1654,7 @@ document.addEventListener("visibilitychange", () => {
 
 const pendingTimer = setInterval(tickPending, 15000);
 renderHistory();
+updateUserTitle();
 void (async () => {
   await TangbaoAccount.ready;
   await syncAccountHistory();

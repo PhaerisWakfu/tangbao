@@ -287,6 +287,15 @@ body[data-presence="asleep"] svg.steam { display: none; }
 .hist .text-btn svg.i { width: 15px; height: 15px; color: var(--muted); }
 .hist .text-btn:hover svg.i { color: var(--ink); }
 .hist-row { position: relative; }
+.hist-unread-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 0 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .hist-pin-mark {
   display: grid;
   flex: none;

@@ -28,6 +28,7 @@ const profileErr = $("#profile-err");
 const profileOk = $("#profile-ok");
 
 let waiting = 0;
+let unread = 0;
 let pending = 0;
 let applyPage = 1;
 let auditPage = 1;
@@ -115,6 +116,7 @@ function showDesk(on) {
     gateCard.classList.remove("is-booting");
     gateCard.setAttribute("aria-busy", "false");
     waiting = 0;
+    unread = 0;
     pending = 0;
     applyPage = 1;
     auditPage = 1;
@@ -126,7 +128,7 @@ function showDesk(on) {
 }
 
 function paintTitle() {
-  document.title = waiting > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
+  document.title = unread > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
 }
 
 function applyPresence(status) {
@@ -424,6 +426,7 @@ async function loadOlderThread() {
 async function loadQueue() {
   const data = await api("/api/admin/queue");
   waiting = (data.waiting || []).length;
+  unread = (data.waiting || []).filter((item) => item.unread).length;
   pending = Number(data.pending) || 0;
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   showDesk(true);
@@ -516,6 +519,9 @@ async function openSlip(id, fromAudit) {
     const data = await api(`/api/admin/threads/${id}`);
     if (selected !== id) return;
     renderThread(data);
+    if (!readonly && data.thread.operatorId === seat.operatorId) {
+      await api(`/api/admin/threads/${id}/read`, { method: "POST" }).catch(() => {});
+    }
     await loadQueue();
   } catch (err) {
     replyErr.textContent = err.message;

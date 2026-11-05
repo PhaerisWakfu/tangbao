@@ -512,6 +512,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (adminPin && method === "POST") return pinThread(request, env, adminPin[1]);
   const adminRename = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/rename$/);
   if (adminRename && method === "POST") return renameAdminThread(request, env, adminRename[1]);
+  const adminReadMarker = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/read$/);
+  if (adminReadMarker && method === "POST") return markThreadRead(request, env, adminReadMarker[1]);
 
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
@@ -1749,11 +1751,12 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt,
-        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned,
+        CASE WHEN EXISTS(SELECT 1 FROM thread_reads r WHERE r.thread_id=threads.id AND r.owner_kind='operator' AND r.owner_id=? AND r.last_read_at>=threads.updated_at) THEN 0 ELSE 1 END AS unread
        FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY pinned DESC,updated_at ASC LIMIT 100`,
     )
-      .bind(own, own, ...ownership.values)
-      .all<{ id: string; title: string; preview: string; updatedAt: number; pinned: number }>(),
+      .bind(own, own, own, ...ownership.values)
+      .all<{ id: string; title: string; preview: string; updatedAt: number; pinned: number; unread: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole,
         EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
@@ -2040,6 +2043,19 @@ async function pinThread(request: Request, env: AppEnv, id: string): Promise<Res
       .bind(id, seat.operatorId).run();
   }
   return json({ ok: true, pinned });
+}
+
+async function markThreadRead(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再标记已读。");
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const thread = await env.DB.prepare(`SELECT updated_at AS updatedAt FROM threads WHERE id = ? AND ${ownership.sql}`)
+    .bind(id, ...ownership.values).first<{ updatedAt: number }>();
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+  await env.DB.prepare(`INSERT INTO thread_reads(thread_id,owner_kind,owner_id,last_read_at) VALUES(?,'operator',?,?)
+    ON CONFLICT(thread_id,owner_kind,owner_id) DO UPDATE SET last_read_at=excluded.last_read_at`)
+    .bind(id, seat.operatorId, thread.updatedAt).run();
+  return json({ ok: true });
 }
 
 async function renameAdminThread(request: Request, env: AppEnv, id: string): Promise<Response> {
