@@ -22,6 +22,8 @@ const composer = $("#composer");
 const sys = $("#sys");
 const card = $("#card");
 const modelBtn = $("#model");
+const modelScrim = $("#model-scrim");
+const modelClose = $("#model-close");
 const modelSearch = $("#model-search");
 const history = $("#history");
 const titleEl = $("#title");
@@ -1073,6 +1075,7 @@ async function sendText(text) {
 
 function closeCard() {
   card.hidden = true;
+  modelScrim.hidden = true;
   modelBtn.setAttribute("aria-expanded", "false");
 }
 
@@ -1080,8 +1083,11 @@ modelBtn.addEventListener("click", (event) => {
   event.stopPropagation();
   const open = card.hidden;
   card.hidden = !open;
+  modelScrim.hidden = !open;
   modelBtn.setAttribute("aria-expanded", String(open));
 });
+modelClose.addEventListener("click", closeCard);
+modelScrim.addEventListener("click", closeCard);
 card.addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", closeCard);
 
@@ -1345,11 +1351,13 @@ function paintModels() {
   if (!id) auto.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
   auto.addEventListener("click", () => {
     if (current) {
+      closeCard();
       newChat(AUTO);
       return;
     }
     chosen = AUTO;
     paintModels();
+    closeCard();
   });
   list.append(auto);
 
@@ -1377,11 +1385,13 @@ function paintModels() {
     button.addEventListener("click", () => {
       if (!online) return;
       if (current) {
+        closeCard();
         newChat(model.id);
         return;
       }
       chosen = model.id;
       paintModels();
+      closeCard();
     });
     list.append(button);
   };
@@ -1394,9 +1404,11 @@ function paintModels() {
     list.append(empty);
   }
   if (!modelSearchMode && modelSearchHidden > 0) {
-    const more = document.createElement("p");
-    more.className = "model-more static";
-    more.textContent = `还有 ${modelSearchHidden} 个型号，搜索查看`;
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "model-more";
+    more.textContent = `查看全部 ${modelSearchHidden} 个型号`;
+    more.addEventListener("click", () => void browseAllModels());
     list.append(more);
   }
   if (modelSearchMode && modelSearchHasMore) {
@@ -1464,6 +1476,27 @@ async function searchModels() {
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchHasMore = Boolean(data.hasMore);
     modelSearchHidden = 0;
+    modelsAt = Date.now();
+    paintModels();
+  } catch (err) {
+    if (seq === modelSearchSeq) showSys(err.message);
+  }
+}
+
+async function browseAllModels() {
+  modelSearchMode = true;
+  modelSearchQuery = "";
+  modelSearchPage = 1;
+  modelSearchHasMore = false;
+  modelSearchHidden = 0;
+  modelSearch.value = "";
+  const seq = ++modelSearchSeq;
+  try {
+    const data = await api("/api/models?page=1");
+    if (seq !== modelSearchSeq) return;
+    models = data.models || [];
+    autoModel = typeof data.auto === "string" ? data.auto : "";
+    modelSearchHasMore = Boolean(data.hasMore);
     modelsAt = Date.now();
     paintModels();
   } catch (err) {

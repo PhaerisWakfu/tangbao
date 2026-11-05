@@ -1147,31 +1147,58 @@ body[data-state="chat"] .stage {
 .send svg.i { width: 17px; height: 17px; stroke-width: 2; }
 .send:disabled { background: var(--off); color: var(--off-ink); cursor: default; }
 .send:not(:disabled):active { transform: scale(0.94); }
+.model-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 54;
+  background: rgba(31, 29, 26, 0.3);
+  backdrop-filter: blur(2px);
+}
+.model-scrim[hidden] { display: none; }
 .card {
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 10px);
-  z-index: 20;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 55;
   display: flex;
   flex-direction: column;
-  width: 304px;
-  max-height: calc(100dvh - 24px);
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(640px, calc(100dvh - 48px));
   padding: 16px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
-  box-shadow: 0 24px 60px -24px rgba(31, 29, 26, 0.28), 0 2px 8px rgba(31, 29, 26, 0.05);
+  box-shadow: 0 24px 60px -24px rgba(31, 29, 26, 0.35), 0 2px 8px rgba(31, 29, 26, 0.05);
+  transform: translate(-50%, -50%);
 }
 .card[hidden] { display: none; }
-.card header { display: flex; align-items: center; gap: 12px; }
+.card header { position: relative; display: flex; align-items: center; gap: 12px; padding-right: 30px; }
 .card header svg.mark { width: 34px; height: 34px; }
 .card h2 { margin: 0; font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: 0.04em; }
 .card header p { margin: 1px 0 0; font-size: 12px; color: var(--faint); }
 .card header svg.ok { margin-left: auto; color: var(--accent); }
+.card-close {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 20px;
+  cursor: pointer;
+}
+.card-close:hover { background: var(--hover); color: var(--ink); }
 .card .model-list {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: min(32vh, 260px);
+  max-height: min(42vh, 360px);
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
@@ -2123,16 +2150,17 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   .launch-notice-close { top: 8px; right: 8px; width: 26px; height: 26px; }
 
   .card {
-    position: fixed;
+    top: auto;
     left: 12px;
     right: 12px;
     bottom: max(12px, env(safe-area-inset-bottom));
     width: auto;
-    max-height: calc(100dvh - 24px - env(safe-area-inset-top));
-    z-index: 55;
+    max-height: min(76dvh, calc(100dvh - 24px - env(safe-area-inset-top)));
+    border-radius: 20px;
+    transform: none;
   }
   .card .model-list {
-    max-height: min(46dvh, 360px);
+    max-height: min(48dvh, 420px);
   }
 }
 
