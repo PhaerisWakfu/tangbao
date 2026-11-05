@@ -26,13 +26,16 @@
     "types": "wrangler types",
     "check": "node scripts/check-client.mjs",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "migrate:turso": "node scripts/migrate-turso.mjs",
+    "browser:local": "node scripts/browser.mjs",
+    "shoot:local": "node scripts/shoot-site.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261019.1",
     "playwright-core": "^1.64.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.42.0"
+    "wrangler": "^4.157.0"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

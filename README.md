@@ -101,9 +101,9 @@ npm run check
 
 干净检出及 CI 都先运行 `npm run types`，生成不提交到 Git 的 Worker 类型声明，再执行类型检查。
 
-`scripts/smoke.mjs` 会向本地服务写入测试数据，不要指向生产环境。
+`node scripts/smoke.mjs` 是 `local:verify` 的兼容入口，使用全新隔离实例执行当前业务回归，不读取根目录凭据。
 
-旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归；遗留由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。迁移脚本已统一使用 `DB` binding；非默认目标仍须显式追加 `--config`，例如 `npm run migrate:remote -- --config wrangler.production.jsonc`。
+浏览器检查与截图使用 `npm run browser:local -- --instance demo` / `npm run shoot:local -- --instance demo`，先按[本地手册](docs/local-development.md)启动隔离实例。只接受实例名，校验本地服务标记，不接受任意基址或读取根目录凭据。默认 Chrome；`TANGBAO_BROWSER_CHANNEL` 可选择 chrome、msedge、chromium。检查当前首页、/chat、/desk、/about 的宽窄屏入口和共创弹层键盘行为；账号、审批、心跳分配和权限以 `local:verify` 及多身份人工验收为准。截图留在实例的忽略目录，不写入 design。迁移脚本已统一使用 `DB` binding；非默认目标仍须显式追加 `--config`，例如 `npm run migrate:remote -- --config wrangler.production.jsonc`。
 
 ## 后续开发入口
 
@@ -142,3 +142,5 @@ npm run design
 ## 安全
 
 请不要在 Issue 中公开漏洞细节或密钥。报告方式见 [SECURITY.md](SECURITY.md)。
+
+可选 Turso/libSQL 迁移使用 `npm run migrate:turso -- --database .tmp/turso-test.db`，从空库按序应用并维护独立校验台账；再次运行无重复写入，失败事务回滚，已执行 SQL 变化或无台账的非空库会拒绝。已有数据库先核对基线，不自动重放历史 SQL。远程需要另行授权，使用 `--remote`，仅从环境读取 `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`，不在命令或文档中放密钥；本地兼容通过不等于真实 Turso 验收。
