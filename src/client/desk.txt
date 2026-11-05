@@ -12,11 +12,6 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
-const threadMoreWrap = $("#thread-more-wrap");
-const threadMore = $("#thread-more");
-const threadMenu = $("#thread-menu");
-const pinThreadAction = $("#pin-thread");
-const renameThreadAction = $("#rename-thread");
 const deskRename = $("#desk-rename");
 const deskRenameInput = $("#desk-rename-input");
 let renameTarget = null;
@@ -141,7 +136,33 @@ function applyPresence(status) {
   presenceLabel.textContent = status?.label || (state === "online" ? "在线" : "离开");
 }
 
+function closeSlipMenus() {
+  for (const menu of document.querySelectorAll(".slip-menu:not([hidden])")) {
+    menu.hidden = true;
+    menu.closest(".slip-row")?.querySelector(".slip-more")?.setAttribute("aria-expanded", "false");
+  }
+}
+
+async function toggleSlipPin(item) {
+  try {
+    await api(`/api/admin/threads/${item.id}/pin`, { method: "POST", body: { pinned: !item.pinned } });
+    await tick();
+  } catch (error) {
+    replyErr.textContent = error.message || "置顶操作没有保存。";
+  }
+}
+
 function slip(item, kind) {
+  const row = document.createElement("div");
+  row.className = "slip-row";
+  if (item.pinned) row.dataset.pinned = "true";
+  if (item.pinned) {
+    const mark = document.createElement("span");
+    mark.className = "slip-pin-mark";
+    mark.setAttribute("aria-label", "已置顶");
+    mark.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 14.8v3.4M7.4 9.2a1.7 1.7 0 0 1-.9 1.5l-1.3.7a1.7 1.7 0 0 0-.9 1.5v.5h11.4v-.5a1.7 1.7 0 0 0-.9-1.5l-1.3-.7a1.7 1.7 0 0 1-.9-1.5V6.3a1 1 0 0 1 .8-1 1.4 1.4 0 0 0-.2-2.7H7.8a1.4 1.4 0 0 0-.2 2.7 1 1 0 0 1 .8 1z"/></svg>';
+    row.append(mark);
+  }
   const button = document.createElement("button");
   button.type = "button";
   button.className = kind === "wait" ? "slip waiting" : "slip";
@@ -165,16 +186,57 @@ function slip(item, kind) {
         ? `拉黑于 ${clock(item.updatedAt)}`
         : `回于 ${clock(item.updatedAt)}`;
   button.append(meta);
-  if (item.pinned) {
-    const pinned = document.createElement("span");
-    pinned.className = "slip-pin";
-    pinned.textContent = "置顶";
-    button.append(pinned);
-  }
   button.addEventListener("click", () => {
     void openSlip(item.id);
   });
-  return button;
+  row.append(button);
+
+  if (kind === "wait" || kind === "done") {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "slip-more";
+    more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-expanded", "false");
+    more.setAttribute("aria-label", "对话操作");
+    more.title = "对话操作";
+    more.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4.2" r="1.25"/><circle cx="10" cy="10" r="1.25"/><circle cx="10" cy="15.8" r="1.25"/></svg>';
+    const menu = document.createElement("div");
+    menu.className = "slip-menu";
+    menu.hidden = true;
+    menu.setAttribute("role", "menu");
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "slip-menu-item";
+    pin.setAttribute("role", "menuitem");
+    pin.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 14.8v3.4M7.4 9.2a1.7 1.7 0 0 1-.9 1.5l-1.3.7a1.7 1.7 0 0 0-.9 1.5v.5h11.4v-.5a1.7 1.7 0 0 0-.9-1.5l-1.3-.7a1.7 1.7 0 0 1-.9-1.5V6.3a1 1 0 0 1 .8-1 1.4 1.4 0 0 0-.2-2.7H7.8a1.4 1.4 0 0 0-.2 2.7 1 1 0 0 1 .8 1z"/></svg><span>${item.pinned ? "取消置顶" : "置顶"}</span>`;
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "slip-menu-item";
+    rename.setAttribute("role", "menuitem");
+    rename.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></svg><span>重命名</span>';
+    menu.append(pin, rename);
+    more.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const opening = menu.hidden;
+      closeSlipMenus();
+      if (!opening) return;
+      menu.hidden = false;
+      more.setAttribute("aria-expanded", "true");
+      pin.focus();
+    });
+    menu.addEventListener("click", (event) => event.stopPropagation());
+    pin.addEventListener("click", () => {
+      closeSlipMenus();
+      void toggleSlipPin(item);
+    });
+    rename.addEventListener("click", () => {
+      closeSlipMenus();
+      openDeskRename(item.id, item.title);
+    });
+    row.append(more, menu);
+  }
+  return row;
 }
 
 function renderQueue(data) {
@@ -223,11 +285,6 @@ function renderThread(data) {
   const locked = readonly || !own;
   const shelve = $("#shelve");
   const block = $("#block");
-  threadMoreWrap.hidden = locked;
-  threadMenu.hidden = true;
-  threadMore.setAttribute("aria-expanded", "false");
-  pinThreadAction.dataset.pinned = data.thread.pinned ? "1" : "";
-  pinThreadAction.querySelector("span").textContent = data.thread.pinned ? "取消置顶" : "置顶";
   shelve.hidden = locked || Boolean(data.thread.blocked) || !data.thread.awaiting;
   block.hidden = !seat.super && !own;
   $("#back-audit").hidden = !readonly;
@@ -431,20 +488,14 @@ $("#profile-back").addEventListener("click", () => {
 
 profileForm.addEventListener("submit", saveProfile);
 
-function closeThreadMenu() {
-  threadMenu.hidden = true;
-  threadMore.setAttribute("aria-expanded", "false");
-}
-
 function closeDeskRename() {
   deskRename.hidden = true;
   renameTarget = null;
 }
 
-function openDeskRename() {
-  if (!selected) return;
-  renameTarget = selected;
-  deskRenameInput.value = $("#slip-title").textContent || "";
+function openDeskRename(id, title) {
+  renameTarget = id;
+  deskRenameInput.value = title || "";
   deskRename.hidden = false;
   deskRenameInput.focus();
   deskRenameInput.select();
@@ -460,7 +511,7 @@ async function saveDeskRename() {
   }
   try {
     const data = await api(`/api/admin/threads/${renameTarget}/rename`, { method: "POST", body: { title } });
-    $("#slip-title").textContent = data.title || title;
+    if (selected === renameTarget) $("#slip-title").textContent = data.title || title;
     closeDeskRename();
     await tick();
   } catch (error) {
@@ -468,32 +519,6 @@ async function saveDeskRename() {
   }
 }
 
-threadMore.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  const opening = threadMenu.hidden;
-  closeThreadMenu();
-  if (!opening) return;
-  threadMenu.hidden = false;
-  threadMore.setAttribute("aria-expanded", "true");
-  pinThreadAction.focus();
-});
-threadMenu.addEventListener("click", (event) => event.stopPropagation());
-pinThreadAction.addEventListener("click", async () => {
-  if (!selected) return;
-  const next = pinThreadAction.dataset.pinned !== "1";
-  closeThreadMenu();
-  try {
-    await api(`/api/admin/threads/${selected}/pin`, { method: "POST", body: { pinned: next } });
-    await tick();
-  } catch (error) {
-    replyErr.textContent = error.message || "置顶操作没有保存。";
-  }
-});
-renameThreadAction.addEventListener("click", () => {
-  closeThreadMenu();
-  openDeskRename();
-});
 $("#desk-rename-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void saveDeskRename();
@@ -503,7 +528,7 @@ $("#desk-rename-cancel").addEventListener("click", closeDeskRename);
 deskRename.addEventListener("click", (event) => {
   if (event.target === deskRename) closeDeskRename();
 });
-document.addEventListener("click", closeThreadMenu);
+document.addEventListener("click", closeSlipMenus);
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
@@ -568,7 +593,7 @@ function resetDeskView() {
   pendingImages = []; showAttach();
   $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
   $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
-  threadMoreWrap.hidden = true; closeThreadMenu(); closeDeskRename();
+  closeSlipMenus(); closeDeskRename();
   showPane("thread"); showDesk(false);
 }
 
@@ -1605,8 +1630,8 @@ document.addEventListener("keydown", (event) => {
     closeDeskRename();
     return;
   }
-  if (!threadMenu.hidden) {
-    closeThreadMenu();
+  if (document.querySelector(".slip-menu:not([hidden])")) {
+    closeSlipMenus();
     return;
   }
   if (!$("#viewer").hidden) {
