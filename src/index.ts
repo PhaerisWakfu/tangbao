@@ -87,7 +87,8 @@ const MODEL_RECENT_MS = 30 * DAY;
 const MODEL_PAGE_SIZE = 30;
 const AUDIT_MODEL_PAGE_SIZE = 20;
 const MODEL_SEARCH_MAX = 40;
-const QUEUE_CAP = 400;
+// Per-model admission control for new conversations. Existing threads are never capped here.
+const MODEL_QUEUE_CAP = 20;
 const BODY_LIMIT = 2000;
 const REQUEST_LIMIT = 20_000;
 const IMAGE_LIMIT = 2_000_000;
@@ -937,7 +938,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
   if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
-  await assertQueue(env, false);
+  await assertModelQueue(env, assignment.id);
   const id = randomId(16), token = randomId(32), now = Date.now(), messageId = randomId(16);
   const operator = assignment.id, queued = assignment.queued ? 1 : 0;
   const autoHome = queued || (operator === HOME_MODEL && assignment.requested !== HOME_MODEL) ? 1 : 0;
@@ -1082,7 +1083,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
       .first<{ active: number; owner_ready: number }>();
     if (!row || row.active !== 1 || !row.owner_ready) throw new HttpError(400, "这个模型不在。");
   }
-  await assertQueue(env, thread.awaiting === 1);
+  // The global queue cap protects new conversations. Continuing an existing
+  // thread must remain possible even when that cap is full.
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
   noteVisitor(
@@ -2547,11 +2549,14 @@ async function attachIdentity(
   return { blocked: Boolean(scope) };
 }
 
-async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> {
-  if (alreadyWaiting) return;
-  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND ${unblockedThread("threads")}`).first<{ n: number }>();
-  if (Number(row?.n ?? 0) >= QUEUE_CAP) {
-    throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
+async function assertModelQueue(env: AppEnv, operatorId: string): Promise<void> {
+  if (operatorId === HOME_MODEL || operatorId === POOL_MODEL) return;
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM threads t
+     WHERE t.awaiting=1 AND t.queued=0 AND t.operator_id=? AND ${unblockedThread("t")}`,
+  ).bind(operatorId).first<{ n: number }>();
+  if (Number(row?.n ?? 0) >= MODEL_QUEUE_CAP) {
+    throw new HttpError(429, "这个模型手头排队较多，换一个模型或稍后再开新对话。已有对话仍可继续。");
   }
 }
 
