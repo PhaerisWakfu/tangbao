@@ -510,6 +510,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   const adminPin = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/pin$/);
   if (adminPin && method === "POST") return pinThread(request, env, adminPin[1]);
+  const adminRename = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/rename$/);
+  if (adminRename && method === "POST") return renameAdminThread(request, env, adminRename[1]);
 
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
@@ -2038,6 +2040,20 @@ async function pinThread(request: Request, env: AppEnv, id: string): Promise<Res
   return json({ ok: true, pinned });
 }
 
+async function renameAdminThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const thread = await env.DB.prepare(`SELECT 1 AS found FROM threads WHERE id = ? AND ${ownership.sql}`)
+    .bind(id, ...ownership.values).first();
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+  const payload = await readJson(request);
+  const title = typeof payload.title === "string" ? payload.title.trim().replace(/\s+/g, " ") : "";
+  if (!title || [...title].length > 80) throw new HttpError(400, "对话名称需要是1至80个字符。");
+  await env.DB.prepare(`UPDATE threads SET title = ? WHERE id = ? AND ${ownership.sql}`)
+    .bind(title, id, ...ownership.values).run();
+  return json({ ok: true, title });
+}
+
 async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
   const ownership = seatOwnership(seat, "threads.operator_id");
@@ -2504,7 +2520,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();

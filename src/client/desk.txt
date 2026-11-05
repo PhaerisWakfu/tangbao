@@ -12,7 +12,14 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
-const pinSlip = $("#pin-slip");
+const threadMoreWrap = $("#thread-more-wrap");
+const threadMore = $("#thread-more");
+const threadMenu = $("#thread-menu");
+const pinThreadAction = $("#pin-thread");
+const renameThreadAction = $("#rename-thread");
+const deskRename = $("#desk-rename");
+const deskRenameInput = $("#desk-rename-input");
+let renameTarget = null;
 const legacyBind = $("#desk-legacy-bind");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
@@ -216,9 +223,11 @@ function renderThread(data) {
   const locked = readonly || !own;
   const shelve = $("#shelve");
   const block = $("#block");
-  pinSlip.hidden = locked;
-  pinSlip.textContent = data.thread.pinned ? "取消置顶" : "置顶";
-  pinSlip.dataset.pinned = data.thread.pinned ? "1" : "";
+  threadMoreWrap.hidden = locked;
+  threadMenu.hidden = true;
+  threadMore.setAttribute("aria-expanded", "false");
+  pinThreadAction.dataset.pinned = data.thread.pinned ? "1" : "";
+  pinThreadAction.querySelector("span").textContent = data.thread.pinned ? "取消置顶" : "置顶";
   shelve.hidden = locked || Boolean(data.thread.blocked) || !data.thread.awaiting;
   block.hidden = !seat.super && !own;
   $("#back-audit").hidden = !readonly;
@@ -422,19 +431,79 @@ $("#profile-back").addEventListener("click", () => {
 
 profileForm.addEventListener("submit", saveProfile);
 
-pinSlip.addEventListener("click", async () => {
-  if (!selected || pinSlip.hidden || pinSlip.disabled) return;
-  const next = pinSlip.dataset.pinned !== "1";
-  pinSlip.disabled = true;
+function closeThreadMenu() {
+  threadMenu.hidden = true;
+  threadMore.setAttribute("aria-expanded", "false");
+}
+
+function closeDeskRename() {
+  deskRename.hidden = true;
+  renameTarget = null;
+}
+
+function openDeskRename() {
+  if (!selected) return;
+  renameTarget = selected;
+  deskRenameInput.value = $("#slip-title").textContent || "";
+  deskRename.hidden = false;
+  deskRenameInput.focus();
+  deskRenameInput.select();
+}
+
+async function saveDeskRename() {
+  if (!renameTarget) return;
+  const title = deskRenameInput.value.trim().replace(/\s+/g, " ");
+  if (!title || [...title].length > 80) {
+    replyErr.textContent = "对话名称需要是1至80个字符。";
+    deskRenameInput.focus();
+    return;
+  }
+  try {
+    const data = await api(`/api/admin/threads/${renameTarget}/rename`, { method: "POST", body: { title } });
+    $("#slip-title").textContent = data.title || title;
+    closeDeskRename();
+    await tick();
+  } catch (error) {
+    replyErr.textContent = error.message || "对话名称没有保存。";
+  }
+}
+
+threadMore.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const opening = threadMenu.hidden;
+  closeThreadMenu();
+  if (!opening) return;
+  threadMenu.hidden = false;
+  threadMore.setAttribute("aria-expanded", "true");
+  pinThreadAction.focus();
+});
+threadMenu.addEventListener("click", (event) => event.stopPropagation());
+pinThreadAction.addEventListener("click", async () => {
+  if (!selected) return;
+  const next = pinThreadAction.dataset.pinned !== "1";
+  closeThreadMenu();
   try {
     await api(`/api/admin/threads/${selected}/pin`, { method: "POST", body: { pinned: next } });
     await tick();
   } catch (error) {
     replyErr.textContent = error.message || "置顶操作没有保存。";
-  } finally {
-    pinSlip.disabled = false;
   }
 });
+renameThreadAction.addEventListener("click", () => {
+  closeThreadMenu();
+  openDeskRename();
+});
+$("#desk-rename-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveDeskRename();
+});
+$("#desk-rename-close").addEventListener("click", closeDeskRename);
+$("#desk-rename-cancel").addEventListener("click", closeDeskRename);
+deskRename.addEventListener("click", (event) => {
+  if (event.target === deskRename) closeDeskRename();
+});
+document.addEventListener("click", closeThreadMenu);
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
@@ -499,6 +568,7 @@ function resetDeskView() {
   pendingImages = []; showAttach();
   $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
   $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
+  threadMoreWrap.hidden = true; closeThreadMenu(); closeDeskRename();
   showPane("thread"); showDesk(false);
 }
 
@@ -1531,6 +1601,14 @@ $("#viewer").addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (!deskRename.hidden) {
+    closeDeskRename();
+    return;
+  }
+  if (!threadMenu.hidden) {
+    closeThreadMenu();
+    return;
+  }
   if (!$("#viewer").hidden) {
     closeViewer();
     return;
