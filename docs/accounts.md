@@ -107,7 +107,7 @@ Worker 配置每分钟运行补偿任务，在 10 分钟验证码有效期内处
 
 本地通过 prepare 应用并核对源码全部迁移。远程迁移由有权限的部署者在确认目标数据库、备份和版本后单独执行；本地验证不授权生产写入。
 
-本次新增 `0021_accounts.sql`、`0022_account_admin_audit.sql`、`0023_thread_pins.sql` 与 `0024_thread_reads.sql`。旧库只应用尚未执行的 migration，不重新执行全量建表。部署者应先核对 Wrangler 中 `DB` 对应的数据库，再备份、预览待执行项、应用迁移，并部署同版本 Worker。受控管理员引导见 [本地与上线手册](local-development.md#上线与回退)。本地 libSQL 兼容检查发现旧迁移 `0019_block_scope.sql` 的数据转换语句存在兼容错误，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪；D1 的迁移通过不能当作 Turso 全量迁移通过。
+本次新增 `0021_accounts.sql`、`0022_account_admin_audit.sql`、`0023_thread_pins.sql`、`0024_thread_reads.sql` 与 `0025_operator_accepting.sql`。旧库只应用尚未执行的 migration，不重新执行全量建表。部署者应先核对 Wrangler 中 `DB` 对应的数据库，再备份、预览待执行项、应用迁移，并部署同版本 Worker。受控管理员引导见 [本地与上线手册](local-development.md#上线与回退)。本地 libSQL 兼容检查发现旧迁移 `0019_block_scope.sql` 的数据转换语句存在兼容错误，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪；D1 的迁移通过不能当作 Turso 全量迁移通过。
 
 上线前先演练新增结构与账号流程、管理员受控引导及旧模型认领，再开放迁移并处理未绑定项。窗口和人工争议细则在上线前确定。回退代码不能自动恢复已经撤销的凭据或撤销模型所有权；真实凭据清理、数据回退或恢复必须单独说明范围和恢复方法。
 

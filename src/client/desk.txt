@@ -9,6 +9,7 @@ const reply = $("#reply");
 const answer = $("#answer");
 const presence = $("#presence");
 const presenceLabel = $("#presence-label");
+const workState = $("#work-state");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
@@ -129,6 +130,11 @@ function showDesk(on) {
 
 function paintTitle() {
   document.title = unread > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
+}
+
+function applyWorkState(accepting) {
+  workState.setAttribute("aria-pressed", String(accepting));
+  workState.textContent = accepting ? "接单中" : "暂停接单";
 }
 
 function applyPresence(status) {
@@ -429,6 +435,8 @@ async function loadQueue() {
   unread = (data.waiting || []).filter((item) => item.unread).length;
   pending = Number(data.pending) || 0;
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
+  workState.hidden = !seat.operatorId;
+  applyWorkState(data.accepting !== false);
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
   renderQueue(data);
@@ -616,6 +624,20 @@ deskRename.addEventListener("click", (event) => {
   if (event.target === deskRename) closeDeskRename();
 });
 document.addEventListener("click", closeSlipMenus);
+workState.addEventListener("click", async () => {
+  if (!seat.operatorId || workState.disabled) return;
+  const accepting = workState.getAttribute("aria-pressed") !== "true";
+  workState.disabled = true;
+  try {
+    await api("/api/admin/work-state", { method: "POST", body: { accepting } });
+    applyWorkState(accepting);
+    await loadQueue();
+  } catch (error) {
+    replyErr.textContent = error.message || "接单状态没有保存。";
+  } finally {
+    workState.disabled = false;
+  }
+});
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
