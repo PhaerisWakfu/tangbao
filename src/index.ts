@@ -106,7 +106,8 @@ const encoder = new TextEncoder();
 
 const PUBLIC_CACHE_TTL: Record<string, number> = {
   "/api/status": 300,
-  "/api/models": 300,
+  "/api/models": 30,
+  "/api/models/status": 15,
   "/api/presence": 600,
 };
 
@@ -402,7 +403,7 @@ export default {
       const url = new URL(request.url);
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
-      const ttl = request.method === "GET" ? (pagedModels ? 30 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
+      const ttl = request.method === "GET" ? (pagedModels ? 300 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
       if (ttl) {
         const cacheKey = new Request(url.toString(), { method: "GET" });
         let hit: Response | undefined;
@@ -472,6 +473,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   if (path === "/api/status" && method === "GET") return json(await siteStatus(env));
+  if (path === "/api/models/status" && method === "GET") return listModelStatuses(env, url);
   if (path === "/api/models" && method === "GET") return listModels(env, url);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
@@ -1260,6 +1262,39 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     pageSize: MODEL_PAGE_SIZE,
     hasMore: page * MODEL_PAGE_SIZE < total,
   });
+}
+
+async function listModelStatuses(env: AppEnv, url: URL): Promise<Response> {
+  const raw = (url.searchParams.get("ids") || "").split(",");
+  const ids = [...new Set(raw.map((id) => id.trim()).filter((id) => /^tangbao-[a-z0-9-]{1,60}$/.test(id)))].slice(0, 60);
+  if (!ids.length) return json({ models: [] });
+  const now = Date.now();
+  const operatorIds = ids.filter((id) => id !== HOME_MODEL);
+  const [home, rows] = await Promise.all([
+    ids.includes(HOME_MODEL) ? homePresence(env, now) : Promise.resolve(null),
+    operatorIds.length
+      ? env.DB.prepare(
+        `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+          (SELECT COUNT(*) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS pending,
+          (SELECT MIN(t.updated_at) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS oldest_pending_at
+         FROM operators o WHERE o.id IN (${operatorIds.map(() => "?").join(",")})`,
+      ).bind(...operatorIds).all<PresenceRow>()
+      : Promise.resolve({ results: [] as PresenceRow[] }),
+  ]);
+  const byId = new Map<string, ReturnType<typeof modelStatusJson>>();
+  for (const row of rows.results) byId.set(row.id, modelStatusJson(presenceFromRow(row, now)));
+  if (home) byId.set(HOME_MODEL, modelStatusJson(home));
+  return json({ models: ids.map((id) => byId.get(id)).filter(Boolean) });
+}
+
+function modelStatusJson(row: Presence) {
+  return {
+    id: row.id,
+    online: row.status === "online",
+    status: publicPresence(row.status),
+    pending: row.pending,
+    lastSeenAt: row.lastSeenAt,
+  };
 }
 
 function modelSuffix(value: unknown): string {

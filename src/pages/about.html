@@ -168,31 +168,46 @@
       })
       .catch(() => {});
 
+    function paintLineup(models) {
+      const lineup = document.getElementById("lineup");
+      lineup.replaceChildren();
+      for (const model of models) {
+        const online = model.status === "online";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "line";
+        button.dataset.state = model.status || (online ? "online" : "away");
+        button.disabled = !online;
+        button.setAttribute("aria-disabled", String(!online));
+        const state = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
+        button.innerHTML = `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="state">${state}</small>`;
+        button.querySelector("b").textContent = model.id;
+        button.querySelector(".who small").textContent = model.blurb || "";
+        button.addEventListener("click", () => {
+          if (!online) return;
+          try {
+            localStorage.setItem("tangbao.model", model.id);
+          } catch {}
+          location.href = "/chat";
+        });
+        lineup.append(button);
+      }
+    }
+
     fetch("/api/models")
       .then((response) => response.json())
       .then((data) => {
-        const lineup = document.getElementById("lineup");
-        for (const model of data.models || []) {
-          const online = model.status === "online";
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "line";
-          button.dataset.state = model.status || (online ? "online" : "away");
-          button.disabled = !online;
-          button.setAttribute("aria-disabled", String(!online));
-          const state = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
-          button.innerHTML = `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="state">${state}</small>`;
-          button.querySelector("b").textContent = model.id;
-          button.querySelector(".who small").textContent = model.blurb || "";
-          button.addEventListener("click", () => {
-            if (!online) return;
-            try {
-              localStorage.setItem("tangbao.model", model.id);
-            } catch {}
-            location.href = "/chat";
-          });
-          lineup.append(button);
-        }
+        const models = data.models || [];
+        paintLineup(models);
+        const ids = models.map((model) => model.id).slice(0, 60);
+        if (!ids.length) return;
+        fetch(`/api/models/status?ids=${encodeURIComponent(ids.join(","))}`)
+          .then((response) => response.json())
+          .then((status) => {
+            const statusById = new Map((status.models || []).map((model) => [model.id, model]));
+            paintLineup(models.map((model) => ({ ...model, ...(statusById.get(model.id) || {}) })));
+          })
+          .catch(() => {});
       })
       .catch(() => {});
   </script>

@@ -1223,6 +1223,7 @@ modelBtn.addEventListener("click", (event) => {
   card.hidden = !open;
   modelScrim.hidden = !open;
   modelBtn.setAttribute("aria-expanded", String(open));
+  if (open) void refreshModelStatuses();
 });
 modelClose.addEventListener("click", closeCard);
 modelScrim.addEventListener("click", closeCard);
@@ -1559,13 +1560,34 @@ function paintModels() {
   if (!current) applyModelStatus();
 }
 
+async function freshModelStatuses(list) {
+  if (!list.length) return list;
+  const byId = new Map();
+  for (let offset = 0; offset < list.length; offset += 60) {
+    const ids = list.slice(offset, offset + 60).map((model) => model.id);
+    try {
+      const data = await api(`/api/models/status?ids=${encodeURIComponent(ids.join(","))}`);
+      for (const item of data.models || []) byId.set(item.id, item);
+    } catch {
+      // 状态接口失败时沿用模型列表里的旧状态，不阻塞选型。
+    }
+  }
+  return list.map((model) => ({ ...model, ...(byId.get(model.id) || {}) }));
+}
+
+async function refreshModelStatuses() {
+  if (!models.length) return;
+  models = await freshModelStatuses(models);
+  paintModels();
+}
+
 async function loadModels(pick) {
   if (!pick && (modelSearchMode || Date.now() - modelsAt < 60000)) return;
   const seq = ++modelSearchSeq;
   try {
     const data = await api("/api/models");
     if (seq !== modelSearchSeq || modelSearchMode) return;
-    models = data.models || [];
+    models = await freshModelStatuses(data.models || []);
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchMode = false;
     modelSearchQuery = "";
@@ -1609,7 +1631,7 @@ async function searchModels() {
   try {
     const data = await api(`/api/models?q=${encodeURIComponent(q)}&page=1`);
     if (seq !== modelSearchSeq) return;
-    models = data.models || [];
+    models = await freshModelStatuses(data.models || []);
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchHasMore = Boolean(data.hasMore);
     modelSearchHidden = 0;
@@ -1629,7 +1651,7 @@ async function loadMoreModels() {
       `/api/models?q=${encodeURIComponent(modelSearchQuery)}&page=${page}`,
     );
     if (seq !== modelSearchSeq) return;
-    models = models.concat(data.models || []);
+    models = models.concat(await freshModelStatuses(data.models || []));
     autoModel = typeof data.auto === "string" ? data.auto : autoModel;
     modelSearchPage = page;
     modelSearchHasMore = Boolean(data.hasMore);

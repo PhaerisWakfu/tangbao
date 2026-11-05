@@ -453,7 +453,19 @@
       .catch(() => {});
     fetch("/api/models")
       .then((response) => response.json())
-      .then((data) => paintModels(data.models || []))
+      .then((data) => {
+        const models = data.models || [];
+        paintModels(models);
+        const ids = models.map((model) => model.id).slice(0, 60);
+        if (!ids.length) return;
+        fetch(`/api/models/status?ids=${encodeURIComponent(ids.join(","))}`)
+          .then((response) => response.json())
+          .then((status) => {
+            const statusById = new Map((status.models || []).map((model) => [model.id, model]));
+            paintModels(models.map((model) => ({ ...model, ...(statusById.get(model.id) || {}) })));
+          })
+          .catch(() => {});
+      })
       .catch(() => {});
   </script>
 </body>
