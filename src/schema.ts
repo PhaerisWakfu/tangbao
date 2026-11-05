@@ -11,7 +11,7 @@ const FAILURE_TTL = 1_000;
 // data. Schema changes are applied only by the ordered migration files.
 const CORE_SCHEMA = `SELECT t.reported_at, t.report_reason, t.last_role, t.account_id,
   m.draw, i.image_key, a.session_version, s.revoked_at, o.operator_uid,
-  j.image_key, audit.event, mail.payload_ciphertext, pin.owner_kind
+  j.image_key, audit.event, mail.payload_ciphertext, pin.owner_kind, rate.reset_at, auth_rate.reset_at
   FROM threads t
   LEFT JOIN messages m INDEXED BY idx_messages_thread_order ON 0
   LEFT JOIN message_images i ON 0
@@ -22,6 +22,8 @@ const CORE_SCHEMA = `SELECT t.reported_at, t.report_reason, t.last_role, t.accou
   LEFT JOIN account_admin_audit audit ON 0
   LEFT JOIN mail_deliveries mail ON 0
   LEFT JOIN thread_pins pin ON 0
+  LEFT JOIN rate_buckets rate INDEXED BY idx_rate_buckets_expiry ON 0
+  LEFT JOIN auth_rate_buckets auth_rate INDEXED BY idx_auth_rate_buckets_expiry ON 0
   WHERE 0`;
 
 export function assertSchemaReady(database: D1Database): Promise<void> {
@@ -35,7 +37,7 @@ export function assertSchemaReady(database: D1Database): Promise<void> {
          LEFT JOIN (${CORE_SCHEMA}) required ON 0
          WHERE version.key = ?`,
       ).bind("app_schema_version").first<{ value: string }>();
-      if (version?.value !== "25") throw new SchemaNotReadyError();
+      if (version?.value !== "26") throw new SchemaNotReadyError();
       entry.expiresAt = Date.now() + SUCCESS_TTL;
     } catch {
       entry.expiresAt = Date.now() + FAILURE_TTL;

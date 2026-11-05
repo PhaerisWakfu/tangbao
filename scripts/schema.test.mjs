@@ -27,11 +27,12 @@ async function fixture(t, complete = true) {
   const database = new scope.Database(client), statements = [];
   const binding = { prepare(sql) { statements.push(sql); return database.prepare(sql); } };
   return { client, binding, statements, check: scope.exports.assertSchemaReady, advance: n => { now += n; },
-    upgrade: () => client.executeMultiple(migration24 + "\n" + migration25),
+    upgrade: () => client.executeMultiple(migration24 + "\n" + migration25 + "\n" + migration26),
   };
 }
 const migration24 = await readFile(path.join(root, "migrations/0024_app_schema_version.sql"), "utf8");
 const migration25 = await readFile(path.join(root, "migrations/0025_message_paging.sql"), "utf8");
+const migration26 = await readFile(path.join(root, "migrations/0026_security_maintenance.sql"), "utf8");
 const missing = error => error.code === "SCHEMA_NOT_READY" && !error.message.includes("SELECT");
 
 test("missing migration fails without schema repair or user-data writes", async t => {

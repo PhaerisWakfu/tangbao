@@ -20,6 +20,8 @@ import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptRe
 import { consumeMailEvents } from "./mail-events";
 import { processImageCleanup, cleanupUncommittedImages, isDefiniteDatabaseRejection } from "./image-cleanup";
 import { assertSchemaReady, SchemaNotReadyError } from "./schema";
+import { readRequestBytes, readRequestForm } from "./request-body";
+import { processRateCleanup } from "./rate-cleanup";
 
 class HttpError extends Error {
   constructor(
@@ -307,9 +309,9 @@ async function recoverSession(request: Request, env: AppEnv, url: URL): Promise<
       if (!(host === "phaeris.cn" || host.endsWith(".phaeris.cn") || host.endsWith(".workers.dev"))) return new Response("来源不正确。", { status: 403 });
     } catch { return new Response("来源不正确。", { status: 403 }); }
   }
-  if (Number(request.headers.get("content-length") || "0") > 1_500_000) return new Response("记录过大，无法自动迁移。", { status: 413 });
   let form: FormData;
-  try { form = await request.formData(); } catch { return new Response("记录格式不正确。", { status: 400 }); }
+  try { form = await readRequestForm(request, 1_500_000, () => new HttpError(413, "记录过大，无法自动迁移。")); }
+  catch (error) { return new Response(error instanceof HttpError ? error.message : "记录格式不正确。", { status: error instanceof HttpError ? error.status : 400 }); }
   const raw = String(form.get("payload") || "");
   if (!raw || raw.length > 1_500_000) return new Response("没有找到可迁移的记录。", { status: 400 });
   let parsed: Record<string, unknown>;
@@ -410,6 +412,7 @@ export default {
     ctx.waitUntil(refreshHomePresence(scoped));
     ctx.waitUntil(processMailOutbox(scoped));
     ctx.waitUntil(processImageCleanup(scoped));
+    ctx.waitUntil(processRateCleanup(scoped));
   },
   async queue(batch, env): Promise<void> {
     if (env.MAINTENANCE === "1") {
@@ -1723,6 +1726,7 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
 
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
+  assertOrigin(request, env);
   const own = seat.operatorId;
   const ownership = seatOwnership(seat, "threads.operator_id");
   const now = Date.now();
@@ -2545,10 +2549,8 @@ function bearer(request: Request): string {
 async function readJson(
   request: Request,
 ): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown }> {
-  const declared = Number(request.headers.get("content-length") || "0");
-  if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
-  const text = await request.text();
-  if (text.length > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
+  const text = new TextDecoder().decode(await readRequestBytes(request, REQUEST_LIMIT,
+    () => new HttpError(413, "这句太长了。糖包一次看不了这么多。")));
   if (!text) return {};
   try {
     const parsed: unknown = JSON.parse(text);
@@ -2589,9 +2591,8 @@ function readOperator(value: unknown): string {
 async function readIncoming(request: Request, empty: string): Promise<Incoming> {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
-    const declared = Number(request.headers.get("content-length") || "0");
-    if (declared > MAX_IMAGES * IMAGE_LIMIT + 100_000) throw new HttpError(413, "这些图太大了。先收一收再发。");
-    const form = await request.formData();
+    const form = await readRequestForm(request, MAX_IMAGES * IMAGE_LIMIT + 100_000,
+      () => new HttpError(413, "这些图太大了。先收一收再发。"));
     const raw = form.get("body");
     const text = maskAbuse(typeof raw === "string" ? sanitize(raw) : "");
     if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");

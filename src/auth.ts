@@ -1,4 +1,5 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
+import { readRequestBytes } from "./request-body";
 import {
   MailError, authNow, b64url, clearChallengePayload, createMailChallenge, emailCodeHash,
   fromB64url, randomToken, sha256, type MailEnv, type MailPurpose,
@@ -173,21 +174,7 @@ async function kdfRate(env: AuthEnv, email: string, amount = 1): Promise<void> {
 async function payload(request: Request): Promise<Record<string, unknown>> {
   if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) throw new AuthError(415, "JSON_REQUIRED", "请求格式不正确，请重试。");
   const tooLarge = () => new AuthError(413, "REQUEST_TOO_LARGE", "提交内容过长，请检查后重试。");
-  if (Number(request.headers.get("content-length") || "0") > 8192) throw tooLarge();
-  let text = "";
-  let size = 0;
-  const decoder = new TextDecoder();
-  const reader = request.body?.getReader();
-  if (reader) {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > 8192) { await reader.cancel(); throw tooLarge(); }
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-  }
+  const text = new TextDecoder().decode(await readRequestBytes(request, 8192, tooLarge));
   try {
     const result: unknown = JSON.parse(text || "{}");
     if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("shape");

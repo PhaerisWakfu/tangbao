@@ -36,11 +36,13 @@ node --test scripts/migrations.test.mjs
 
 ## 严格迁移与缺失提示
 
-对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql` 和 `0025_message_paging.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
+对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql`、`0025_message_paging.sql` 和 `0026_security_maintenance.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
 
-合并并行分支后同时保留 `0023_image_cleanup_jobs.sql` 与 `0023_thread_pins.sql`，不重命名已经存在于迁移台账的文件。完整目录共 26 份 SQL，结构标记仍为 `app_schema_version=25`，标记不是文件计数。D1 按完整文件名记录；Turso 工具按文件名及摘要核验既有历史，只执行尚未登记的文件，并拒绝修改或删除已登记 SQL。旧实例升级也须补齐置顶表，缺少时相关请求明确不可用。
+合并并行分支后同时保留 `0023_image_cleanup_jobs.sql` 与 `0023_thread_pins.sql`，不重命名已经存在于迁移台账的文件。完整目录共 27 份 SQL，结构标记为 `app_schema_version=26`，标记不是文件计数。D1 按完整文件名记录；Turso 工具按文件名及摘要核验既有历史，只执行尚未登记的文件，并拒绝修改或删除已登记 SQL。旧实例升级也须补齐置顶表，缺少时相关请求明确不可用。
 
 `0024` 建立专用版本标记，`0025` 增加对话消息顺序索引并升级为 `app_schema_version=25`，不复用旧请求可能覆盖的 `schema_v`。Worker 不再在请求中建表、加列或回填。API、会创建匿名身份的 `/chat` 入口、定时及邮件事件处理先进行只读版本/核心字段检查；不就绪时 API 返回 `503 SCHEMA_NOT_READY`，聊天入口显示升级/不可用提示，后台工作不启动。静态资源和说明页仍可读取，维护模式规则保留。
+
+`0026` 增加两类限流窗口的到期索引，并升级为结构版本 `26`。定时维护每次各清理最多 500 条已过期窗口，活跃窗口保留；清理不扫描或删除账号、对话及审计记录，也不在请求热路径执行。
 
 检查按实际数据库绑定隔离并合并并发，每次为一条只读语句：版本按 key 点查，核心表/字段用零行子查询解析，不扫描用户内容。成功缓存 60 秒，失败缓存 1 秒；补迁移后无需重启即可恢复。人工破坏已校验的结构可能到成功缓存过期后才被检查器识别，不能将它当作逐请求完整结构审计。Turso 复用同一配置的适配器对象以保持缓存有效，更换绑定或连接配置不会复用原库结论。
 
