@@ -36,8 +36,11 @@ let auditToken = 0;
 let applyStamp = "";
 let auditStamp = "";
 let selected = null;
+let threadViewVersion = 0;
 let shown = "";
 let timer = 0;
+let ticking = null;
+let pollingAccountId = null;
 let pendingImages = [];
 let readonly = false;
 let seat = { super: false, operatorId: "" };
@@ -346,6 +349,7 @@ async function saveProfile(event) {
 }
 
 function showPane(name, nav) {
+  if (name !== "thread") threadViewVersion++;
   $("#pane-thread").hidden = name !== "thread";
   $("#pane-apply").hidden = name !== "apply";
   $("#pane-audit").hidden = name !== "audit";
@@ -358,6 +362,7 @@ function showPane(name, nav) {
 }
 
 async function openSlip(id, fromAudit) {
+  const version = ++threadViewVersion;
   readonly = Boolean(fromAudit);
   showPane("thread", readonly ? "audit" : "thread");
   if (id !== selected) shown = "";
@@ -365,12 +370,13 @@ async function openSlip(id, fromAudit) {
   replyErr.textContent = "";
   try {
     const data = await api(`/api/admin/threads/${id}`);
-    if (selected !== id) return;
+    if (selected !== id || version !== threadViewVersion) return;
     renderThread(data);
     await loadQueue();
   } catch (err) {
-    replyErr.textContent = err.message;
+    if (version === threadViewVersion) replyErr.textContent = err.message;
   }
+  if (version !== threadViewVersion) return;
   if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
   if (!reply.hidden) answer.focus();
 }
@@ -388,21 +394,37 @@ function arm() {
 async function tick() {
   const account = TangbaoAccount.account;
   if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
-  try {
-    await loadQueue();
-    if (selected && !$("#pane-thread").hidden) renderThread(await api(`/api/admin/threads/${selected}`));
-    if (!$("#pane-apply").hidden) await loadApplications();
-    if (!$("#pane-audit").hidden) await loadAudit();
-  } catch (err) {
-    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
-      resetDeskView();
-      loginErr.textContent = err.message;
-      $("#gate-note").textContent = "当前账号暂时无法进入笼屉，请根据提示处理。";
-      await TangbaoAccount.refresh().catch(() => null);
-      return;
+  if (ticking && pollingAccountId === account.id) return ticking;
+  clearTimeout(timer);
+  const request = (async () => {
+    try {
+      await loadQueue();
+      const id = selected;
+      const version = threadViewVersion;
+      if (id && !$("#pane-thread").hidden) {
+        const data = await api(`/api/admin/threads/${id}`);
+        if (selected === id && version === threadViewVersion && !$("#pane-thread").hidden) renderThread(data);
+      }
+      if (!$("#pane-apply").hidden) await loadApplications();
+      if (!$("#pane-audit").hidden) await loadAudit();
+    } catch (err) {
+      if (account.id !== TangbaoAccount.account?.id) return;
+      if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
+        resetDeskView();
+        loginErr.textContent = err.message;
+        $("#gate-note").textContent = "当前账号暂时无法进入笼屉，请根据提示处理。";
+        await TangbaoAccount.refresh().catch(() => null);
+      }
+    } finally {
+      if (ticking === request) {
+        ticking = null;
+        arm();
+      }
     }
-  }
-  arm();
+  })();
+  ticking = request;
+  pollingAccountId = account.id;
+  return request;
 }
 
 $("#profile-back").addEventListener("click", () => {
@@ -466,6 +488,7 @@ let replyGuard = { key: "", at: 0 };
 
 function resetDeskView() {
   clearTimeout(timer); applyToken++; auditToken++;
+  threadViewVersion++;
   selected = null; shown = ""; readonly = false;
   seat = { super: false, operatorId: "" };
   thread.replaceChildren(); pile.replaceChildren();
@@ -1195,13 +1218,17 @@ answer.addEventListener("keydown", (event) => {
 reply.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selected || replying) return;
+  const id = selected;
+  const version = threadViewVersion;
+  const accountId = deskAccountId;
+  const draft = answer.value;
   const text = answer.value.trim();
   const images = pendingImages.slice();
   if (!text && !images.length) {
     replyErr.textContent = "写一句可能没用的话，或放图片。";
     return;
   }
-  const key = `${text}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
+  const key = `${id}\n${text}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
   const now = Date.now();
   if (replyGuard.key === key && now - replyGuard.at < 1500) return;
   replying = true;
@@ -1215,15 +1242,22 @@ reply.addEventListener("submit", async (event) => {
     for (const item of images) payload.append("images", item.file, item.file.name);
   }
   try {
-    await api(`/api/admin/threads/${selected}`, { method: "POST", body: payload });
-    answer.value = "";
-    clearAttach();
-    shown = "";
-    renderThread(await api(`/api/admin/threads/${selected}`));
+    await api(`/api/admin/threads/${id}`, { method: "POST", body: payload });
+    if (accountId !== deskAccountId) return;
+    if (selected === id && version === threadViewVersion) {
+      if (answer.value === draft) answer.value = "";
+      const sentImages = new Set(images);
+      for (const image of pendingImages) if (sentImages.has(image)) URL.revokeObjectURL(image.url);
+      pendingImages = pendingImages.filter(image => !sentImages.has(image));
+      showAttach();
+      shown = "";
+      const data = await api(`/api/admin/threads/${id}`);
+      if (selected === id && version === threadViewVersion) renderThread(data);
+    }
     await loadQueue();
   } catch (err) {
     replyGuard.key = "";
-    replyErr.textContent = err.message;
+    if (accountId === deskAccountId && selected === id && version === threadViewVersion) replyErr.textContent = err.message;
   } finally {
     replying = false;
     button.disabled = false;

@@ -45,6 +45,7 @@ let messages = [];
 let openAwaiting = true;
 let painted = "";
 let timer = 0;
+let ticking = null;
 let sending = false;
 let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
@@ -64,6 +65,7 @@ let modelSearchHasMore = false;
 let modelSearchHidden = 0;
 let modelSearchSeq = 0;
 let modelSearchTimer = 0;
+let modelMoreRequest = null;
 let making = false;
 let blocked = false;
 const MAX_IMAGES = 6;
@@ -580,13 +582,14 @@ function forget(id) {
 
 async function refresh() {
   const thread = current;
+  const version = viewVersion;
   if (!thread || !validId(thread.id)) {
     applyModelStatus();
     return;
   }
   try {
     const data = await api(`/api/threads/${thread.id}`, { token: thread.token });
-    if (current !== thread) return;
+    if (current !== thread || version !== viewVersion) return;
     const wasQueued = threadQueued;
     threadQueued = Boolean(data.queued);
     if (threadQueued) {
@@ -616,7 +619,7 @@ async function refresh() {
     paint(data.messages || []);
     paintModels();
   } catch (err) {
-    if (current !== thread) return;
+    if (current !== thread || version !== viewVersion) return;
     if (err instanceof ApiError && err.statusCode === 401 && thread.owned) {
       showSys("登录已过期，请重新登录以继续查看账号对话。");
       await TangbaoAccount.refresh().catch(() => null);
@@ -641,13 +644,20 @@ function arm() {
 }
 
 async function tick() {
-  try {
-    await loadModels(false);
-    await refresh();
-  } catch {
-    // 下一轮再看。失败不改掉已经写在页面上的话。
-  }
-  arm();
+  if (ticking) return ticking;
+  clearTimeout(timer);
+  ticking = (async () => {
+    try {
+      await loadModels(false);
+      await refresh();
+    } catch {
+      // 下一轮再看。失败不改掉已经写在页面上的话。
+    } finally {
+      ticking = null;
+      arm();
+    }
+  })();
+  return ticking;
 }
 
 function closeSide() {
@@ -657,7 +667,7 @@ function closeSide() {
 async function openThread(id) {
   const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
-  viewVersion++;
+  const version = ++viewVersion;
   current = found;
   threadModel = "";
   threadQueued = false;
@@ -674,7 +684,7 @@ async function openThread(id) {
   try {
     await refresh();
   } catch (err) {
-    showSys(err.message);
+    if (version === viewVersion) showSys(err.message);
   }
 }
 
@@ -1324,6 +1334,9 @@ async function loadMoreModels() {
   if (!modelSearchMode || !modelSearchHasMore) return;
   const seq = modelSearchSeq;
   const page = modelSearchPage + 1;
+  const request = `${seq}:${page}`;
+  if (modelMoreRequest === request) return;
+  modelMoreRequest = request;
   try {
     const data = await api(
       `/api/models?q=${encodeURIComponent(modelSearchQuery)}&page=${page}`,
@@ -1335,11 +1348,15 @@ async function loadMoreModels() {
     modelSearchHasMore = Boolean(data.hasMore);
     paintModels();
   } catch (err) {
-    showSys(err.message);
+    if (seq === modelSearchSeq) showSys(err.message);
+  } finally {
+    if (modelMoreRequest === request) modelMoreRequest = null;
   }
 }
 
 modelSearch.addEventListener("input", () => {
+  modelSearchSeq++;
+  modelSearchHasMore = false;
   modelSearchMode = Boolean(modelSearch.value.trim());
   clearTimeout(modelSearchTimer);
   modelSearchTimer = setTimeout(() => {
