@@ -688,8 +688,8 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   display: grid;
   flex: none;
   place-items: center;
-  width: 18px;
-  margin: 12px 0 0 5px;
+  width: 16px;
+  margin: 12px 4px 0 0;
   color: var(--accent);
 }
 .slip-pin-mark svg {

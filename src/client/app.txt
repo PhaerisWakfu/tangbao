@@ -376,13 +376,6 @@ function renderHistory() {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
       if (thread.pinned) row.dataset.pinned = "true";
-      if (thread.pinned) {
-        const mark = document.createElement("span");
-        mark.className = "hist-pin-mark";
-        mark.setAttribute("aria-label", "已置顶");
-        mark.innerHTML = PIN_ICON;
-        row.append(mark);
-      }
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
       link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
       row.append(link);
@@ -397,6 +390,13 @@ function renderHistory() {
         badge.setAttribute("role", "img");
         badge.setAttribute("aria-label", `模型：${model}`);
         row.append(badge);
+      }
+      if (thread.pinned) {
+        const mark = document.createElement("span");
+        mark.className = "hist-pin-mark";
+        mark.setAttribute("aria-label", "已置顶");
+        mark.innerHTML = PIN_ICON;
+        row.append(mark);
       }
       const more = document.createElement("button");
       more.type = "button";

@@ -292,7 +292,7 @@ body[data-presence="asleep"] svg.steam { display: none; }
   flex: none;
   place-items: center;
   width: 16px;
-  margin-left: 5px;
+  margin-left: 4px;
   color: var(--accent);
 }
 .hist-pin-mark svg {
