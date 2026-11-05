@@ -184,7 +184,7 @@ function slip(item, kind) {
   meta.textContent = kind === "wait"
     ? `等了 ${spent(Date.now() - item.updatedAt)}`
     : kind === "shelved"
-      ? `放下于 ${clock(item.updatedAt)}`
+      ? `稍后处理于 ${clock(item.updatedAt)}`
       : kind === "blocked"
         ? `拉黑于 ${clock(item.updatedAt)}`
         : `回于 ${clock(item.updatedAt)}`;
@@ -273,7 +273,7 @@ function renderQueue(data) {
     pile.append(recentTitle);
     for (const item of recent) pile.append(slip(item, "done"));
   }
-  foldPile("先放下", data.shelved || [], "shelved");
+  foldPile("稍后处理", data.shelved || [], "shelved");
   foldPile("已拉黑", data.blocked || [], "blocked");
 }
 
@@ -316,7 +316,7 @@ function renderThread(data, keepScroll = false) {
   reply.hidden = locked;
   if (!data.thread.awaiting) {
     shelve.dataset.confirm = "";
-    shelve.textContent = "先放下";
+    shelve.textContent = "稍后处理";
   }
   if (data.thread.blocked) {
     if (block.dataset.confirm !== "1") block.textContent = seat.super ? "全部解开" : "解开";
@@ -330,7 +330,7 @@ function renderThread(data, keepScroll = false) {
     : data.thread.awaiting
       ? `等了 ${spent(Date.now() - data.thread.updatedAt)}`
       : last && last.role === "visitor"
-        ? "先放下了"
+        ? "稍后处理了"
         : "已回复";
   $("#answer").placeholder = last && last.role === "visitor" && last.draw
     ? "他要一张图。画完放进来，或写一句。"
@@ -646,16 +646,16 @@ $("#shelve").addEventListener("click", async () => {
   const button = $("#shelve");
   if (button.dataset.confirm !== "1") {
     button.dataset.confirm = "1";
-    button.textContent = "放下";
+    button.textContent = "确认稍后";
     window.setTimeout(() => {
       if (button.dataset.confirm !== "1") return;
       button.dataset.confirm = "";
-      button.textContent = "先放下";
+      button.textContent = "稍后处理";
     }, 2200);
     return;
   }
   button.dataset.confirm = "";
-  button.textContent = "先放下";
+  button.textContent = "稍后处理";
   try {
     await api(`/api/admin/threads/${selected}/shelve`, { method: "POST" });
     shown = "";
