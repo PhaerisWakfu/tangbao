@@ -1478,11 +1478,9 @@ function paintModels() {
     list.append(empty);
   }
   if (!modelSearchMode && modelSearchHidden > 0) {
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = "model-more";
-    more.textContent = `查看全部 ${modelSearchHidden} 个型号`;
-    more.addEventListener("click", () => void browseAllModels());
+    const more = document.createElement("p");
+    more.className = "model-more static";
+    more.textContent = `还有 ${modelSearchHidden} 个型号，搜索查看`;
     list.append(more);
   }
   if (modelSearchMode && modelSearchHasMore) {
@@ -1550,27 +1548,6 @@ async function searchModels() {
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchHasMore = Boolean(data.hasMore);
     modelSearchHidden = 0;
-    modelsAt = Date.now();
-    paintModels();
-  } catch (err) {
-    if (seq === modelSearchSeq) showSys(err.message);
-  }
-}
-
-async function browseAllModels() {
-  modelSearchMode = true;
-  modelSearchQuery = "";
-  modelSearchPage = 1;
-  modelSearchHasMore = false;
-  modelSearchHidden = 0;
-  modelSearch.value = "";
-  const seq = ++modelSearchSeq;
-  try {
-    const data = await api("/api/models?page=1");
-    if (seq !== modelSearchSeq) return;
-    models = data.models || [];
-    autoModel = typeof data.auto === "string" ? data.auto : "";
-    modelSearchHasMore = Boolean(data.hasMore);
     modelsAt = Date.now();
     paintModels();
   } catch (err) {
