@@ -25,6 +25,9 @@ const history = $("#history");
 const titleEl = $("#title");
 const claimPrompt = $("#claim-prompt");
 const claimPromptCount = $("#claim-prompt-count");
+const renamePrompt = $("#rename-prompt");
+const renameInput = $("#rename-input");
+let renameTarget = null;
 const accountGear = $("#account-gear");
 const accountMenu = $("#account-menu");
 
@@ -366,23 +369,21 @@ function renderHistory() {
   const sections = [["账号对话", ownedThreads], ["此浏览器的匿名对话", store.threads]];
   for (const [label, threads] of sections) {
     if (!threads.length) continue;
+    threads.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
     const heading = document.createElement("h3"); heading.textContent = label; history.append(heading);
     for (const thread of threads) {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
+      if (thread.pinned) row.dataset.pinned = "true";
+      if (thread.pinned) {
+        const mark = document.createElement("span");
+        mark.className = "hist-pin-mark";
+        mark.setAttribute("aria-label", "已置顶");
+        mark.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8v6.2M7.2 9h5.6l1.2 3.1H6L7.2 9ZM10 12.1V17"/></svg>';
+        row.append(mark);
+      }
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
       link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "hist-x"; remove.setAttribute("aria-label", "删除这段对话");
-      const icon = '<svg class="i"><use href="#i-x"/></svg>'; remove.innerHTML = icon;
-      remove.addEventListener("click", (event) => {
-        event.preventDefault(); event.stopPropagation();
-        if (remove.dataset.confirm !== "1") {
-          remove.dataset.confirm = "1"; remove.setAttribute("aria-label", "确认删除"); remove.textContent = "删";
-          window.setTimeout(() => { if (remove.dataset.confirm === "1") { remove.dataset.confirm = ""; remove.setAttribute("aria-label", "删除这段对话"); remove.innerHTML = icon; } }, 2200);
-          return;
-        }
-        void removeThread(thread);
-      });
       row.append(link);
       const model = historyModel(thread);
       const initial = historyInitial(thread);
@@ -396,7 +397,69 @@ function renderHistory() {
         badge.setAttribute("aria-label", `模型：${model}`);
         row.append(badge);
       }
-      row.append(remove); history.append(row);
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "hist-more";
+      more.setAttribute("aria-haspopup", "menu");
+      more.setAttribute("aria-expanded", "false");
+      more.setAttribute("aria-label", "对话操作");
+      more.title = "对话操作";
+      more.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4.2" r="1.25"/><circle cx="10" cy="10" r="1.25"/><circle cx="10" cy="15.8" r="1.25"/></svg>';
+      const menu = document.createElement("div");
+      menu.className = "hist-menu";
+      menu.hidden = true;
+      menu.setAttribute("role", "menu");
+      const pinAction = document.createElement("button");
+      pinAction.type = "button";
+      pinAction.className = "hist-menu-item";
+      pinAction.setAttribute("role", "menuitem");
+      pinAction.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8v6.2M7.2 9h5.6l1.2 3.1H6L7.2 9ZM10 12.1V17"/></svg><span>${thread.pinned ? "取消固定" : "固定"}</span>`;
+      const renameAction = document.createElement("button");
+      renameAction.type = "button";
+      renameAction.className = "hist-menu-item";
+      renameAction.setAttribute("role", "menuitem");
+      renameAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></svg><span>重命名</span>';
+      const deleteAction = document.createElement("button");
+      deleteAction.type = "button";
+      deleteAction.className = "hist-menu-item is-danger";
+      deleteAction.setAttribute("role", "menuitem");
+      deleteAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10M9 9v4M11 9v4"/></svg><span>删除</span>';
+      menu.append(pinAction, renameAction, deleteAction);
+      more.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const opening = menu.hidden;
+        closeHistoryMenus();
+        if (!opening) return;
+        menu.hidden = false;
+        more.setAttribute("aria-expanded", "true");
+        pinAction.focus();
+      });
+      menu.addEventListener("click", (event) => event.stopPropagation());
+      pinAction.addEventListener("click", () => {
+        closeHistoryMenus();
+        void toggleThreadPin(thread);
+      });
+      renameAction.addEventListener("click", () => {
+        closeHistoryMenus();
+        openRenamePrompt(thread);
+      });
+      deleteAction.addEventListener("click", async () => {
+        if (deleteAction.dataset.confirm !== "1") {
+          deleteAction.dataset.confirm = "1";
+          deleteAction.querySelector("span").textContent = "确认删除";
+          window.setTimeout(() => {
+            if (deleteAction.dataset.confirm === "1") {
+              deleteAction.dataset.confirm = "";
+              deleteAction.querySelector("span").textContent = "删除";
+            }
+          }, 2200);
+          return;
+        }
+        closeHistoryMenus();
+        await removeThread(thread);
+      });
+      row.append(more, menu); history.append(row);
       if (!thread.owned && TangbaoAccount.account?.verified) {
         const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim history-claim-one"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
         claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
@@ -422,6 +485,69 @@ function remember(thread, activate = true) {
     saveStore();
   }
   renderHistory();
+}
+
+async function toggleThreadPin(thread) {
+  const next = !thread.pinned;
+  if (thread.owned) {
+    try {
+      await api(`/api/account/threads/${thread.id}/pin`, { method: "POST", body: { pinned: next } });
+      thread.pinned = next;
+      renderHistory();
+    } catch (error) {
+      showSys(error.message || "置顶操作没有保存。");
+    }
+    return;
+  }
+  thread.pinned = next;
+  saveStore();
+  renderHistory();
+}
+
+function closeHistoryMenus() {
+  for (const menu of document.querySelectorAll(".hist-menu:not([hidden])")) {
+    menu.hidden = true;
+    menu.closest(".hist-row")?.querySelector(".hist-more")?.setAttribute("aria-expanded", "false");
+  }
+}
+
+function openRenamePrompt(thread) {
+  if (!renamePrompt || !renameInput) return;
+  renameTarget = thread;
+  renameInput.value = thread.title || "";
+  renamePrompt.hidden = false;
+  renameInput.focus();
+  renameInput.select();
+}
+
+function closeRenamePrompt() {
+  if (!renamePrompt) return;
+  renamePrompt.hidden = true;
+  renameTarget = null;
+}
+
+async function saveRename() {
+  if (!renameTarget || !renameInput) return;
+  const title = renameInput.value.trim().replace(/\s+/g, " ");
+  if (!title || [...title].length > 80) {
+    showSys("对话名称需要是1至80个字符。");
+    renameInput.focus();
+    return;
+  }
+  const thread = renameTarget;
+  try {
+    if (thread.owned) await api(`/api/account/threads/${thread.id}/rename`, { method: "POST", body: { title } });
+    thread.title = title;
+    if (!thread.owned) saveStore();
+    if (current?.id === thread.id) {
+      current.title = title;
+      titleEl.textContent = title;
+    }
+    closeRenamePrompt();
+    renderHistory();
+  } catch (error) {
+    showSys(error.message || "对话名称没有保存。");
+  }
 }
 
 async function loadOwnedThreads(append = false) {
@@ -460,6 +586,7 @@ async function claimThreads(threads, options = {}) {
     for (const thread of threads) {
       if (TangbaoAccount.account?.id !== accountId) break;
       await api("/api/account/threads/claim", { method: "POST", body: { threadId: thread.id, token: thread.token } });
+      if (thread.pinned) await api(`/api/account/threads/${thread.id}/pin`, { method: "POST", body: { pinned: true } }).catch(() => {});
       store.threads = store.threads.filter((item) => item.id !== thread.id);
       if (store.activeId === thread.id) store.activeId = null;
       saveStore(); completed++;
@@ -520,6 +647,16 @@ claimPrompt?.addEventListener("click", (event) => {
 $("#claim-prompt-close")?.addEventListener("click", closeClaimPrompt);
 $("#claim-prompt-later")?.addEventListener("click", closeClaimPrompt);
 $("#claim-prompt-all")?.addEventListener("click", () => void promptClaimAll());
+$("#rename-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveRename();
+});
+$("#rename-close")?.addEventListener("click", closeRenamePrompt);
+$("#rename-cancel")?.addEventListener("click", closeRenamePrompt);
+renamePrompt?.addEventListener("click", (event) => {
+  if (event.target === renamePrompt) closeRenamePrompt();
+});
+document.addEventListener("click", () => closeHistoryMenus());
 
 async function syncAccountHistory() {
   if (loggedOut) return;
@@ -980,6 +1117,14 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (claimPrompt && !claimPrompt.hidden) {
     closeClaimPrompt();
+    return;
+  }
+  if (renamePrompt && !renamePrompt.hidden) {
+    closeRenamePrompt();
+    return;
+  }
+  if (document.querySelector(".hist-menu:not([hidden])")) {
+    closeHistoryMenus();
     return;
   }
   if (!$("#viewer").hidden) {

@@ -153,9 +153,9 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.accounts-test.jso
 npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file scripts/sql/accounts-postflight.sql --json > private-assets/accounts-test/postflight.json
 ```
 
-新增 SQL 留痕为 [0021_accounts.sql](../migrations/0021_accounts.sql) 和 [0022_account_admin_audit.sql](../migrations/0022_account_admin_audit.sql)。不要单独 execute 两份文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
+新增 SQL 留痕为 [0021_accounts.sql](../migrations/0021_accounts.sql)、[0022_account_admin_audit.sql](../migrations/0022_account_admin_audit.sql) 和 [0023_thread_pins.sql](../migrations/0023_thread_pins.sql)。不要单独 execute 这些文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
 
-迁移后应有全部 22 份版本记录；旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
+迁移后应有全部 23 份版本记录；旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
 
 这条导入流程针对尚未启用账号的 0001–0020 源库。将来复制已经升级的 0021/0022 数据库时，须另行处理复制来的账号会话、验证码、认领证明、outbox 和通知任务，不能直接启动真实发信。
 

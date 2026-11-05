@@ -12,6 +12,7 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
+const pinSlip = $("#pin-slip");
 const legacyBind = $("#desk-legacy-bind");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
@@ -157,6 +158,12 @@ function slip(item, kind) {
         ? `拉黑于 ${clock(item.updatedAt)}`
         : `回于 ${clock(item.updatedAt)}`;
   button.append(meta);
+  if (item.pinned) {
+    const pinned = document.createElement("span");
+    pinned.className = "slip-pin";
+    pinned.textContent = "置顶";
+    button.append(pinned);
+  }
   button.addEventListener("click", () => {
     void openSlip(item.id);
   });
@@ -209,6 +216,9 @@ function renderThread(data) {
   const locked = readonly || !own;
   const shelve = $("#shelve");
   const block = $("#block");
+  pinSlip.hidden = locked;
+  pinSlip.textContent = data.thread.pinned ? "取消置顶" : "置顶";
+  pinSlip.dataset.pinned = data.thread.pinned ? "1" : "";
   shelve.hidden = locked || Boolean(data.thread.blocked) || !data.thread.awaiting;
   block.hidden = !seat.super && !own;
   $("#back-audit").hidden = !readonly;
@@ -412,6 +422,19 @@ $("#profile-back").addEventListener("click", () => {
 
 profileForm.addEventListener("submit", saveProfile);
 
+pinSlip.addEventListener("click", async () => {
+  if (!selected || pinSlip.hidden || pinSlip.disabled) return;
+  const next = pinSlip.dataset.pinned !== "1";
+  pinSlip.disabled = true;
+  try {
+    await api(`/api/admin/threads/${selected}/pin`, { method: "POST", body: { pinned: next } });
+    await tick();
+  } catch (error) {
+    replyErr.textContent = error.message || "置顶操作没有保存。";
+  } finally {
+    pinSlip.disabled = false;
+  }
+});
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");

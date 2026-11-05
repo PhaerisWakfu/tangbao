@@ -286,6 +286,90 @@ body[data-presence="asleep"] svg.steam { display: none; }
 }
 .hist .text-btn svg.i { width: 15px; height: 15px; color: var(--muted); }
 .hist .text-btn:hover svg.i { color: var(--ink); }
+.hist-row { position: relative; }
+.hist-pin-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  margin-left: 5px;
+  color: var(--accent);
+}
+.hist-pin-mark svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hist-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+}
+.hist-more svg { width: 16px; height: 16px; fill: currentColor; }
+.hist-row:hover .hist-more,
+.hist-row:focus-within .hist-more,
+.hist-more[aria-expanded="true"] { opacity: 1; pointer-events: auto; }
+.hist-more:hover,
+.hist-more[aria-expanded="true"] { background: var(--hover-2); color: var(--ink); }
+@media (hover: none) {
+  .hist-more { opacity: 0.6; pointer-events: auto; }
+}
+.hist-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 4px;
+  z-index: 30;
+  min-width: 142px;
+  padding: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 14px 34px -18px rgba(31, 29, 26, 0.45);
+}
+.hist-menu[hidden] { display: none; }
+.hist-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.hist-menu-item svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hist-menu-item:hover { background: var(--hover); color: var(--ink); }
+.hist-menu-item.is-danger { color: #a04b2a; }
+.hist-row[data-pinned="true"] { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.hist-row[data-pinned="true"]:hover { background: var(--hover); }
 .hist-x {
   display: none;
   place-items: center;
@@ -1183,6 +1267,38 @@ body[data-state="chat"] .stage {
 .claim-all:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
 .claim-later:focus-visible,
 .claim-all:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); outline-offset: 2px; }
+
+.rename-card { width: min(420px, 100%); }
+.rename-card form { margin-top: 16px; }
+.rename-card .field { margin-top: 0; }
+.rename-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+}
+.rename-actions button {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.rename-actions button:hover { border-color: var(--line-2); background: var(--hover); color: var(--ink); }
+.rename-actions .primary {
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--serif);
+  font-weight: 600;
+}
+.rename-actions .primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); color: var(--on-accent); }
 
 .report-card { width: min(420px, 100%); }
 .report-lead { margin: 2px 0 12px; font-size: 13.5px; line-height: 1.7; color: var(--ink-2); }

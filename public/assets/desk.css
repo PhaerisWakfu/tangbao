@@ -660,6 +660,17 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .slip b { font-size: 14px; font-weight: 500; }
 .slip span { margin-top: 2px; font-size: 13px; color: var(--muted); }
 .slip small { display: block; margin-top: 4px; font-size: 11.5px; color: var(--faint); }
+.slip .slip-pin {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.5;
+}
 .slip.waiting b::before {
   content: "";
   display: inline-block;
@@ -695,6 +706,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 }
 .shelve:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); color: var(--ink); }
 .shelve[data-confirm="1"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.shelve[data-pinned="1"] { border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); color: var(--accent); }
 .shelve[hidden] { display: none; }
 #block {
   margin-left: 0;

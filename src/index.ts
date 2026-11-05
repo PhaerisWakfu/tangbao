@@ -508,6 +508,9 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const image = path.match(/^\/api\/images\/([A-Za-z0-9_-]{16,80})$/);
   if (image && method === "GET") return serveImage(request, env, image[1]);
 
+  const adminPin = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/pin$/);
+  if (adminPin && method === "POST") return pinThread(request, env, adminPin[1]);
+
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
     if (method === "GET") return adminRead(request, env, adminThread[1]);
@@ -1743,16 +1746,19 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   if (!seat.super) await migrateHomeBacklog(env, own, seat);
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at ASC LIMIT 100`,
+      `SELECT id, title, preview, updated_at AS updatedAt,
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
+       FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY pinned DESC,updated_at ASC LIMIT 100`,
     )
-      .bind(own, ...ownership.values)
-      .all<{ id: string; title: string; preview: string; updatedAt: number }>(),
+      .bind(own, own, ...ownership.values)
+      .all<{ id: string; title: string; preview: string; updatedAt: number; pinned: number }>(),
     env.DB.prepare(
-      `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole
-       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY updated_at DESC LIMIT 40`,
+      `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole,
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
+       FROM threads WHERE awaiting = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY pinned DESC,updated_at DESC LIMIT 40`,
     )
-      .bind(own, ...ownership.values)
-      .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string }>(),
+      .bind(own, own, ...ownership.values)
+      .all<{ id: string; title: string; preview: string; updatedAt: number; lastRole: string; pinned: number }>(),
     seat.super && own === HOME_MODEL ? homePresence(env, now) : operatorPresence(env, own, now, seat),
     seat.super
       ? env.DB.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").first<{ n: number }>()
@@ -1978,9 +1984,11 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
   const seat = await requireSeat(request, env);
   const ownership = seatOwnership(seat, "threads.operator_id", [], true);
   const thread = await env.DB.prepare(
-    `SELECT id, title, awaiting, operator_id, token_hash, visitor_hash, ip_hash, account_id, updated_at AS updatedAt FROM threads WHERE id = ? AND ${ownership.sql}`,
+    `SELECT id, title, awaiting, operator_id, token_hash, visitor_hash, ip_hash, account_id, updated_at AS updatedAt,
+       EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
+     FROM threads WHERE id = ? AND ${ownership.sql}`,
   )
-    .bind(id, ...ownership.values)
+    .bind(seat.operatorId, id, ...ownership.values)
     .first<{
       id: string;
       title: string;
@@ -1991,6 +1999,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       ip_hash: string | null;
       account_id: string | null;
       updatedAt: number;
+      pinned: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
   const messages = await listMessages(env, id);
@@ -2003,9 +2012,30 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       operatorId: thread.operator_id,
       updatedAt: thread.updatedAt,
       blocked,
+      pinned: Boolean(thread.pinned),
     },
     messages,
   });
+}
+
+async function pinThread(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再置顶对话。");
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const thread = await env.DB.prepare(`SELECT 1 AS found FROM threads WHERE id = ? AND ${ownership.sql}`)
+    .bind(id, ...ownership.values).first();
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+  const payload = await readJson(request);
+  const pinned = payload.pinned !== false;
+  if (pinned) {
+    await env.DB.prepare(`INSERT INTO thread_pins(thread_id,owner_kind,owner_id,created_at) VALUES(?,'operator',?,?)
+      ON CONFLICT(thread_id,owner_kind,owner_id) DO UPDATE SET created_at=excluded.created_at`)
+      .bind(id, seat.operatorId, Date.now()).run();
+  } else {
+    await env.DB.prepare("DELETE FROM thread_pins WHERE thread_id=? AND owner_kind='operator' AND owner_id=?")
+      .bind(id, seat.operatorId).run();
+  }
+  return json({ ok: true, pinned });
 }
 
 async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
@@ -2474,7 +2504,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();

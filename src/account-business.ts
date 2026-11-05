@@ -100,9 +100,40 @@ export async function accountBusinessRoute(request: Request, env: BusinessEnv): 
   if (path === "/api/account/threads" && request.method === "GET") {
     const account = await requireAccount(request, env);
     const page = Math.max(1, Math.min(10000, Number(url.searchParams.get("page")) || 1));
-    const rows = await env.DB.prepare(`SELECT id,title,preview,updated_at AS updatedAt,operator_id AS operatorId,awaiting
-      FROM threads WHERE account_id=? ORDER BY updated_at DESC,id DESC LIMIT 101 OFFSET ?`).bind(account.id, (page - 1) * 100).all();
-    return json({ threads: rows.results.slice(0, 100), page, hasMore: rows.results.length > 100 });
+    const rows = await env.DB.prepare(`SELECT id,title,preview,updated_at AS updatedAt,operator_id AS operatorId,awaiting,
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='account' AND p.owner_id=?) AS pinned
+      FROM threads WHERE account_id=? ORDER BY pinned DESC,updated_at DESC,id DESC LIMIT 101 OFFSET ?`)
+      .bind(account.id, account.id, (page - 1) * 100).all<Record<string, unknown>>();
+    const threads = rows.results.slice(0, 100).map((row) => ({ ...row, pinned: Boolean(row.pinned) }));
+    return json({ threads, page, hasMore: rows.results.length > 100 });
+  }
+  const accountRename = path.match(/^\/api\/account\/threads\/([A-Za-z0-9_-]{16,80})\/rename$/);
+  if (accountRename && request.method === "POST") {
+    const account = await requireAccount(request, env);
+    const body = await bodyOf(request);
+    const title = typeof body.title === "string" ? body.title.trim().replace(/\s+/g, " ") : "";
+    if (!title || [...title].length > 80) throw new AuthError(400, "TITLE_INVALID", "对话名称需要是1至80个字符。");
+    const result = await env.DB.prepare("UPDATE threads SET title=? WHERE id=? AND account_id=?")
+      .bind(title, accountRename[1], account.id).run();
+    if (!result.meta.changes) throw new AuthError(404, "THREAD_NOT_FOUND", "这段对话不在当前账号下。");
+    return json({ ok: true, title });
+  }
+  const accountPin = path.match(/^\/api\/account\/threads\/([A-Za-z0-9_-]{16,80})\/pin$/);
+  if (accountPin && request.method === "POST") {
+    const account = await requireAccount(request, env);
+    const body = await bodyOf(request);
+    const pinned = body.pinned !== false;
+    const thread = await env.DB.prepare("SELECT 1 AS found FROM threads WHERE id=? AND account_id=?").bind(accountPin[1], account.id).first();
+    if (!thread) throw new AuthError(404, "THREAD_NOT_FOUND", "这段对话不在当前账号下。");
+    if (pinned) {
+      await env.DB.prepare(`INSERT INTO thread_pins(thread_id,owner_kind,owner_id,created_at) VALUES(?,'account',?,?)
+        ON CONFLICT(thread_id,owner_kind,owner_id) DO UPDATE SET created_at=excluded.created_at`)
+        .bind(accountPin[1], account.id, Date.now()).run();
+    } else {
+      await env.DB.prepare("DELETE FROM thread_pins WHERE thread_id=? AND owner_kind='account' AND owner_id=?")
+        .bind(accountPin[1], account.id).run();
+    }
+    return json({ ok: true, pinned });
   }
   if (path === "/api/account/threads/claim" && request.method === "POST") {
     const account = await requireAccount(request, env);

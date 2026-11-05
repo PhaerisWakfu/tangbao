@@ -173,6 +173,26 @@
     </div>
   </div>
 
+  <div class="apply" id="rename-prompt" hidden>
+    <div class="apply-card rename-card" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+      <header>
+        <h2 id="rename-title">重命名对话</h2>
+        <button type="button" id="rename-close" aria-label="关闭">×</button>
+      </header>
+      <form id="rename-form">
+        <label class="field">
+          <span>对话名称</span>
+          <input id="rename-input" maxlength="80" autocomplete="off">
+          <small>1–80 个字符。</small>
+        </label>
+        <div class="rename-actions">
+          <button type="button" id="rename-cancel">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
