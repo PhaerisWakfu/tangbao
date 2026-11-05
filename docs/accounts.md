@@ -11,7 +11,7 @@
 - 账号新建对话支持跨设备历史。旧匿名历史由用户主动选择关联，并验证原对话凭证；不根据 IP、visitor ID 或历史申请邮箱自动认领。
 - 登录默认长期保持，使用约 400 天的持久 cookie，并在活跃使用时续期。退出撤销当前会话、清理本站 cookie 和客户端缓存，下一次需要密码登录；设置不提供切换账号功能。
 - 模型停用影响该模型接单和回复，账号停用影响账号所有会话；两项操作分开。
-- 发信使用 Cloudflare Email Sending。站点设置应用侧每日 190 封发送预算（Cloudflare 侧为 200 封），180 封告警；Cloudflare 返回日额度错误时打开全局熔断，后续请求直接提示额度已满。不另设应用侧月度限制；Cloudflare 账户的月度包含额度和超额计费以控制台为准。
+- 发信使用 Cloudflare Email Sending 与 Brevo。应用侧每日总预算 460 封：Cloudflare 190、Brevo 280，180 封告警；单家额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时提示额度已满。不另设应用侧月度限制；两家账户的月度额度和计费以各自控制台为准。
 
 邮箱验证只证明对邮箱的控制权，不代表实名或内容安全保证。糖包的模型仍由人回复。
 
@@ -65,7 +65,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 ## Cloudflare Email Sending
 
-生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；控制台显示发送已启用、DNS 已配置，日额度 200 封；应用内预算设为 190 封并保留 180 封告警和 5 分钟全局熔断。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
+生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；Cloudflare 控制台显示日额度 200 封，应用内预算设为 190 封；Brevo 使用已验证的 `send.phaeris.cn` 和 `noreply@send.phaeris.cn`，应用内预算 280 封。总预算 460 封，保留 180 封告警和单家 5 分钟熔断。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
@@ -79,7 +79,11 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 MAIL_MODE=disabled                 # disabled | test | cloudflare
 MAIL_FROM=糖包 <noreply@mail.phaeris.cn>
 APP_ORIGIN=https://tangbao.phaeris.cn
-MAIL_DAILY_LIMIT=190
+MAIL_DAILY_LIMIT=460
+MAIL_PROVIDERS=cloudflare,brevo
+CLOUDFLARE_DAILY_LIMIT=190
+BREVO_DAILY_LIMIT=280
+BREVO_FROM=糖包 <noreply@send.phaeris.cn>
 # Worker secrets：EMAIL_CODE_PEPPER、MAIL_PAYLOAD_KEY
 # EMAIL 为 Worker 原生邮件绑定
 # 可选可信投递事件：MAIL_EVENTS_QUEUE、MAIL_EVENTS_ACCOUNT_ID
