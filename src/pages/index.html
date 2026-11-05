@@ -137,8 +137,8 @@
     </main>
   </div>
 
-  <div class="apply" id="report" hidden>
-    <div class="apply-card report-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
+  <dialog class="apply" id="report" aria-labelledby="report-title" hidden>
+    <div class="apply-card report-card">
       <header>
         <h2 id="report-title">举报模型</h2>
         <button type="button" id="report-close" aria-label="关闭">×</button>
@@ -153,10 +153,10 @@
       <button class="primary" type="button" id="report-submit">提交举报</button>
       <p class="err" id="report-err" role="alert"></p>
     </div>
-  </div>
+  </dialog>
 
-  <div class="apply claim-prompt" id="claim-prompt" hidden>
-    <div class="apply-card claim-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
+  <dialog class="apply claim-prompt" id="claim-prompt" aria-labelledby="claim-title" hidden>
+    <div class="apply-card claim-card">
       <header>
         <div>
           <p class="claim-kicker">匿名历史</p>
@@ -171,15 +171,16 @@
         <button class="claim-all" type="button" id="claim-prompt-all">全部关联</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
-  <div class="viewer" id="viewer" hidden>
+  <dialog class="viewer" id="viewer" aria-label="查看图片" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
-  </div>
+  </dialog>
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/modal.js"></script>
   <script src="/assets/account.js"></script>
   <script src="/assets/app.js"></script>
 </body>

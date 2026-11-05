@@ -13,6 +13,7 @@ import mdJs from "./client/md.txt";
 import swJs from "./client/sw.txt";
 import manifestJson from "./client/manifest.txt";
 import accountJs from "./client/account.txt";
+import modalJs from "./client/modal.txt";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
@@ -543,7 +544,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   const script =
-    path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
+    path === "/assets/modal.js" ? modalJs : path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },

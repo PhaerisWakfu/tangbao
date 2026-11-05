@@ -1,0 +1,42 @@
+/* Native dialogs provide focus containment, background inertness and focus restoration. */
+const modalOpeners = new WeakMap();
+window.TangbaoModal = {
+  open(dialog, returnFocus = document.activeElement) {
+    if (!dialog || dialog.open) return;
+    modalOpeners.set(dialog, returnFocus);
+    dialog.hidden = false;
+    dialog.showModal();
+  },
+  close(dialog) {
+    if (!dialog) return;
+    if (dialog.open) {
+      dialog.close();
+      const opener = modalOpeners.get(dialog);
+      if (opener?.isConnected && opener.getClientRects().length && !opener.disabled) opener.focus();
+      modalOpeners.delete(dialog);
+    }
+    dialog.hidden = true;
+  },
+  bind(dialog, close) {
+    if (!dialog) return;
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      close();
+    });
+    // Let the browser cancel the top dialog, without closing underlying UI.
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") event.stopPropagation();
+      if (event.key !== "Tab") return;
+      const controls = [...dialog.querySelectorAll("button, a[href], input, textarea, select, [tabindex]")]
+        .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+      const first = controls[0], last = controls.at(-1);
+      if (!first) { event.preventDefault(); return; }
+      if (!dialog.contains(document.activeElement) ||
+          (event.shiftKey && document.activeElement === first) ||
+          (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    });
+  },
+};

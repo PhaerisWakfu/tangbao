@@ -2018,3 +2018,16 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
     max-height: min(46dvh, 360px);
   }
 }
+
+/* Keep the existing overlay layout when promoted to the native modal top layer. */
+dialog.apply, dialog.viewer, dialog.sketch {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: var(--ink);
+}
+dialog.apply::backdrop, dialog.viewer::backdrop, dialog.sketch::backdrop { background: transparent; }

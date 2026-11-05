@@ -485,7 +485,7 @@ function claimPromptKey() {
 
 function closeClaimPrompt() {
   if (!claimPrompt) return;
-  claimPrompt.hidden = true;
+  TangbaoModal.close(claimPrompt);
 }
 
 function scheduleClaimPrompt(delay = 700) {
@@ -495,7 +495,7 @@ function scheduleClaimPrompt(delay = 700) {
 
 function showClaimPrompt() {
   if (!claimPrompt || !TangbaoAccount.account?.verified || !store.threads.length) return;
-  if (document.querySelector(".account-dialog")?.open) {
+  if (document.querySelector("dialog[open]")) {
     scheduleClaimPrompt(700);
     return;
   }
@@ -505,7 +505,7 @@ function showClaimPrompt() {
     if (localStorage.getItem(key) === "1") return;
   } catch {}
   claimPromptCount.textContent = String(store.threads.length);
-  claimPrompt.hidden = false;
+  TangbaoModal.open(claimPrompt);
   try { localStorage.setItem(key, "1"); } catch {}
   claimPrompt.querySelector("#claim-prompt-all")?.focus();
 }
@@ -547,7 +547,7 @@ window.addEventListener("tb:logout", () => {
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
-  if (reportModal) reportModal.hidden = true;
+  if (reportModal) TangbaoModal.close(reportModal);
   $("#report-reason").value = "";
   body.dataset.state = "empty"; titleEl.textContent = ""; log.replaceChildren();
   blocked = false; sending = false; grow(); updateReportEntry(); renderHistory(); showSys("");
@@ -747,11 +747,11 @@ function downloadShots(files) {
 
 function openViewer(src) {
   $("#viewer-img").src = src;
-  $("#viewer").hidden = false;
+  TangbaoModal.open($("#viewer"));
 }
 
 function closeViewer() {
-  $("#viewer").hidden = true;
+  TangbaoModal.close($("#viewer"));
   $("#viewer-img").removeAttribute("src");
 }
 
@@ -1039,12 +1039,12 @@ function openReport() {
   reportTarget.textContent = `被举报：${label}`;
   reportReason.value = "";
   reportErr.textContent = "";
-  reportModal.hidden = false;
+  TangbaoModal.open(reportModal);
   $("#report-close").focus();
 }
 
 function closeReport() {
-  reportModal.hidden = true;
+  TangbaoModal.close(reportModal);
   updateReportEntry();
 }
 
@@ -1381,3 +1381,7 @@ void (async () => {
   }
   void tick();
 })();
+
+TangbaoModal.bind($("#viewer"), closeViewer);
+TangbaoModal.bind(reportModal, closeReport);
+TangbaoModal.bind(claimPrompt, closeClaimPrompt);

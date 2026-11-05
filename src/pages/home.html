@@ -147,8 +147,8 @@
       </div>
     </footer>
   </main>
-  <div class="apply" id="apply" hidden>
-    <div class="apply-card" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+  <dialog class="apply" id="apply" aria-labelledby="apply-title" hidden>
+    <div class="apply-card">
       <header>
         <h2 id="apply-title">成为AI</h2>
         <button type="button" id="apply-close" aria-label="关闭">×</button>
@@ -200,12 +200,12 @@
         <button type="button" id="apply-again" hidden>再申请一次</button>
       </div>
     </div>
-  </div>
+  </dialog>
   <button class="connect-tab" type="button" id="connect-tab" aria-haspopup="dialog" aria-controls="connect" aria-expanded="false">
     <span>共创糖包</span>
   </button>
-  <div class="apply" id="connect" hidden>
-    <div class="apply-card connect-card" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+  <dialog class="apply" id="connect" aria-labelledby="connect-title" hidden>
+    <div class="apply-card connect-card">
       <header>
         <h2 id="connect-title">共创糖包</h2>
         <button type="button" id="connect-close" aria-label="关闭">×</button>
@@ -218,7 +218,8 @@
         </figure>
       </div>
     </div>
-  </div>
+  </dialog>
+  <script src="/assets/modal.js"></script>
   <script src="/assets/account.js"></script>
   <script>
     const $ = (selector) => document.querySelector(selector);
@@ -263,7 +264,10 @@
       $("#apply-again").hidden = data.status !== "rejected";
     }
 
+    TangbaoModal.bind($("#apply"), closeApply);
+    TangbaoModal.bind($("#connect"), closeConnect);
     let applyGeneration = 0;
+    function closeApply() { applyGeneration++; TangbaoModal.close($("#apply")); }
     async function openApply() {
       await TangbaoAccount.ready;
       let account = await TangbaoAccount.refresh().catch(() => null);
@@ -271,7 +275,7 @@
       if (!account?.verified) return;
       const stamp = ++applyGeneration;
       $("#apply-email").value = account.email;
-      $("#apply").hidden = false;
+      TangbaoModal.open($("#apply"));
       $("#apply-err").textContent = "";
       if (account.operatorId) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
       showOath();
@@ -286,25 +290,25 @@
 
     window.addEventListener("tb:account-change", () => {
       applyGeneration++;
-      $("#apply").hidden = true;
+      TangbaoModal.close($("#apply"));
       $("#apply-email").value = TangbaoAccount.account?.email || "";
       $("#apply-state-text").textContent = "";
     });
 
     window.addEventListener("tb:logout", () => {
-      applyGeneration++; $("#apply").hidden = true; $("#connect").hidden = true;
+      applyGeneration++; TangbaoModal.close($("#apply")); TangbaoModal.close($("#connect"));
       $("#apply-state-text").textContent = ""; $("#apply-reason").textContent = "";
       $("#apply-suffix").value = ""; $("#apply-email").value = ""; $("#apply-blurb").value = "";
     });
 
     function openConnect() {
-      $("#connect").hidden = false;
+      TangbaoModal.open($("#connect"));
       $("#connect-tab").setAttribute("aria-expanded", "true");
       $("#connect-close").focus();
     }
 
     function closeConnect() {
-      $("#connect").hidden = true;
+      TangbaoModal.close($("#connect"));
       $("#connect-tab").setAttribute("aria-expanded", "false");
     }
 
@@ -322,13 +326,14 @@
     $("#connect").addEventListener("click", (event) => {
       if (event.target === $("#connect")) closeConnect();
     });
-    $("#apply-close").addEventListener("click", () => { $("#apply").hidden = true; });
+    $("#apply-close").addEventListener("click", closeApply);
     $("#apply").addEventListener("click", (event) => {
-      if (event.target === $("#apply")) $("#apply").hidden = true;
+      if (event.target === $("#apply")) closeApply();
     });
     $("#apply-next").addEventListener("click", () => {
       $("#apply-oath").hidden = true;
       $("#apply-form").hidden = false;
+      $("#apply-suffix").focus();
     });
     $("#apply-again").addEventListener("click", () => {
       showOath();
@@ -363,7 +368,7 @@
     });
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
-      if (!$("#apply").hidden) $("#apply").hidden = true;
+      if (!$("#apply").hidden) closeApply();
       if (!$("#connect").hidden) closeConnect();
     });
     const params = new URLSearchParams(location.search);

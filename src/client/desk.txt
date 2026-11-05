@@ -269,6 +269,9 @@ function renderThread(data) {
         img.tabIndex = 0;
         img.setAttribute("role", "button");
         img.addEventListener("click", () => openViewer(src));
+        img.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openViewer(src); }
+        });
         shots.append(img);
       }
       wrap.append(shots);
@@ -498,7 +501,7 @@ function resetDeskView() {
   for (const image of pendingImages) URL.revokeObjectURL(image.url);
   pendingImages = []; showAttach();
   $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
-  $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
+  closeViewer(); closeSketch();
   showPane("thread"); showDesk(false);
 }
 
@@ -1440,12 +1443,12 @@ function openSketch() {
   erasing = false;
   $("#sketch-erase").setAttribute("aria-pressed", "false");
   $("#sketch-err").textContent = "";
-  sketch.hidden = false;
+  TangbaoModal.open(sketch, $("#plus"));
   requestAnimationFrame(preparePad);
 }
 
 function closeSketch() {
-  sketch.hidden = true;
+  TangbaoModal.close(sketch);
 }
 
 pad.addEventListener("pointerdown", (event) => {
@@ -1529,10 +1532,10 @@ $("#draw-image").addEventListener("click", openSketch);
 
 function openViewer(src) {
   $("#viewer-img").src = src;
-  $("#viewer").hidden = false;
+  TangbaoModal.open($("#viewer"));
 }
 function closeViewer() {
-  $("#viewer").hidden = true;
+  TangbaoModal.close($("#viewer"));
   $("#viewer-img").removeAttribute("src");
 }
 $("#viewer").addEventListener("click", (event) => {
@@ -1554,3 +1557,6 @@ document.addEventListener("visibilitychange", () => {
 });
 
 void TangbaoAccount.ready.then(syncDeskAccount);
+
+TangbaoModal.bind($("#viewer"), closeViewer);
+TangbaoModal.bind(sketch, closeSketch);
