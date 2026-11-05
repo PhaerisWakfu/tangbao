@@ -1060,7 +1060,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
       .first<{ active: number; owner_ready: number }>();
     if (!row || row.active !== 1 || !row.owner_ready) throw new HttpError(400, "这个模型不在。");
   }
-  await assertQueue(env, thread.awaiting === 1);
+  // The global queue cap protects new conversations. Continuing an existing
+  // thread must remain possible even when that cap is full.
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
   noteVisitor(
@@ -2434,7 +2435,7 @@ async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> 
   if (alreadyWaiting) return;
   const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND ${unblockedThread("threads")}`).first<{ n: number }>();
   if (Number(row?.n ?? 0) >= QUEUE_CAP) {
-    throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
+    throw new HttpError(429, "笼里排队的新对话太多了，先等一会儿再开新屉。已有对话仍可继续。");
   }
 }
 
