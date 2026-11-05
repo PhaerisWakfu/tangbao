@@ -367,7 +367,6 @@ body[data-presence="asleep"] svg.steam { display: none; }
   stroke-linejoin: round;
 }
 .hist-menu-item:hover { background: var(--hover); color: var(--ink); }
-.hist-menu-item.is-danger { color: #a04b2a; }
 .hist-row[data-pinned="true"] { background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .hist-row[data-pinned="true"]:hover { background: var(--hover); }
 .hist-x {

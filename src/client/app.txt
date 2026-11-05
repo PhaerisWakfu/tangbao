@@ -6,6 +6,7 @@ const WAIT = {
   awake: "他在看这句，不是在生成。",
   asleep: "他不在，这句会留到他回来。",
 };
+const PIN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
 const STEAM =
   '<svg class="steam" viewBox="0 0 26 18" aria-hidden="true">' +
   '<path d="M8 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M13 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M18 17c-3-3 3-5 0-8s3-5 0-8"/></svg>';
@@ -379,7 +380,7 @@ function renderHistory() {
         const mark = document.createElement("span");
         mark.className = "hist-pin-mark";
         mark.setAttribute("aria-label", "已置顶");
-        mark.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8v6.2M7.2 9h5.6l1.2 3.1H6L7.2 9ZM10 12.1V17"/></svg>';
+        mark.innerHTML = PIN_ICON;
         row.append(mark);
       }
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
@@ -413,7 +414,7 @@ function renderHistory() {
       pinAction.type = "button";
       pinAction.className = "hist-menu-item";
       pinAction.setAttribute("role", "menuitem");
-      pinAction.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8v6.2M7.2 9h5.6l1.2 3.1H6L7.2 9ZM10 12.1V17"/></svg><span>${thread.pinned ? "取消固定" : "固定"}</span>`;
+      pinAction.innerHTML = `${PIN_ICON}<span>${thread.pinned ? "取消固定" : "固定"}</span>`;
       const renameAction = document.createElement("button");
       renameAction.type = "button";
       renameAction.className = "hist-menu-item";
@@ -421,7 +422,7 @@ function renderHistory() {
       renameAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></svg><span>重命名</span>';
       const deleteAction = document.createElement("button");
       deleteAction.type = "button";
-      deleteAction.className = "hist-menu-item is-danger";
+      deleteAction.className = "hist-menu-item";
       deleteAction.setAttribute("role", "menuitem");
       deleteAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10M9 9v4M11 9v4"/></svg><span>删除</span>';
       menu.append(pinAction, renameAction, deleteAction);
