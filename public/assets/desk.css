@@ -639,6 +639,19 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   list-style: none;
 }
 .fold summary::-webkit-details-marker { display: none; }
+.thread-load-more {
+  display: block;
+  margin: 2px auto 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.thread-load-more:hover { border-color: var(--line-2); background: var(--hover); color: var(--ink); }
+.thread-load-more:disabled { cursor: default; opacity: 0.65; }
 .fold summary::before { content: "▸ "; }
 .fold[open] summary::before { content: "▾ "; }
 .pile .none { margin: 6px 10px; font-size: 13px; color: var(--faint); }

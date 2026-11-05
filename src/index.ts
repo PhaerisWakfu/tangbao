@@ -981,8 +981,9 @@ async function sha256Bytes(bytes: ArrayBuffer): Promise<string> {
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
-  const [messages, operator] = await Promise.all([
-    listMessages(env, id),
+  const before = new URL(request.url).searchParams.get("before") || "";
+  const [{ messages, hasMore }, operator] = await Promise.all([
+    listMessages(env, id, before),
     operatorPresence(env, thread.operator_id),
   ]);
   const status = statusPayload(publicPresence(operator.status));
@@ -994,6 +995,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     reported: thread.reported_at > 0,
     blocked: seen.blocked,
     messages,
+    hasMore,
     status,
     operatorStatus: status,
   });
@@ -2004,7 +2006,8 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       pinned: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
-  const messages = await listMessages(env, id);
+  const before = new URL(request.url).searchParams.get("before") || "";
+  const { messages, hasMore } = await listMessages(env, id, before);
   const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
@@ -2017,6 +2020,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       pinned: Boolean(thread.pinned),
     },
     messages,
+    hasMore,
   });
 }
 
@@ -2095,29 +2099,56 @@ async function serveImage(request: Request, env: AppEnv, id: string): Promise<Re
   return new Response(bytes, { headers: { "content-type": row.image_type || "application/octet-stream", "cache-control": "private, no-store" } });
 }
 
-async function listMessages(env: AppEnv, threadId: string) {
-  const messages = await env.DB.prepare(
-    "SELECT id, role, body, draw, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
-  )
-    .bind(threadId)
-    .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+async function listMessages(env: AppEnv, threadId: string, before = ""): Promise<{
+  messages: Array<{ id: string; role: string; body: string; draw: number; createdAt: number; images: { id: string; type: string; url: string }[] }>;
+  hasMore: boolean;
+}> {
+  const pageSize = 50;
+  let rows;
+  if (before) {
+    const cursor = await env.DB.prepare("SELECT id,created_at AS createdAt FROM messages WHERE id=? AND thread_id=?")
+      .bind(before, threadId).first<{ id: string; createdAt: number }>();
+    if (!cursor) throw new HttpError(400, "消息游标已失效，请刷新后重试。");
+    rows = await env.DB.prepare(
+      `SELECT id, role, body, draw, created_at AS createdAt FROM messages
+       WHERE thread_id=? AND (created_at < ? OR (created_at = ? AND id < ?))
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+    )
+      .bind(threadId, cursor.createdAt, cursor.createdAt, cursor.id, pageSize + 1)
+      .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+  } else {
+    rows = await env.DB.prepare(
+      `SELECT id, role, body, draw, created_at AS createdAt FROM messages
+       WHERE thread_id=? ORDER BY created_at DESC, id DESC LIMIT ?`,
+    )
+      .bind(threadId, pageSize + 1)
+      .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+  }
+  const hasMore = rows.results.length > pageSize;
+  const page = rows.results.slice(0, pageSize).reverse();
   const grouped = new Map<string, { id: string; type: string; url: string }[]>();
   const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
-  const images = await env.DB.prepare(
-    `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
-     FROM message_images i JOIN messages m ON m.id = i.message_id
-     WHERE m.thread_id = ? ORDER BY i.position ASC`,
-  )
-    .bind(threadId)
-    .all<{ id: string; messageId: string; imageType: string }>();
-  for (const image of images.results) {
-    const list = grouped.get(image.messageId) ?? [];
-    const expires = Date.now() + 5 * 60_000;
-    const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
-    list.push({ id: image.id, type: image.imageType, url });
-    grouped.set(image.messageId, list);
+  for (let offset = 0; offset < page.length; offset += 80) {
+    const chunk = page.slice(offset, offset + 80);
+    const marks = chunk.map(() => "?").join(", ");
+    const images = await env.DB.prepare(
+      `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
+       FROM message_images i WHERE i.message_id IN (${marks}) ORDER BY i.position ASC`,
+    )
+      .bind(...chunk.map((message) => message.id))
+      .all<{ id: string; messageId: string; imageType: string }>();
+    for (const image of images.results) {
+      const list = grouped.get(image.messageId) ?? [];
+      const expires = Date.now() + 5 * 60_000;
+      const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
+      list.push({ id: image.id, type: image.imageType, url });
+      grouped.set(image.messageId, list);
+    }
   }
-  return messages.results.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] }));
+  return {
+    messages: page.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] })),
+    hasMore,
+  };
 }
 
 async function writeMessage(

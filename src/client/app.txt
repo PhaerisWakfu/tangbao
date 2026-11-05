@@ -49,6 +49,9 @@ let claiming = false;
 let loggedOut = TangbaoAccount.logoutPending;
 let status = { state: "available", label: "在线", note: "他在", awake: true, online: true, status: "online" };
 let messages = [];
+let messagesThreadId = null;
+let messagesHasMore = false;
+let messagesLoading = false;
 let openAwaiting = true;
 let painted = "";
 let timer = 0;
@@ -290,17 +293,38 @@ function tickPending() {
   row.querySelector("small").textContent = `已用时 ${spent(Date.now() - Number(row.dataset.since))} · ${wait}`;
 }
 
+function mergeMessages(base, incoming) {
+  const byId = new Map();
+  for (const message of base) byId.set(message.id, message);
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+}
+
 function paint(list) {
-  const key = JSON.stringify({ list, openAwaiting, blocked });
+  const keepScroll = arguments[1] === true;
+  const hasMore = typeof messagesHasMore === "boolean" ? messagesHasMore : false;
+  const loadingMore = typeof messagesLoading === "boolean" ? messagesLoading : false;
+  const key = JSON.stringify({ list, openAwaiting, blocked, hasMore, loadingMore });
   if (key === painted) {
     tickPending();
     return;
   }
+  const previousHeight = stage.scrollHeight;
+  const previousTop = stage.scrollTop;
   painted = key;
   messages = list;
   body.dataset.state = list.length ? "chat" : "empty";
   titleEl.textContent = list.length && current ? current.title || "" : "";
   log.replaceChildren();
+  if (hasMore && list.length) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "log-more";
+    more.disabled = loadingMore;
+    more.textContent = loadingMore ? "正在加载更早消息…" : "上拉加载更早消息";
+    more.addEventListener("click", () => void loadOlderMessages());
+    log.append(more);
+  }
   let askedAt = 0;
   for (const message of list) {
     if (message.role === "visitor") {
@@ -329,7 +353,34 @@ function paint(list) {
     log.append(note);
   }
   tickPending();
-  stage.scrollTop = stage.scrollHeight;
+  if (keepScroll) stage.scrollTop = previousTop + (stage.scrollHeight - previousHeight);
+  else stage.scrollTop = stage.scrollHeight;
+}
+
+async function loadOlderMessages() {
+  if (!current || !validId(current.id) || !messagesHasMore || messagesLoading) return;
+  const thread = current;
+  const oldest = messages[0]?.id;
+  if (!oldest) return;
+  messagesLoading = true;
+  painted = "";
+  paint(messages, true);
+  try {
+    const data = await api(`/api/threads/${thread.id}?before=${encodeURIComponent(oldest)}`, { token: thread.token });
+    if (current !== thread) return;
+    messages = mergeMessages(messages, data.messages || []);
+    messagesHasMore = Boolean(data.hasMore);
+    messagesLoading = false;
+    painted = "";
+    paint(messages, true);
+  } catch (error) {
+    if (current === thread) {
+      messagesLoading = false;
+      painted = "";
+      paint(messages, true);
+      showSys(error.message);
+    }
+  }
 }
 
 function historyModel(thread) {
@@ -355,6 +406,10 @@ function historyInitial(thread) {
 function visibleThreads() {
   return [...ownedThreads, ...store.threads];
 }
+
+stage.addEventListener("scroll", () => {
+  if (stage.scrollTop < 60 && messagesHasMore && !messagesLoading && current) void loadOlderMessages();
+});
 
 function renderHistory() {
   history.replaceChildren();
@@ -683,6 +738,7 @@ window.addEventListener("tb:logout", () => {
   loggedOut = true; historySequence++; viewVersion++;
   clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
   current = null; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; store = { threads: [], activeId: null };
+  messages = []; messagesThreadId = null; messagesHasMore = false; messagesLoading = false;
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
@@ -728,6 +784,12 @@ async function refresh() {
   try {
     const data = await api(`/api/threads/${thread.id}`, { token: thread.token });
     if (current !== thread) return;
+    if (messagesThreadId !== thread.id) {
+      messagesThreadId = thread.id;
+      messages = [];
+      messagesHasMore = false;
+      messagesLoading = false;
+    }
     const wasQueued = threadQueued;
     threadQueued = Boolean(data.queued);
     if (threadQueued) {
@@ -754,7 +816,10 @@ async function refresh() {
       renderHistory();
     }
     updateReportEntry();
-    paint(data.messages || []);
+    messages = mergeMessages(messages, data.messages || []);
+    messagesHasMore = Boolean(data.hasMore);
+    messagesLoading = false;
+    paint(messages);
     paintModels();
   } catch (err) {
     if (current !== thread) return;
@@ -800,6 +865,10 @@ async function openThread(id) {
   if (!found) return;
   viewVersion++;
   current = found;
+  messages = [];
+  messagesThreadId = id;
+  messagesHasMore = false;
+  messagesLoading = false;
   threadModel = "";
   threadQueued = false;
   updateReportEntry();
@@ -823,6 +892,10 @@ function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
+  messages = [];
+  messagesThreadId = null;
+  messagesHasMore = false;
+  messagesLoading = false;
   applyBlocked(false);
   threadModel = "";
   threadQueued = false;

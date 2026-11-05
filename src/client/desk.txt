@@ -42,6 +42,11 @@ let applyStamp = "";
 let auditStamp = "";
 let selected = null;
 let shown = "";
+let threadMessages = [];
+let threadHasMore = false;
+let threadLoadingMore = false;
+let threadData = null;
+let threadMessagesId = null;
 let timer = 0;
 let pendingImages = [];
 let readonly = false;
@@ -281,9 +286,24 @@ function foldPile(title, items, kind) {
   pile.append(details);
 }
 
-function renderThread(data) {
+function mergeThreadMessages(base, incoming) {
+  const byId = new Map();
+  for (const message of base) byId.set(message.id, message);
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+}
+
+function renderThread(data, keepScroll = false) {
+  threadData = data.thread;
+  if (threadMessagesId !== data.thread.id) {
+    threadMessages = [];
+    threadHasMore = false;
+    threadMessagesId = data.thread.id;
+  }
+  threadMessages = mergeThreadMessages(threadMessages, data.messages || []);
+  threadHasMore = Boolean(data.hasMore);
   $("#slip-title").textContent = data.thread.title;
-  const last = data.messages.at(-1);
+  const last = threadMessages.at(-1);
   const own = data.thread.operatorId === seat.operatorId;
   const locked = readonly || !own;
   const shelve = $("#shelve");
@@ -313,11 +333,22 @@ function renderThread(data) {
   $("#answer").placeholder = last && last.role === "visitor" && last.draw
     ? "他要一张图。画完放进来，或写一句。"
     : "写一句可能没用的话";
-  const key = JSON.stringify(data.messages);
+  const key = JSON.stringify({ messages: threadMessages, hasMore: threadHasMore, loading: threadLoadingMore });
   if (key === shown) return;
+  const previousHeight = thread.scrollHeight;
+  const previousTop = thread.scrollTop;
   shown = key;
   thread.replaceChildren();
-  for (const message of data.messages) {
+  if (threadHasMore) {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "thread-load-more";
+    more.disabled = threadLoadingMore;
+    more.textContent = threadLoadingMore ? "正在加载更早消息…" : "上拉加载更早消息";
+    more.addEventListener("click", () => void loadOlderThread());
+    thread.append(more);
+  }
+  for (const message of threadMessages) {
     const wrap = document.createElement("div");
     wrap.className = message.role === "tangbao" ? "me" : "them";
     if (message.body) {
@@ -355,7 +386,39 @@ function renderThread(data) {
     wrap.append(meta);
     thread.append(wrap);
   }
-  thread.scrollTop = thread.scrollHeight;
+  if (keepScroll) thread.scrollTop = previousTop + (thread.scrollHeight - previousHeight);
+  else thread.scrollTop = thread.scrollHeight;
+}
+
+thread.addEventListener("scroll", () => {
+  if (thread.scrollTop < 40 && threadHasMore && !threadLoadingMore && selected) void loadOlderThread();
+});
+
+async function loadOlderThread() {
+  if (!selected || !threadHasMore || threadLoadingMore || !threadData) return;
+  const id = selected;
+  const oldest = threadMessages[0]?.id;
+  if (!oldest) return;
+  threadLoadingMore = true;
+  shown = "";
+  renderThread({ thread: threadData, messages: threadMessages, hasMore: threadHasMore }, true);
+  try {
+    const data = await api(`/api/admin/threads/${id}?before=${encodeURIComponent(oldest)}`);
+    if (selected !== id) return;
+    threadLoadingMore = false;
+    threadData = data.thread;
+    threadMessages = mergeThreadMessages(threadMessages, data.messages || []);
+    threadHasMore = Boolean(data.hasMore);
+    shown = "";
+    renderThread({ thread: data.thread, messages: threadMessages, hasMore: threadHasMore }, true);
+  } catch (error) {
+    if (selected === id) {
+      threadLoadingMore = false;
+      shown = "";
+      renderThread({ thread: threadData, messages: threadMessages, hasMore: threadHasMore }, true);
+      replyErr.textContent = error.message || "更早的消息没有加载出来。";
+    }
+  }
 }
 
 async function loadQueue() {
@@ -439,7 +502,14 @@ function showPane(name, nav) {
 async function openSlip(id, fromAudit) {
   readonly = Boolean(fromAudit);
   showPane("thread", readonly ? "audit" : "thread");
-  if (id !== selected) shown = "";
+  if (id !== selected) {
+    shown = "";
+    threadMessages = [];
+    threadHasMore = false;
+    threadLoadingMore = false;
+    threadData = null;
+    threadMessagesId = null;
+  }
   selected = id;
   replyErr.textContent = "";
   try {
@@ -595,6 +665,7 @@ let replyGuard = { key: "", at: 0 };
 function resetDeskView() {
   clearTimeout(timer); applyToken++; auditToken++;
   selected = null; shown = ""; readonly = false;
+  threadMessages = []; threadHasMore = false; threadLoadingMore = false; threadData = null; threadMessagesId = null;
   seat = { super: false, operatorId: "" };
   thread.replaceChildren(); pile.replaceChildren();
   $("#applications").replaceChildren(); $("#audit").replaceChildren(); $("#pool-list").replaceChildren();
