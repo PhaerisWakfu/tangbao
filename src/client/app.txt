@@ -1436,27 +1436,28 @@ function paintModels() {
 
   const visible = modelSearchMode
     ? models.slice()
-    : models.filter((model) => model.id === id || model.status === "online" || model.online === true);
+    : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
+    const selectable = online || state === "busy";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
     button.dataset.state = state;
-    button.disabled = !online;
-    button.setAttribute("aria-disabled", String(!online));
+    button.disabled = !selectable;
+    button.setAttribute("aria-disabled", String(!selectable));
     button.setAttribute("aria-pressed", String(model.id === id));
     button.innerHTML =
-      `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
+      `<i data-on="${selectable ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
     button.querySelector("b").textContent = model.id;
     button.querySelector(".who small").textContent = model.blurb || "";
     button.querySelector(".model-state").textContent =
       state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
-      if (!online) return;
+      if (!selectable) return;
       if (current) {
         closeCard();
         newChat(model.id);

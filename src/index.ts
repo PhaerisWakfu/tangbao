@@ -1198,11 +1198,9 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
          AND o.last_seen_at >= ?
-         AND COALESCE(p.n, 0) < ?
-         AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
        ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
     )
-      .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT)
+      .bind(now - ONLINE_TTL)
       .all<PresenceRow>();
     const operators = rows.results.map((row) => presenceFromRow(row, now));
     const totalRow = await env.DB.prepare(
