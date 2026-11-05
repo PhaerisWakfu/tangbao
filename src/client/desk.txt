@@ -136,7 +136,8 @@ function paintTitle() {
 
 function applyWorkState(accepting) {
   workState.setAttribute("aria-checked", String(accepting));
-  workState.querySelector(".work-state-label").textContent = accepting ? "接单中" : "暂停接单";
+  workState.querySelector(".work-state-label").textContent = accepting ? "营业中" : "打烊中";
+  workState.title = accepting ? "营业中：可以自动分配新对话" : "打烊中：不再自动分配新对话，已有对话仍可回复";
 }
 
 function applyPresence(status) {
