@@ -2168,9 +2168,14 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   border-radius: 8px;
   font-size: 20px;
 }
-.sketch-tools { display: grid; gap: 6px; margin: 12px 0; }
-.sketch-tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sketch-tool-row:last-child { justify-content: flex-end; }
+.sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 12px 0; }
+.sketch-tool-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sketch-actions { margin-left: auto; }
+@media (max-width: 700px) {
+  .sketch-actions { margin-left: 0; }
+  .sketch-color span { display: none; }
+  .sketch-color { padding: 0 6px; }
+}
 .sketch-tools button {
   display: inline-flex;
   align-items: center;
@@ -2207,14 +2212,17 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   cursor: pointer;
 }
 .sketch-color input {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 50%;
   background: none;
   cursor: pointer;
+  appearance: none;
 }
+.sketch-color input::-webkit-color-swatch-wrapper { padding: 0; }
+.sketch-color input::-webkit-color-swatch { border: 0; border-radius: 50%; }
 .swatch { width: 22px; height: 22px; padding: 0; border-radius: 999px; background: var(--c) !important; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12); }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
 #sketch-pad {

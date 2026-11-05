@@ -202,12 +202,16 @@
         <button type="button" id="sketch-close" aria-label="关闭">×</button>
       </header>
       <div class="sketch-tools">
-        <div class="sketch-tool-row">
+        <div class="sketch-tool-group">
           <button type="button" id="sketch-pen" aria-pressed="true">画笔 <kbd>B</kbd></button>
           <button type="button" id="sketch-erase">橡皮 <kbd>E</kbd></button>
-          <button type="button" data-size="3">细 <kbd>[</kbd></button>
+        </div>
+        <div class="sketch-tool-group">
+          <button type="button" data-size="3">细</button>
           <button type="button" data-size="6" aria-pressed="true">中</button>
-          <button type="button" data-size="12">粗 <kbd>]</kbd></button>
+          <button type="button" data-size="12">粗</button>
+        </div>
+        <div class="sketch-tool-group sketch-colors">
           <button type="button" class="swatch" data-color="#1f1d1a" style="--c:#1f1d1a" aria-label="墨色" aria-pressed="true"></button>
           <button type="button" class="swatch" data-color="#a8622a" style="--c:#a8622a" aria-label="红糖"></button>
           <button type="button" class="swatch" data-color="#2f5d50" style="--c:#2f5d50" aria-label="松绿"></button>
@@ -216,7 +220,7 @@
           <button type="button" class="swatch" data-color="#b58a2a" style="--c:#b58a2a" aria-label="姜黄"></button>
           <label class="sketch-color"><input type="color" id="sketch-color" value="#1f1d1a" aria-label="自定义颜色"><span>自选</span></label>
         </div>
-        <div class="sketch-tool-row">
+        <div class="sketch-tool-group sketch-actions">
           <button type="button" id="sketch-undo">撤销 <kbd>Ctrl Z</kbd></button>
           <button type="button" id="sketch-redo">重做 <kbd>Ctrl ⇧ Z</kbd></button>
           <button type="button" id="sketch-clear">清空</button>
