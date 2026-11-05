@@ -206,6 +206,10 @@ function foldPile(title, items, kind) {
   pile.append(details);
 }
 
+function messageScroller() {
+  return window.matchMedia("(max-width: 860px)").matches ? document.scrollingElement : thread;
+}
+
 function renderThread(data) {
   $("#slip-title").textContent = data.thread.title;
   const last = data.messages.at(-1);
@@ -240,8 +244,9 @@ function renderThread(data) {
     : "写一句可能没用的话";
   const key = JSON.stringify(data.messages);
   if (key === shown) return;
-  const top = thread.scrollTop;
-  const reading = Boolean(shown) && thread.scrollHeight - thread.clientHeight - top > 100;
+  const scroller = messageScroller();
+  const top = scroller.scrollTop;
+  const reading = Boolean(shown) && scroller.scrollHeight - scroller.clientHeight - top > 100;
   shown = key;
   thread.replaceChildren();
   for (const message of data.messages) {
@@ -285,7 +290,7 @@ function renderThread(data) {
     wrap.append(meta);
     thread.append(wrap);
   }
-  thread.scrollTop = reading ? top : thread.scrollHeight;
+  scroller.scrollTop = reading ? top : scroller.scrollHeight;
 }
 
 async function loadQueue() {
@@ -1578,9 +1583,10 @@ async function loadOlderMessages() {
   try {
     const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`, {}, "older");
     if (id !== selected || version !== threadViewVersion) return;
-    const top = thread.scrollTop, height = thread.scrollHeight;
+    const scroller = messageScroller();
+    const top = scroller.scrollTop, height = scroller.scrollHeight;
     renderThread(data);
-    thread.scrollTop = top + thread.scrollHeight - height;
+    scroller.scrollTop = top + scroller.scrollHeight - height;
   } catch { /* The shared pager exposes a recoverable error beside the button. */ }
 }
 $("#messages-older").addEventListener("click", () => void loadOlderMessages());

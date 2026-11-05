@@ -146,3 +146,23 @@ test("switching desk thread hides the old reply form until the new read complete
   assert.equal(f.context.$("#shelve").hidden, true);
   pending.resolve({}); await opening;
 });
+for (const narrow of [true, false]) test(`older desk history preserves the ${narrow ? "mobile document" : "desktop thread"} scroll position`, async () => {
+  const f = desk();
+  const root = { scrollTop: 200, scrollHeight: 2000, clientHeight: 844 };
+  f.context.document.scrollingElement = root;
+  f.context.thread = { scrollTop: narrow ? 0 : 400, scrollHeight: 1000, clientHeight: narrow ? 1000 : 600 };
+  f.context.window.matchMedia = () => ({ matches: narrow });
+  f.context.api = async route => route.includes("before=")
+    ? { messages: [{ id: "a-0" }, { id: "a-1" }], messagePage: { oldest: "a-0", newest: "a-1", hasOlder: false, hasNewer: false } }
+    : { messages: [{ id: "a-2" }, { id: "a-3" }], messagePage: { oldest: "a-2", newest: "a-3", hasOlder: true, hasNewer: false } };
+  functions("desk", ["loadOlderMessages", ...(sources.desk.includes("function messageScroller()") ? ["messageScroller"] : [])], f.context);
+  await f.context.messagePages.load("0:a", "/api/admin/threads/a");
+  f.context.renderThread = data => {
+    assert.equal(data.messages.length, 4);
+    f.context.thread.scrollHeight += 1000;
+    if (narrow) { f.context.thread.clientHeight += 1000; root.scrollHeight += 1000; }
+  };
+  await f.context.loadOlderMessages();
+  assert.equal(root.scrollTop, narrow ? 1200 : 200);
+  if (!narrow) assert.equal(f.context.thread.scrollTop, 1400);
+});
