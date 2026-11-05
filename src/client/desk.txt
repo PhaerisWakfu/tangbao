@@ -1790,5 +1790,8 @@ async function loadOlderMessages() {
 }
 $("#messages-older").addEventListener("click", () => void loadOlderMessages());
 $("#messages-newer").addEventListener("click", () => void tick());
+thread.addEventListener("scroll", () => {
+  if (messageScroller() === thread && thread.scrollTop < 40) void loadOlderMessages();
+}, { passive: true });
 
 TangbaoModal.bind(deskRename, closeDeskRename);

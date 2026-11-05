@@ -22,12 +22,30 @@ async function fixture(t) {
   await client.batch(["a", "b"].map(id => ({ sql: "INSERT INTO threads(id,token_hash,title,created_at,updated_at) VALUES(?,'synthetic','synthetic',1,1)", args: [id] })), "write");
   const bindings = [], sqls = [], database = new scope.Database(client);
   const env = { DB: { prepare(sql) { sqls.push(sql); return { bind(...args) { bindings.push(args.length); assert(args.length <= 50); return database.prepare(sql).bind(...args); } }; } } };
-  return { client, bindings, sqls, list: (thread = "a", query = "") => scope.list(env, thread, new URLSearchParams(query)) };
+  return { client, bindings, sqls,
+    list: (thread = "a", query = "") => scope.list(env, thread, new URLSearchParams(`order=written${query ? `&${query}` : ""}`)),
+    legacyList: (query = "") => scope.list(env, "a", new URLSearchParams(query)),
+  };
 }
 async function insert(f, count = 144) {
   await f.client.batch(Array.from({ length: count }, (_, i) => ({ sql: "INSERT INTO messages(id,thread_id,role,body,created_at) VALUES(?,'a','visitor',?,100)", args: [`a-${i}`, `message-${i}`] })), "write");
   await f.client.execute("INSERT INTO messages(id,thread_id,role,body,created_at) VALUES('b-0','b','visitor','private-other',100)");
 }
+test("main's existing clients retain hasMore and timestamp/id cursors without reloading", async t => {
+  const f = await fixture(t); await insert(f);
+  let query = "", all = [], requests = 0;
+  do {
+    const page = await f.legacyList(query); requests++;
+    assert.equal(typeof page.hasMore, "boolean");
+    assert(page.messages.length <= 50);
+    all = [...page.messages, ...all];
+    if (!page.hasMore) break;
+    assert(requests < 5, "legacy cursor must make progress even when every timestamp is equal");
+    query = `before=${page.messages[0].id}`;
+  } while (true);
+  assert.equal(all.length,144); assert.equal(new Set(all.map(row => row.id)).size,144);
+  assert.deepEqual(all.map(row => row.id), Array.from({length:144}, (_,i)=>`a-${i}`).sort());
+});
 test("first/older message pages stay bounded and preserve every same-timestamp message and image", async t => {
   const f = await fixture(t); await insert(f);
   for (const [id, msg, pos] of [["second", "a-0", 1], ["first", "a-0", 0], ["last", "a-143", 0], ["other", "b-0", 0]]) await f.client.execute({ sql: "INSERT INTO message_images(id,message_id,image_key,image_type,position) VALUES(?,?,?,'image/png',?)", args: [id, msg, `img/${id}`, pos] });

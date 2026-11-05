@@ -74,4 +74,29 @@ export async function runConcurrencyScenarios({ actor, admin, operatorA, operato
     assert.equal(rows.reduce((total,row)=>total+row.n,0),10);
     await db(`DELETE FROM threads WHERE id LIKE ${quote(prefix+'%')}`);
   });
+  await check("main队列准入按模型20条，其他模型与已有对话不被全局积压阻断", async () => {
+    const user=actor("queue-admission-review"); await user.register();
+    const a=operatorA.state.operatorId,b=operatorB.state.operatorId,now=Date.now();
+    const prefix=`synthetic-admission-${randomBytes(6).toString("hex")}`;
+    await db("UPDATE threads SET awaiting=0; UPDATE operators SET last_seen_at=0;");
+    await db(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<400)
+      INSERT INTO threads(id,token_hash,title,created_at,updated_at,operator_id,queued,auto_home,awaiting)
+      SELECT ${quote(prefix)}||'-'||n,'synthetic','合成准入边界',${now},${now},
+        CASE WHEN n<=20 THEN ${quote(a)} ELSE 'tangbao-pool' END,
+        CASE WHEN n<=20 THEN 0 ELSE 1 END,CASE WHEN n<=20 THEN 0 ELSE 1 END,1 FROM seq`);
+    const existing=`${prefix}-existing`;
+    await db(`INSERT INTO threads(id,token_hash,title,created_at,updated_at,operator_id,awaiting,account_id)
+      VALUES(${quote(existing)},'synthetic','已有对话续聊',${now},${now},${quote(a)},0,${quote(user.state.accountId)})`);
+    await user.request("/api/threads",{method:"POST",body:{body:"满模型拒绝新建",operator:a},status:429});
+    const other=await user.request("/api/threads",{method:"POST",body:{body:"其他模型仍可新建",operator:b}});assert.equal(other.operator,b);
+    await user.request(`/api/threads/${existing}/messages`,{method:"POST",body:{body:"满队列仍可继续原对话"}});
+    assert.equal((await user.request(`/api/threads/${existing}`)).messages.at(-1).body,"满队列仍可继续原对话");
+    for(const [operator,queued] of [["tangbao-vme50-flash",false],["",true]]){
+      const created=await user.request("/api/threads",{method:"POST",body:{body:"主模型与消息池不受普通模型准入上限限制",operator}});
+      assert.equal(created.queued,queued);assert.equal(created.operator,queued?"tangbao-pool":operator);
+    }
+    await db(`UPDATE threads SET awaiting=0 WHERE id IN (${quote(prefix+'-1')},${quote(prefix+'-2')})`);
+    const admitted=await user.request("/api/threads",{method:"POST",body:{body:"19条时仍允许新建",operator:a}});assert.equal(admitted.operator,a);
+    await db(`DELETE FROM threads WHERE id LIKE ${quote(prefix+'%')}`);
+  });
 }

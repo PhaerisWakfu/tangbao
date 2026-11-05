@@ -23,7 +23,7 @@ window.TangbaoMessagePages = class {
     if (this.pending) return this.pending;
     const serial = this.serial;
     const mode = direction === "older" && this.oldest ? "older" : this.newest ? "newer" : "initial";
-    const query = new URLSearchParams();
+    const query = new URLSearchParams({ order: "written" });
     if (mode === "older") query.set("before", this.oldest);
     if (mode === "newer") query.set("after", this.newest);
     this.errors[mode] = "";

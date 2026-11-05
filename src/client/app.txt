@@ -1589,6 +1589,9 @@ async function loadOlderMessages() {
 }
 $("#messages-older").addEventListener("click", () => void loadOlderMessages());
 $("#messages-newer").addEventListener("click", () => void refresh().catch(error => showSys(error.message)));
+stage.addEventListener("scroll", () => {
+  if (stage.scrollTop < 60) void loadOlderMessages();
+}, { passive: true });
 const sketch = $("#sketch");
 const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");

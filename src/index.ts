@@ -89,7 +89,8 @@ const MODEL_RECENT_MS = 30 * DAY;
 const MODEL_PAGE_SIZE = 30;
 const AUDIT_MODEL_PAGE_SIZE = 20;
 const MODEL_SEARCH_MAX = 40;
-const QUEUE_CAP = 400;
+// Per-model admission control for new conversations. Existing threads are never capped here.
+const MODEL_QUEUE_CAP = 20;
 const BODY_LIMIT = 2000;
 const REQUEST_LIMIT = 20_000;
 const IMAGE_LIMIT = 2_000_000;
@@ -891,7 +892,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
   if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
-  await assertQueue(env, false);
+  await assertModelQueue(env, assignment.id);
   const id = randomId(16), token = randomId(32), now = Date.now(), messageId = randomId(16);
   const operator = assignment.id, queued = assignment.queued ? 1 : 0;
   const autoHome = queued || (operator === HOME_MODEL && assignment.requested !== HOME_MODEL) ? 1 : 0;
@@ -1045,7 +1046,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
       .first<{ active: number; owner_ready: number }>();
     if (!row || row.active !== 1 || !row.owner_ready) throw new HttpError(400, "这个模型不在。");
   }
-  await assertQueue(env, thread.awaiting === 1);
+  // Admission applies only to new conversations. Continuing an existing thread
+  // remains possible even when the selected model's new-thread queue is full.
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
   noteVisitor(
@@ -2083,26 +2085,33 @@ async function serveImage(request: Request, env: AppEnv, id: string): Promise<Re
 
 async function listMessages(env: AppEnv, threadId: string, query = new URLSearchParams()) {
   const after = query.get("after"), before = query.get("before");
+  // Existing main pages use timestamp/id cursors. Only the incremental client
+  // opts into write order, so open pages retain their original cursor contract.
+  const writtenOrder = query.get("order") === "written" || Boolean(after);
   if ((after && before) || query.has("after") && !after || query.has("before") && !before ||
       [after, before].some(cursor => cursor && !/^[A-Za-z0-9_-]{1,80}$/.test(cursor))) {
     throw new HttpError(400, "消息位置不正确，请重新打开对话。");
   }
   const cursor = after || before;
-  let anchor: number | undefined;
+  let anchor: { position: number; createdAt: number; id: string } | null = null;
   if (cursor) {
-    const row = await env.DB.prepare("SELECT rowid AS position FROM messages WHERE id=? AND thread_id=?")
-      .bind(cursor, threadId).first<{ position: number }>();
-    if (!row) throw new HttpError(400, "消息位置已失效，请重新打开对话。");
-    anchor = row.position;
+    anchor = await env.DB.prepare("SELECT rowid AS position,created_at AS createdAt,id FROM messages WHERE id=? AND thread_id=?")
+      .bind(cursor, threadId).first<{ position: number; createdAt: number; id: string }>();
+    if (!anchor) throw new HttpError(400, "消息位置已失效，请重新打开对话。");
   }
   // The thread index contains SQLite's implicit rowid suffix. Unlike timestamps,
   // a retained message anchor cannot miss a later commit in the same millisecond.
   const direction = after ? "ASC" : "DESC";
+  const comparison = after ? ">" : "<";
+  const boundary = !anchor ? "" : writtenOrder ? `AND rowid ${comparison} ?`
+    : `AND (created_at ${comparison} ? OR (created_at=? AND id ${comparison} ?))`;
+  const order = writtenOrder ? `rowid ${direction}` : `created_at ${direction},id ${direction}`;
+  const values = !anchor ? [] : writtenOrder ? [anchor.position] : [anchor.createdAt, anchor.createdAt, anchor.id];
   const rows = await env.DB.prepare(
     `SELECT id, role, body, draw, created_at AS createdAt FROM messages
-     WHERE thread_id=? ${cursor ? `AND rowid ${after ? ">" : "<"} ?` : ""}
-     ORDER BY rowid ${direction} LIMIT 51`,
-  ).bind(threadId, ...(cursor ? [anchor] : [])).all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+     WHERE thread_id=? ${boundary}
+     ORDER BY ${order} LIMIT 51`,
+  ).bind(threadId, ...values).all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
   const more = rows.results.length > 50;
   const selected = rows.results.slice(0, 50);
   if (!after) selected.reverse();
@@ -2126,6 +2135,7 @@ async function listMessages(env: AppEnv, threadId: string, query = new URLSearch
   }
   return {
     messages: selected.map(message => ({ ...message, images: grouped.get(message.id) ?? [] })),
+    hasMore: !after && more,
     messagePage: { oldest: selected[0]?.id || null, newest: selected.at(-1)?.id || after || null,
       hasOlder: !after && more, hasNewer: Boolean(after) && more },
   };
@@ -2431,11 +2441,14 @@ async function attachIdentity(
   return { blocked: Boolean(scope) };
 }
 
-async function assertQueue(env: AppEnv, alreadyWaiting: boolean): Promise<void> {
-  if (alreadyWaiting) return;
-  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM threads WHERE awaiting = 1 AND ${unblockedThread("threads")}`).first<{ n: number }>();
-  if (Number(row?.n ?? 0) >= QUEUE_CAP) {
-    throw new HttpError(429, "笼里的屉已经顶到盖了。过一会儿再放一屉。");
+async function assertModelQueue(env: AppEnv, operatorId: string): Promise<void> {
+  if (operatorId === HOME_MODEL || operatorId === POOL_MODEL) return;
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM threads t
+     WHERE t.awaiting=1 AND t.queued=0 AND t.operator_id=? AND ${unblockedThread("t")}`,
+  ).bind(operatorId).first<{ n: number }>();
+  if (Number(row?.n ?? 0) >= MODEL_QUEUE_CAP) {
+    throw new HttpError(429, "这个模型手头排队较多，换一个模型或稍后再开新对话。已有对话仍可继续。");
   }
 }
 

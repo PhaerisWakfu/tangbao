@@ -17,7 +17,7 @@ test("older pages and incremental refresh preserve loaded history, deduplicate a
   await pages.load("v1", "/thread"); await pages.load("v1", "/thread", {}, "older");
   await pages.load("v1", "/thread"); await pages.load("v1", "/thread");
   assert.deepEqual(Array.from(pages.items, m => m.id), ["m1", "m2", "m3", "m4", "m5"]);
-  assert.deepEqual(calls, ["/thread", "/thread?before=m3", "/thread?after=m4", "/thread?after=m5"]);
+  assert.deepEqual(calls, ["/thread?order=written", "/thread?order=written&before=m3", "/thread?order=written&after=m4", "/thread?order=written&after=m5"]);
   assert.equal(pages.newest, "m5"); assert.equal(pages.oldest, "m1"); assert.equal(pages.hasOlder, false);
 });
 test("page requests coalesce and old A cannot overwrite B or reopened A", async () => {
@@ -25,14 +25,14 @@ test("page requests coalesce and old A cannot overwrite B or reopened A", async 
   const { pages } = pager(path => { calls.push(path); if (first) { first = false; return old.promise; } return Promise.resolve(page([path])); });
   const a = pages.load("a1", "/a"), same = pages.load("a1", "/a"); assert.equal(a, same);
   await pages.load("b1", "/b"); await pages.load("a2", "/a"); old.resolve(page(["old-a"])); await a;
-  assert.deepEqual(Array.from(pages.items, m => m.id), ["/a"]); assert.equal(calls.length, 3);
+  assert.deepEqual(Array.from(pages.items, m => m.id), ["/a?order=written"]); assert.equal(calls.length, 3);
 });
 test("failed older request retains history and cursor; a retry recovers without skipping", async () => {
   let n = 0; const calls = [];
   const { pages } = pager(async path => { calls.push(path); n++; if (n === 2) throw Error("offline"); return n === 1 ? page(["m3"], { older: true }) : page(["m1", "m2"]); });
   await pages.load("a", "/a"); await assert.rejects(pages.load("a", "/a", {}, "older"));
   assert.equal(pages.oldest, "m3"); assert.equal(pages.pending, null); assert.equal(pages.items.length, 1);
-  await pages.load("a", "/a", {}, "older"); assert.deepEqual(calls.slice(1), ["/a?before=m3", "/a?before=m3"]);
+  await pages.load("a", "/a", {}, "older"); assert.deepEqual(calls.slice(1), ["/a?order=written&before=m3", "/a?order=written&before=m3"]);
   assert.equal(pages.error, ""); assert.equal(pages.items.length, 3);
 });
 test("logout/clear invalidates in-flight page state and late failures", async () => {

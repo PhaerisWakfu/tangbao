@@ -68,13 +68,13 @@ test("desk late poll response does not render the previously selected thread", a
 });
 test("desk A-B-A switching rejects the first A response", async () => {
   const f = desk(), first = deferred(); let aCalls = 0;
-  f.context.api = route => route.endsWith("/a") && ++aCalls === 1 ? first.promise : Promise.resolve({ title: route.endsWith("/a") ? "new A" : "B" });
+  f.context.api = route => route.split("?")[0].endsWith("/a") && ++aCalls === 1 ? first.promise : Promise.resolve({ title: route.split("?")[0].endsWith("/a") ? "new A" : "B" });
   functions("desk", ["openSlip", "showPane"], f.context);
   const old = f.context.openSlip("a"); await f.context.openSlip("b"); await f.context.openSlip("a");
   first.resolve({ title: "old A" }); await old; assert.equal(f.rendered.at(-1).title, "new A");
 });
 test("desk stale request errors do not replace the new thread error area", async () => {
-  const f = desk(), first = deferred(); f.context.api = route => route.endsWith("/a") ? first.promise : Promise.resolve({});
+  const f = desk(), first = deferred(); f.context.api = route => route.split("?")[0].endsWith("/a") ? first.promise : Promise.resolve({});
   functions("desk", ["openSlip", "showPane"], f.context);
   const old = f.context.openSlip("a"); await f.context.openSlip("b"); first.reject(new Error("old failure")); await old;
   assert.equal(f.context.replyErr.textContent, "");
