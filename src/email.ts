@@ -17,6 +17,9 @@ export class MailError extends Error {
 
 const encoder = new TextEncoder();
 const CODE_TTL = 10 * 60_000;
+const MAIL_BLOCK_KEY = "mail_blocked_until";
+const MAIL_BREAKER_MS = 5 * 60_000;
+const MAIL_WARN_AT = 180;
 export type MailPurpose = "verify" | "reset";
 type Payload = { email: string; code: string; purpose: MailPurpose };
 
@@ -82,7 +85,7 @@ export async function decryptPayload(env: MailEnv, ciphertext: string, context: 
 }
 
 function dailyLimit(env: MailEnv): number {
-  const value = env.MAIL_DAILY_LIMIT === undefined ? 200 : Number(env.MAIL_DAILY_LIMIT);
+  const value = env.MAIL_DAILY_LIMIT === undefined ? 190 : Number(env.MAIL_DAILY_LIMIT);
   if (!Number.isSafeInteger(value) || value < 1 || value > 1_000_000) throw new MailError(503, "MAIL_NOT_CONFIGURED", "邮箱服务尚未配置，请稍后再试。");
   return value;
 }
@@ -108,8 +111,9 @@ export async function createMailChallenge(env: MailEnv, account: { id: string; e
       WHERE EXISTS (SELECT 1 FROM accounts WHERE id = ? AND email = ? AND status = 'active' ${purpose === "verify" ? "AND verified_at = 0" : ""})
         AND NOT EXISTS (SELECT 1 FROM email_challenge_limits WHERE subject = ? AND next_send_at > ?)
         AND (SELECT COUNT(*) FROM email_challenges WHERE email = ? AND created_at > ?) < 5
-        AND COALESCE((SELECT used FROM mail_budgets WHERE period = ?), 0) < ?`)
-      .bind(id, account.id, account.email, purpose, hash, now + CODE_TTL, now, account.id, account.email, account.email, now, account.email, now - 3_600_000, day, dailyLimit(env)),
+        AND COALESCE((SELECT used FROM mail_budgets WHERE period = ?), 0) < ?
+        AND COALESCE((SELECT CAST(value AS INTEGER) FROM settings WHERE key = ?), 0) <= ?`)
+      .bind(id, account.id, account.email, purpose, hash, now + CODE_TTL, now, account.id, account.email, account.email, now, account.email, now - 3_600_000, day, dailyLimit(env), MAIL_BLOCK_KEY, now),
     env.DB.prepare(`UPDATE email_challenges SET revoked_at = ? WHERE account_id = ? AND purpose = ? AND id != ? AND revoked_at = 0 AND consumed_at = 0 AND ${exists}`)
       .bind(now, account.id, purpose, id, id),
     env.DB.prepare(`UPDATE mail_deliveries SET status = 'cancelled', payload_ciphertext = NULL, updated_at = ? WHERE challenge_id IN (SELECT id FROM email_challenges WHERE account_id = ? AND purpose = ? AND revoked_at = ?) AND ${exists}`)
@@ -122,10 +126,24 @@ export async function createMailChallenge(env: MailEnv, account: { id: string; e
       SELECT ?, ?, ?, 'queued', ?, ?, ? WHERE ${exists}`).bind(id, id, ciphertext, now, now, now + CODE_TTL, id),
   ]);
   if (results[0].meta.changes !== 1) {
-    const budget = await env.DB.prepare("SELECT used FROM mail_budgets WHERE period = ?").bind(day).first<{ used: number }>();
+    const [budget, blocked] = await Promise.all([
+      env.DB.prepare("SELECT used FROM mail_budgets WHERE period = ?").bind(day).first<{ used: number }>(),
+      env.DB.prepare("SELECT CAST(value AS INTEGER) AS until FROM settings WHERE key = ?").bind(MAIL_BLOCK_KEY).first<{ until: number }>(),
+    ]);
+    if ((blocked?.until || 0) > now) throw new MailError(429, "MAIL_PROVIDER_EXHAUSTED", "邮件服务今日额度已满，请稍后再试。");
     if ((budget?.used || 0) >= dailyLimit(env)) throw new MailError(429, "MAIL_BUDGET_EXHAUSTED", "今日验证邮件额度已用完，请明天再试。");
     throw new MailError(429, "EMAIL_COOLDOWN", "邮件发送较频繁，请稍后再试。");
   }
+  try {
+    const budget = await env.DB.prepare("SELECT used FROM mail_budgets WHERE period = ?").bind(day).first<{ used: number }>();
+    if ((budget?.used || 0) >= MAIL_WARN_AT) {
+      const warningKey = `mail_budget_warned:${day}`;
+      const warned = await env.DB.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").bind(warningKey, String(budget?.used || 0)).run();
+      if (warned.meta.changes === 1) {
+        console.log(JSON.stringify({ event: "mail_budget_warning", period: day, used: budget?.used || 0, limit: dailyLimit(env) }));
+      }
+    }
+  } catch {}
   return { challengeId: id, mailStatus: "queued" };
 }
 
@@ -155,6 +173,8 @@ export async function processMailOutbox(env: MailEnv): Promise<void> {
     env.DB.prepare("UPDATE mail_deliveries SET status = 'unknown', payload_ciphertext = NULL, last_error = 'INTERRUPTED', updated_at = ? WHERE status = 'sending' AND updated_at < ?").bind(now, now - 120_000),
   ]);
   if (env.MAIL_MODE !== "cloudflare" && !localTest(env)) return;
+  const blocked = await env.DB.prepare("SELECT CAST(value AS INTEGER) AS until FROM settings WHERE key = ?").bind(MAIL_BLOCK_KEY).first<{ until: number }>();
+  if ((blocked?.until || 0) > now) return;
   const pending = await env.DB.prepare(`SELECT id, challenge_id, payload_ciphertext, attempts, expires_at FROM mail_deliveries
     WHERE status IN ('queued', 'retry') AND next_attempt_at <= ? AND expires_at > ? AND attempts < 3
       AND EXISTS (SELECT 1 FROM email_challenges c WHERE c.id = challenge_id AND c.consumed_at = 0 AND c.revoked_at = 0)
@@ -202,6 +222,13 @@ export async function processMailOutbox(env: MailEnv): Promise<void> {
       const status = retry ? "retry" : rateLimited || permanent ? "failed" : "unknown";
       await env.DB.prepare("UPDATE mail_deliveries SET status = ?, next_attempt_at = ?, last_error = ?, payload_ciphertext = CASE WHEN ? = 'retry' THEN payload_ciphertext ELSE NULL END, updated_at = ? WHERE id = ? AND status = 'sending'")
         .bind(status, now + 60_000 * 2 ** item.attempts, code.slice(0, 64), status, authNow(env), item.id).run();
+      if (code === "E_DAILY_LIMIT_EXCEEDED") {
+        const until = now + MAIL_BREAKER_MS;
+        await env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(MAIL_BLOCK_KEY, String(until)).run();
+        console.log(JSON.stringify({ event: "mail_breaker_open", until }));
+        return;
+      }
     }
   }
 }

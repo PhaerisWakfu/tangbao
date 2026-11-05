@@ -187,7 +187,9 @@
   }
 
   function mailMessage(data) {
-    if (["disabled", "failed", "unavailable"].includes(data.mailStatus)) return "暂时无法发送验证码，请稍后重试。";
+    if (["disabled", "failed", "unavailable"].includes(data.mailStatus)) {
+      return typeof data.message === "string" && data.message ? data.message : "暂时无法发送验证码，请稍后重试。";
+    }
     return "验证码发送请求已提交。请查看邮箱和垃圾邮件；未收到时可稍后重发。";
   }
 
