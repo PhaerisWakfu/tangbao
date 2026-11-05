@@ -153,7 +153,9 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.accounts-test.jso
 npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file scripts/sql/accounts-postflight.sql --json > private-assets/accounts-test/postflight.json
 ```
 
-账号 SQL 为 [0021_accounts.sql](../migrations/0021_accounts.sql) 和 [0022_account_admin_audit.sql](../migrations/0022_account_admin_audit.sql)，后续工程修复增加图片清理、会话置顶、结构检查、消息分页及 [0026_security_maintenance.sql](../migrations/0026_security_maintenance.sql) 等迁移。按完整目录应用，不要单独 execute 文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
+账号 SQL 为 [0021_accounts.sql](../migrations/0021_accounts.sql) 和 [0022_account_admin_audit.sql](../migrations/0022_account_admin_audit.sql)，后续工程修复增加图片清理、会话置顶、结构检查、消息分页、[0026_security_maintenance.sql](../migrations/0026_security_maintenance.sql) 及 [0027_clear_legacy_credentials.sql](../migrations/0027_clear_legacy_credentials.sql) 等迁移。按完整目录应用，不要单独 execute 文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
+
+`0027` 清理当前数据库中的旧口令明文副本，保留原验证摘要和模型状态。部署后只核对 postflight 的 `legacy_credential_copies=0`，不输出原值；这一步不清理已有备份或平台恢复点。恢复旧备份时须在开放服务前接续全部迁移并再次核对，不恢复旧口令展示能力。
 
 迁移后版本记录必须与所选部署提交的迁移目录逐项一致，不固定按 22 份判断。当前代码要求 `settings` 中 key 为 `app_schema_version` 的值为 `26`；缺失时相关入口返回 `503 SCHEMA_NOT_READY`，不会自动补表，处理方式见[严格迁移说明](local-development.md#严格迁移与缺失提示)。旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
 

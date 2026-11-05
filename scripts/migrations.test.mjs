@@ -42,3 +42,25 @@ test("0019 preserves model attribution, nearest time, tie order and orphan remov
   const rows = (await client.execute("SELECT id,operator_id,created_at FROM blocks ORDER BY id")).rows.map(row => [row.id, row.operator_id, Number(row.created_at)]);
   assert.deepEqual(rows, [["home-id", "*", 100], ["ip-id", "model-ip", 100], ["nearest-id", "model-nearest", 100], ["tie-id", "model-tie-newer", 100], ["visitor-id", "model-visitor", 100]]);
 });
+test("0027 clears all legacy copies while preserving verification, model state and other data", async t => {
+  const client = await fixture(t); await apply(client, migrations.filter(name => name < "0027"));
+  await client.execute("INSERT INTO accounts(id,email,password_hash,verified_at,created_at,updated_at) VALUES('synthetic-owner','owner@example.test','synthetic-unused',1,1,1)");
+  for (const [id, active, owner, claimed] of [["active",1,null,0],["disabled",0,null,0],["owned",1,"synthetic-owner",1]]) {
+    await client.execute({sql:"INSERT INTO operators(id,password_hash,active,created_at,owner_account_id,legacy_claimed_at) VALUES(?,?,?,?,?,?)",args:[id,`synthetic-digest-${id}`,active,1,owner,claimed]});
+  }
+  for (const [id, status, note] of [["approved","approved","synthetic-copy"],["pending","pending","synthetic-copy"],["rejected","rejected","synthetic-copy"],["empty","rejected",""],["null","rejected",null]]) {
+    await client.execute({sql:"INSERT INTO applications(id,suffix,email,status,created_at,pass_note) VALUES(?,?,'legacy@example.test',?,1,?)",args:[id,id,status,note]});
+  }
+  await client.executeMultiple("INSERT INTO threads(id,token_hash,title,created_at,updated_at) VALUES('synthetic-thread','synthetic','keep',1,1); INSERT INTO messages(id,thread_id,role,body,created_at) VALUES('synthetic-message','synthetic-thread','visitor','keep',1)");
+  const snapshot = async () => ({
+    operators:(await client.execute("SELECT * FROM operators ORDER BY id")).rows,
+    applications:(await client.execute("SELECT * FROM applications ORDER BY id")).rows.map(({pass_note,...row})=>row),
+    accounts:(await client.execute("SELECT * FROM accounts ORDER BY id")).rows,
+    messages:(await client.execute("SELECT * FROM messages ORDER BY id")).rows,
+    version:(await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows,
+  });
+  const before = await snapshot(); await apply(client, migrations.filter(name => name.startsWith("0027")));
+  assert.equal((await client.execute("SELECT count(*) AS n FROM applications WHERE pass_note IS NOT NULL")).rows[0].n,0);
+  assert.deepEqual(await snapshot(),before);
+  await apply(client, migrations.filter(name => name.startsWith("0027"))); assert.deepEqual(await snapshot(),before);
+});
