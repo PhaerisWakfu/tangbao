@@ -16,7 +16,7 @@ import accountJs from "./client/account.txt";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
-import { processImageCleanup } from "./image-cleanup";
+import { processImageCleanup, cleanupUncommittedImages, isDefiniteDatabaseRejection } from "./image-cleanup";
 
 class HttpError extends Error {
   constructor(
@@ -921,14 +921,15 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const payload = { id, token, title, operator, requested: assignment.requested, fallback: assignment.fallback, queued: Boolean(queued) };
   const encrypted = await encryptReplay(env, payload);
   const stored: { id: string; key: string; type: string }[] = [];
-  const cleanup = () => Promise.all(stored.map(image => env.IMAGES.delete(image.key)));
+  const cleanup = () => cleanupUncommittedImages(env, id, stored);
   let written = false;
   let batchStarted = false;
+  let batchResolved = false;
   try {
     for (const image of incoming.images) {
       const imageId = randomId(16), key = `img/${imageId}`;
-      await env.IMAGES.put(key, image.bytes);
       stored.push({ id: imageId, key, type: image.type });
+      await env.IMAGES.put(key, image.bytes);
     }
     const condition = account
       ? "EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')"
@@ -948,11 +949,11 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
     if (guest) statements.push(env.DB.prepare("UPDATE guest_identities SET created_count=created_count+1 WHERE id=? AND EXISTS(SELECT 1 FROM threads WHERE id=?)").bind(guest.id, id));
     batchStarted = true;
     const results = await env.DB.batch(statements);
+    batchResolved = true;
     written = results[1].meta.changes === 1;
     if (!written) {
-      await cleanup();
       const previous = await replay();
-      if (previous) return previous;
+      if (previous) { await cleanup(); return previous; }
       throw new AuthError(401, "AUTH_REQUIRED", "第一段可以继续聊。开启新对话前，请注册并验证邮箱。");
     }
   } catch (error) {
@@ -961,6 +962,9 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
         // A lost provider response does not prove rollback. Never delete linked KV data.
         written = Boolean(await env.DB.prepare("SELECT id FROM threads WHERE id=?").bind(id).first());
       } catch {
+        throw new AuthError(503, "CREATION_UNKNOWN", "发送结果暂时无法确认，请保留内容，使用同一次发送重试。");
+      }
+      if (!written && stored.length && !batchResolved && !isDefiniteDatabaseRejection(error)) {
         throw new AuthError(503, "CREATION_UNKNOWN", "发送结果暂时无法确认，请保留内容，使用同一次发送重试。");
       }
     }
@@ -2094,36 +2098,55 @@ async function writeMessage(
 ): Promise<void> {
   const messageId = randomId(16);
   const now = Date.now();
-  const stored = await storeImages(env, incoming.images);
-  const draw = role === "visitor" && incoming.draw ? 1 : 0;
-  const shown = caption(incoming.body, stored.length);
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
-      messageId,
-      threadId,
-      role,
-      incoming.body,
-      draw,
-      now,
-    ),
-    ...imageInserts(env, messageId, stored),
-    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
-      previewFrom(draw ? `要一张图 · ${shown}` : shown),
-      now,
-      awaiting,
-      role,
-      threadId,
-    ),
-  ]);
+  const stored: { id: string; key: string; type: string }[] = [];
+  let batchStarted = false;
+  try {
+    await storeImages(env, incoming.images, stored);
+    const draw = role === "visitor" && incoming.draw ? 1 : 0;
+    const shown = caption(incoming.body, stored.length);
+    batchStarted = true;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
+        messageId,
+        threadId,
+        role,
+        incoming.body,
+        draw,
+        now,
+      ),
+      ...imageInserts(env, messageId, stored),
+      env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
+        previewFrom(draw ? `要一张图 · ${shown}` : shown),
+        now,
+        awaiting,
+        role,
+        threadId,
+      ),
+    ]);
+  } catch (error) {
+    if (stored.length && batchStarted) {
+      let written: boolean;
+      try {
+        written = Boolean(await env.DB.prepare("SELECT id FROM messages WHERE id = ?").bind(messageId).first());
+      } catch {
+        throw new AuthError(503, "MESSAGE_WRITE_UNKNOWN", "发送结果暂时无法确认，请保留内容，先刷新对话查看，避免重复发送。");
+      }
+      if (written) return;
+      if (!isDefiniteDatabaseRejection(error)) {
+        throw new AuthError(503, "MESSAGE_WRITE_UNKNOWN", "发送结果暂时无法确认，请保留内容，先刷新对话查看，避免重复发送。");
+      }
+    }
+    await cleanupUncommittedImages(env, threadId, stored);
+    throw error;
+  }
 }
 
-async function storeImages(env: AppEnv, images: Incoming["images"]) {
-  const stored: { id: string; key: string; type: string }[] = [];
+async function storeImages(env: AppEnv, images: Incoming["images"], stored: { id: string; key: string; type: string }[]) {
   for (const image of images) {
     const id = randomId(16);
     const key = `img/${id}`;
-    await env.IMAGES.put(key, image.bytes);
     stored.push({ id, key, type: image.type });
+    await env.IMAGES.put(key, image.bytes);
   }
   return stored;
 }

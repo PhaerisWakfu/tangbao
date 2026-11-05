@@ -7,6 +7,43 @@ const CLEANUP_BATCH_SIZE = 20;
 const RETRY_DELAY = 60_000;
 const MAX_RETRY_DELAY = 60 * RETRY_DELAY;
 
+// Only explicit SQL rejections prove rollback. Transport/time-out failures do
+// not, even when a subsequent read cannot find the message yet.
+export function isDefiniteDatabaseRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? error.name : "";
+  const code = "code" in error ? error.code : "";
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  if ((name === "LibsqlError" || name === "LibsqlBatchError") && typeof code === "string") {
+    return /^SQLITE_(?:CONSTRAINT(?:_|$)|ERROR$)/.test(code);
+  }
+  return (name === "D1_ERROR" || message.startsWith("D1_ERROR:")) &&
+    /(?:^|:\s*)SQLITE_(?:CONSTRAINT(?:_[A-Z_]+)?|ERROR)\b/.test(message);
+}
+
+export async function cleanupUncommittedImages(
+  env: ImageCleanupEnv,
+  threadId: string,
+  images: readonly { id: string; key: string }[],
+): Promise<void> {
+  if (!images.length) return;
+  const now = Date.now();
+  try {
+    // Call only before message submission or after an explicit DB rollback.
+    // The primary-key check additionally protects any already-linked image.
+    await env.DB.batch(images.map(image => env.DB.prepare(
+      `INSERT INTO image_cleanup_jobs (image_key, thread_id, attempts, next_attempt_at, created_at)
+       SELECT ?, ?, 0, ?, ? WHERE NOT EXISTS (SELECT 1 FROM message_images WHERE id = ?)
+       ON CONFLICT(image_key) DO NOTHING`,
+    ).bind(image.key, threadId, now, now, image.id)));
+    await processImageCleanup(env, threadId);
+  } catch {
+    // Preserve the original sending error. A successfully persisted job can
+    // still be retried by Cron; a failed registration is not durable recovery.
+    console.log(JSON.stringify({ event: "image_upload_cleanup_deferred" }));
+  }
+}
+
 // KV deletion is idempotent: if acknowledgement fails after deletion, retrying
 // the durable job is safe. Concurrent drains can also delete the same key.
 export async function processImageCleanup(env: ImageCleanupEnv, threadId?: string): Promise<void> {
