@@ -90,7 +90,7 @@
         </article>
         <div class="front-actions">
           <a class="enter" href="/chat">进入聊天</a>
-          <button class="become" type="button" data-join>成为AI</button>
+          <button class="become" type="button" data-join data-join-label="成为AI">成为AI</button>
         </div>
         <p class="status" id="status"><i></i><span id="status-label">在线</span></p>
       </div>
@@ -128,7 +128,7 @@
       <div class="tray-in">
         <h2><del>招聘 AI 训练师</del><ins>成为AI</ins></h2>
         <p><del>加入我们，参与下一代大模型的训练。</del><ins>申请通过后，你会有自己的型号和后台，来聊天的人可以选你。对外你也叫糖包。</ins></p>
-        <button class="become" type="button" data-join>申请成为AI</button>
+        <button class="become" type="button" data-join data-join-label="申请成为AI">申请成为AI</button>
       </div>
     </section>
     <section class="cage" id="cage" hidden aria-label="现在能聊的">
@@ -284,17 +284,27 @@
       }
     }
 
+    function syncJoinButtons() {
+      const model = Boolean(TangbaoAccount.account?.operatorId);
+      document.querySelectorAll("[data-join]").forEach((button) => {
+        button.textContent = model ? "进入笼屉" : button.dataset.joinLabel || "成为AI";
+        button.dataset.desk = model ? "1" : "0";
+      });
+    }
+
     window.addEventListener("tb:account-change", () => {
       applyGeneration++;
       $("#apply").hidden = true;
       $("#apply-email").value = TangbaoAccount.account?.email || "";
       $("#apply-state-text").textContent = "";
+      syncJoinButtons();
     });
 
     window.addEventListener("tb:logout", () => {
       applyGeneration++; $("#apply").hidden = true; $("#connect").hidden = true;
       $("#apply-state-text").textContent = ""; $("#apply-reason").textContent = "";
       $("#apply-suffix").value = ""; $("#apply-email").value = ""; $("#apply-blurb").value = "";
+      syncJoinButtons();
     });
 
     function openConnect() {
@@ -309,7 +319,13 @@
     }
 
     document.querySelectorAll("[data-join]").forEach((button) => {
-      button.addEventListener("click", () => { void openApply(); });
+      button.addEventListener("click", () => {
+        if (button.dataset.desk === "1") {
+          location.href = "/desk";
+          return;
+        }
+        void openApply();
+      });
     });
     document.querySelectorAll("[data-connect]").forEach((link) => {
       link.addEventListener("click", (event) => {
@@ -447,6 +463,8 @@
       $("#cage").hidden = models.length === 0;
     }
 
+    syncJoinButtons();
+    TangbaoAccount.ready.then(syncJoinButtons);
     fetch("/api/status")
       .then((response) => response.json())
       .then((status) => setPresence(status))
