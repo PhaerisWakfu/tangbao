@@ -2022,7 +2022,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
 
 async function pinThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再置顶对话。");
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再固定对话。");
   const ownership = seatOwnership(seat, "threads.operator_id");
   const thread = await env.DB.prepare(`SELECT 1 AS found FROM threads WHERE id = ? AND ${ownership.sql}`)
     .bind(id, ...ownership.values).first();

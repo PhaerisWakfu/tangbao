@@ -304,6 +304,7 @@ body[data-presence="asleep"] svg.steam { display: none; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.hist-pin-mark svg.pin-solid { fill: currentColor; stroke: none; }
 .hist-more {
   display: grid;
   flex: none;
@@ -366,6 +367,7 @@ body[data-presence="asleep"] svg.steam { display: none; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.hist-menu-item svg.pin-solid { fill: currentColor; stroke: none; }
 .hist-menu-item:hover { background: var(--hover); color: var(--ink); }
 .hist-row[data-pinned="true"] { background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .hist-row[data-pinned="true"]:hover { background: var(--hover); }
