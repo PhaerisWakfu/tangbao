@@ -37,6 +37,7 @@
     <symbol id="i-x" viewBox="0 0 20 20"><path d="m6 6 8 8M14 6l-8 8"/></symbol>
     <symbol id="i-image" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8" r="1.2"/><path d="m4 14 4-3.5 2.5 2 2-1.5L16 14"/></symbol>
     <symbol id="i-make" viewBox="0 0 20 20"><rect x="3" y="5" width="10.5" height="10" rx="1.8"/><path d="M16.2 2.8v3.2M14.6 4.4h3.2"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 20 20"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></symbol>
     <symbol id="i-down" viewBox="0 0 20 20"><path d="M10 3.5v8.2M6.4 8.6 10 12.2l3.6-3.6"/><path d="M4.5 16h11"/></symbol>
   </svg>
 
@@ -107,6 +108,7 @@
               <button class="plus-btn" type="button" id="plus" aria-expanded="false" aria-controls="plus-menu" aria-label="添加"><svg class="i"><use href="#i-plus"/></svg></button>
               <div class="plus-menu" id="plus-menu" hidden>
                 <button type="button" id="pick-image"><svg class="i"><use href="#i-image"/></svg><span>添加图片<small>从计算机上传，也可 Ctrl+V 粘贴</small></span></button>
+                <button type="button" id="draw-image"><svg class="i"><use href="#i-pen"/></svg><span>画一张<small>在画板上画，作为图片发送</small></span></button>
                 <div class="plus-rule" role="separator"></div>
                 <button type="button" id="make-image"><svg class="i"><use href="#i-make"/></svg><span>制作图片<small>文生图创作图片</small></span></button>
               </div>
@@ -190,6 +192,32 @@
           <button class="primary" type="submit">保存</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div class="sketch" id="sketch" hidden>
+    <div class="sketch-card" role="dialog" aria-modal="true" aria-labelledby="sketch-title">
+      <header>
+        <h2 id="sketch-title">画一张</h2>
+        <button type="button" id="sketch-close" aria-label="关闭">×</button>
+      </header>
+      <div class="sketch-tools">
+        <button type="button" data-size="3">细</button>
+        <button type="button" data-size="6" aria-pressed="true">中</button>
+        <button type="button" data-size="12">粗</button>
+        <button type="button" class="swatch" data-color="#1f1d1a" style="--c:#1f1d1a" aria-label="墨色" aria-pressed="true"></button>
+        <button type="button" class="swatch" data-color="#a8622a" style="--c:#a8622a" aria-label="红糖"></button>
+        <button type="button" class="swatch" data-color="#2f5d50" style="--c:#2f5d50" aria-label="松绿"></button>
+        <button type="button" id="sketch-erase">橡皮</button>
+        <button type="button" id="sketch-undo">撤销</button>
+        <button type="button" id="sketch-clear">清空</button>
+      </div>
+      <canvas id="sketch-pad"></canvas>
+      <p class="sketch-err" id="sketch-err"></p>
+      <footer>
+        <button class="text-btn" type="button" id="sketch-cancel">取消</button>
+        <button type="button" class="primary" id="sketch-ok">放进消息</button>
+      </footer>
     </div>
   </div>
 

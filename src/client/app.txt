@@ -1129,6 +1129,10 @@ document.addEventListener("keydown", (event) => {
     closeHistoryMenus();
     return;
   }
+  if (!$("#sketch").hidden) {
+    closeSketch();
+    return;
+  }
   if (!$("#viewer").hidden) {
     closeViewer();
     return;
@@ -1511,3 +1515,158 @@ void (async () => {
   }
   void tick();
 })();
+
+const sketch = $("#sketch");
+const pad = $("#sketch-pad");
+const pen = pad.getContext("2d");
+const PAPER = "#fffaf3";
+let strokes = [];
+let currentStroke = null;
+let penSize = 6;
+let penColor = "#1f1d1a";
+let erasing = false;
+let padSize = { w: 1, h: 1, dpr: 1 };
+
+function preparePad() {
+  const width = Math.min(720, window.innerWidth - 64);
+  const height = Math.min(420, Math.round(window.innerHeight * 0.52));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  padSize = { w: width, h: height, dpr };
+  pad.width = Math.round(width * dpr);
+  pad.height = Math.round(height * dpr);
+  pen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  redrawPad();
+}
+
+function redrawPad() {
+  pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  pen.fillStyle = PAPER;
+  pen.fillRect(0, 0, padSize.w, padSize.h);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  for (const stroke of strokes) paintStroke(stroke);
+  if (currentStroke) paintStroke(currentStroke);
+}
+
+function paintStroke(stroke) {
+  if (!stroke.points.length) return;
+  pen.strokeStyle = stroke.color;
+  pen.fillStyle = stroke.color;
+  pen.lineWidth = stroke.size;
+  const first = stroke.points[0];
+  if (stroke.points.length === 1) {
+    pen.beginPath();
+    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    pen.fill();
+    return;
+  }
+  pen.beginPath();
+  pen.moveTo(first.x, first.y);
+  for (let i = 1; i < stroke.points.length; i += 1) pen.lineTo(stroke.points[i].x, stroke.points[i].y);
+  pen.stroke();
+}
+
+function padPoint(event) {
+  const rect = pad.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (padSize.w / rect.width),
+    y: (event.clientY - rect.top) * (padSize.h / rect.height),
+  };
+}
+
+function openSketch() {
+  closePlus();
+  strokes = [];
+  currentStroke = null;
+  erasing = false;
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-err").textContent = "";
+  sketch.hidden = false;
+  requestAnimationFrame(preparePad);
+}
+
+function closeSketch() {
+  sketch.hidden = true;
+}
+
+pad.addEventListener("pointerdown", (event) => {
+  if (sketch.hidden) return;
+  $("#sketch-err").textContent = "";
+  pad.setPointerCapture(event.pointerId);
+  currentStroke = {
+    color: erasing ? PAPER : penColor,
+    size: erasing ? Math.max(penSize * 4, 16) : penSize,
+    points: [padPoint(event)],
+  };
+  redrawPad();
+});
+pad.addEventListener("pointermove", (event) => {
+  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  currentStroke.points.push(padPoint(event));
+  redrawPad();
+});
+function endStroke(event) {
+  if (!currentStroke) return;
+  if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
+  if (currentStroke.points.length) strokes.push(currentStroke);
+  currentStroke = null;
+}
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+
+document.querySelector(".sketch-tools").addEventListener("click", (event) => {
+  const size = event.target.closest("[data-size]");
+  const swatch = event.target.closest("[data-color]");
+  if (size) {
+    penSize = Number(size.dataset.size);
+    erasing = false;
+    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
+    size.setAttribute("aria-pressed", "true");
+  }
+  if (swatch) {
+    penColor = swatch.dataset.color;
+    erasing = false;
+    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
+    swatch.setAttribute("aria-pressed", "true");
+  }
+});
+$("#sketch-erase").addEventListener("click", () => {
+  erasing = true;
+  $("#sketch-erase").setAttribute("aria-pressed", "true");
+});
+$("#sketch-undo").addEventListener("click", () => {
+  strokes.pop();
+  redrawPad();
+});
+$("#sketch-clear").addEventListener("click", () => {
+  strokes = [];
+  redrawPad();
+});
+$("#sketch-close").addEventListener("click", closeSketch);
+$("#sketch-cancel").addEventListener("click", closeSketch);
+$("#sketch-ok").addEventListener("click", () => {
+  if (!strokes.length) {
+    $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
+    return;
+  }
+  if (pendingImages.length >= MAX_IMAGES) {
+    $("#sketch-err").textContent = `一次最多 ${MAX_IMAGES} 张。`;
+    return;
+  }
+  pad.toBlob((blob) => {
+    if (!blob) {
+      $("#sketch-err").textContent = "这张画没能留下来。再试一次。";
+      return;
+    }
+    const file = new File([blob], "sketch.png", { type: "image/png" });
+    pendingImages.push({ file, url: URL.createObjectURL(file) });
+    showAttach();
+    grow();
+    closeSketch();
+  }, "image/png");
+});
+$("#draw-image").addEventListener("click", openSketch);
