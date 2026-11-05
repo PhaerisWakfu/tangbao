@@ -182,7 +182,7 @@ function showSys(text) {
 }
 
 function applyStatus(next) {
-  const present = next.status === "online" || next.status === "busy" || Boolean(next.awake);
+  const present = next.status === "online" || next.status === "idle" || next.status === "busy" || Boolean(next.awake);
   status = { ...next, awake: present, online: next.status === "online" };
   body.dataset.presence = present ? "awake" : "asleep";
   try {
@@ -198,6 +198,9 @@ function applyStatus(next) {
 function statusFromState(state) {
   if (state === "online") {
     return { state: "available", label: "在线", note: "他在", awake: true, online: true, status: state };
+  }
+  if (state === "idle") {
+    return { state: "busy", label: "暂离", note: "可能慢", awake: false, online: false, status: state };
   }
   if (state === "busy") {
     return { state: "busy", label: "忙碌", note: "稍等", awake: false, online: false, status: state };
@@ -1502,12 +1505,12 @@ function paintModels() {
 
   const visible = modelSearchMode
     ? models.slice()
-    : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
+    : models.filter((model) => model.id === id || model.status === "online" || model.status === "idle" || model.status === "busy" || model.online === true);
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
-    const selectable = online || state === "busy";
+    const selectable = online || state === "idle" || state === "busy";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
@@ -1520,7 +1523,7 @@ function paintModels() {
     button.querySelector("b").textContent = model.id;
     button.querySelector(".who small").textContent = model.blurb || "";
     button.querySelector(".model-state").textContent =
-      state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
+      state === "online" ? "在线" : state === "idle" ? "暂离" : state === "busy" ? "忙碌" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
       if (!selectable) return;

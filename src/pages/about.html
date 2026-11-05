@@ -172,14 +172,14 @@
       const lineup = document.getElementById("lineup");
       lineup.replaceChildren();
       for (const model of models) {
-        const online = model.status === "online";
+        const online = model.status === "online" || model.status === "idle";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line";
         button.dataset.state = model.status || (online ? "online" : "away");
         button.disabled = !online;
         button.setAttribute("aria-disabled", String(!online));
-        const state = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
+        const state = model.status === "online" ? "在线" : model.status === "idle" ? "暂离" : model.status === "busy" ? "忙碌" : "离开";
         button.innerHTML = `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="state">${state}</small>`;
         button.querySelector("b").textContent = model.id;
         button.querySelector(".who small").textContent = model.blurb || "";

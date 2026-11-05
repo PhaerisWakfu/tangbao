@@ -40,7 +40,7 @@ type AppEnv = Env & AuthEnv & {
   IMAGES: KVNamespace;
 };
 
-type PresenceState = "online" | "busy" | "away" | "off";
+type PresenceState = "online" | "idle" | "busy" | "away" | "off";
 type StatusPayload = {
   state: "available" | "busy";
   label: string;
@@ -99,6 +99,8 @@ const HOME_BLURB = "糖包本人。什么都聊一点。";
 const LIST_SIZE = 10;
 const ONLINE_TTL = 90_000;
 const HEARTBEAT_WRITE = 20_000;
+const HIDDEN_GRACE = 5 * 60_000;
+const IDLE_AFTER = 2 * 60_000;
 const PENDING_CAP = 2;
 const REPLY_TIMEOUT = 10 * 60_000;
 const HOME_SEEN_KEY = "home_last_seen";
@@ -638,11 +640,12 @@ function statusOf(
   awayAt = 0,
 ): PresenceState {
   if (!active) return "off";
-  if (awayAt > 0) return "away";
-  if (!lastSeen || lastSeen < now - ONLINE_TTL) return "away";
+  if (awayAt > 0 && awayAt <= now) return "away";
+  if (awayAt <= 0 && (!lastSeen || lastSeen < now - ONLINE_TTL)) return "away";
   if (!accepting) return "busy";
   if (pending >= PENDING_CAP) return "busy";
   if (pending > 0 && oldestPendingAt && oldestPendingAt < now - REPLY_TIMEOUT) return "busy";
+  if (awayAt > now && awayAt - now <= HIDDEN_GRACE - IDLE_AFTER) return "idle";
   return "online";
 }
 
@@ -650,9 +653,11 @@ function statusPayload(state: PresenceState): StatusPayload {
   const copy =
     state === "online"
       ? { state: "available" as const, label: "在线", note: "他在" }
-      : state === "busy"
-        ? { state: "busy" as const, label: "忙碌", note: "稍等" }
-        : state === "off"
+      : state === "idle"
+        ? { state: "busy" as const, label: "暂离", note: "可能慢" }
+        : state === "busy"
+          ? { state: "busy" as const, label: "忙碌", note: "稍等" }
+          : state === "off"
           ? { state: "busy" as const, label: "停用", note: "不接新话" }
           : { state: "busy" as const, label: "离开", note: "不在" };
   return {
@@ -801,7 +806,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
 
 async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean> {
   const presence = await operatorPresence(env, operatorId);
-  return presence.status === "online" || presence.status === "busy";
+  return presence.status === "online" || presence.status === "idle" || presence.status === "busy";
 }
 
 async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
@@ -817,11 +822,11 @@ async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
     }
     if (!seat.operatorId) return;
     if (seat.super) {
-      await env.DB.prepare("UPDATE operators SET last_seen_at=?, away_at=0 WHERE id=? AND owner_account_id=? AND (last_seen_at < ? OR away_at != 0)")
+      await env.DB.prepare("UPDATE operators SET last_seen_at=? WHERE id=? AND owner_account_id=? AND away_at=0 AND last_seen_at < ?")
         .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE).run();
       return;
     }
-    await env.DB.prepare("UPDATE operators SET last_seen_at=?, away_at=0 WHERE operator_uid=? AND owner_account_id=? AND (last_seen_at < ? OR away_at != 0)")
+    await env.DB.prepare("UPDATE operators SET last_seen_at=? WHERE operator_uid=? AND owner_account_id=? AND away_at=0 AND last_seen_at < ?")
       .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE).run();
   } catch (err) {
     console.log(JSON.stringify({ event: "heartbeat_error", message: err instanceof Error ? err.message : "unknown" }));
@@ -1139,22 +1144,24 @@ async function setPresence(request: Request, env: AppEnv): Promise<Response> {
   if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再更新在线状态。");
   const payload = await readJson(request);
   const away = payload.away === true;
+  const graceMs = away ? Math.min(HIDDEN_GRACE, Math.max(0, Number(payload.graceMs) || 0)) : 0;
   const now = Date.now();
+  const awayAt = away ? now + graceMs : 0;
   if (seat.super && seat.operatorId === HOME_MODEL) {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-        .bind(HOME_AWAY_KEY, away ? String(now) : "0"),
+        .bind(HOME_AWAY_KEY, String(awayAt)),
       ...(away ? [] : [env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
         .bind(HOME_SEEN_KEY, String(now))]),
     ]);
   } else if (seat.super) {
     await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE id=? AND owner_account_id=? AND active=1")
-      .bind(away ? 1 : 0, now, away ? now : 0, seat.operatorId, seat.accountId).run();
+      .bind(away ? 1 : 0, now, awayAt, seat.operatorId, seat.accountId).run();
   } else {
     await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE operator_uid=? AND owner_account_id=? AND active=1")
-      .bind(away ? 1 : 0, now, away ? now : 0, seat.operatorUid, seat.accountId).run();
+      .bind(away ? 1 : 0, now, awayAt, seat.operatorUid, seat.accountId).run();
   }
-  return json({ ok: true, away });
+  return json({ ok: true, away, awayAt });
 }
 
 async function setWorkState(request: Request, env: AppEnv): Promise<Response> {
@@ -1256,10 +1263,10 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
-         AND o.last_seen_at >= ? AND o.away_at = 0
+         AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
        ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
     )
-      .bind(now - ONLINE_TTL)
+      .bind(now, now - ONLINE_TTL)
       .all<PresenceRow>();
     const operators = rows.results.map((row) => presenceFromRow(row, now));
     const totalRow = await env.DB.prepare(
@@ -1402,15 +1409,14 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
      ) p ON p.operator_id = o.id
      WHERE o.active = 1 AND ${OWNER_READY}
        AND o.accepting = 1
-       AND o.away_at = 0
-       AND o.last_seen_at >= ?
+       AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
        AND COALESCE(p.n, 0) < ?
        AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
        ${blockFilter}
      ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
      LIMIT 1`,
   )
-    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
+    .bind(now, now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
     .first<{ id: string }>();
   return row?.id || HOME_MODEL;
 }
@@ -1697,9 +1703,10 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operators = operatorRows.results.map((row) => presenceFromRow(row, Date.now()));
   const statusRank: Record<PresenceState, number> = {
     online: 0,
-    busy: 1,
-    away: 2,
-    off: 3,
+    idle: 1,
+    busy: 2,
+    away: 3,
+    off: 4,
   };
   const ordered = [...operators].sort(
     (a, b) => statusRank[a.status] - statusRank[b.status],
@@ -1758,7 +1765,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
 async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat): Promise<number> {
   if (operatorId === HOME_MODEL) return 0;
   const target = await operatorPresence(env, operatorId, Date.now(), seat);
-  if (!target.active || target.status !== "online" || target.pending >= PENDING_CAP) return 0;
+  if (!target.active || (target.status !== "online" && target.status !== "idle") || target.pending >= PENDING_CAP) return 0;
 
   let slots = PENDING_CAP - target.pending;
   const candidates = await env.DB.prepare(
@@ -2657,7 +2664,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown; graceMs?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();

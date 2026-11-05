@@ -52,6 +52,7 @@ let threadMessagesId = null;
 let timer = 0;
 let heartbeatTimer = 0;
 let presenceWarmup = false;
+const HIDDEN_GRACE = 5 * 60 * 1000;
 let pendingImages = [];
 let readonly = false;
 let seat = { super: false, operatorId: "" };
@@ -557,9 +558,9 @@ async function openSlip(id, fromAudit) {
   if (!reply.hidden) answer.focus();
 }
 
-function sendPresence(away, preferBeacon = false) {
+function sendPresence(away, preferBeacon = false, graceMs = 0) {
   if (!TangbaoAccount.account?.verified) return Promise.resolve();
-  const body = JSON.stringify({ away });
+  const body = JSON.stringify({ away, graceMs });
   if (preferBeacon && navigator.sendBeacon) {
     try {
       if (navigator.sendBeacon("/api/admin/presence", new Blob([body], { type: "application/json" }))) return Promise.resolve();
@@ -583,10 +584,10 @@ function startPresenceHeartbeat() {
   }, 25000);
 }
 
-function stopPresenceHeartbeat(away, preferBeacon = false) {
+function stopPresenceHeartbeat(away, preferBeacon = false, graceMs = 0) {
   clearInterval(heartbeatTimer);
   heartbeatTimer = 0;
-  if (away) sendPresence(true, preferBeacon);
+  if (away) sendPresence(true, preferBeacon, graceMs);
 }
 
 function arm() {
@@ -1862,7 +1863,7 @@ document.addEventListener("visibilitychange", () => {
   if (desk.hidden) return;
   if (document.hidden) {
     clearTimeout(timer);
-    stopPresenceHeartbeat(true);
+    stopPresenceHeartbeat(true, false, HIDDEN_GRACE);
   } else {
     presenceWarmup = false;
     startPresenceHeartbeat();
