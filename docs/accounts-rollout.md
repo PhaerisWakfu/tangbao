@@ -48,7 +48,7 @@ Git push 不会执行迁移。仓库 CI 只做检查；**先到 Cloudflare 当�
 | `IMAGES` | KV 名称为 `tangbao`；记录实际 namespace ID，原库保留 |
 | 发信域 | Cloudflare → Email Service → Email Sending → `mail.phaeris.cn`，确认发送已启用、DNS 已配置 |
 | 发件人 | `糖包 <noreply@mail.phaeris.cn>`；与绑定限制保持一致 |
-| 配额 | 应用侧每日总预算 460 封（Cloudflare 190、Brevo 280），180 封告警；单家日额度错误触发该家 5 分钟熔断并切换另一家；账户月度额度以两家控制台为准，测试会真实消耗发信额度 |
+| 配额 | 应用侧每日总预算 360 封（Cloudflare 90、Brevo 280），180 封告警；单家日额度错误触发该家 5 分钟熔断并切换另一家；账户月度额度以两家控制台为准，测试会真实消耗发信额度 |
 | 旧配置与任务 | 保存普通变量、Secrets 名称、Cron/Queue、通知配置及恢复方法；不要截图或回传密钥值 |
 | 验收人员 | 准备管理员 A、新申请者 B、旧模型运营者 C 三个账号各自可收件的真实邮箱，及两个独立浏览器配置或设备；C 另需本人原后台口令 |
 
@@ -92,7 +92,7 @@ npx wrangler kv namespace create IMAGES --config wrangler.accounts-test.jsonc
 }]
 ```
 
-绑定名必须为 `EMAIL`；不要只限制为某一个收件邮箱，否则正常注册用户不能收到邮件。模板中的 `MAIL_MODE=cloudflare`、`MAIL_FROM`、`MAIL_DAILY_LIMIT=460`、`MAIL_PROVIDERS=cloudflare,brevo`、`CLOUDFLARE_DAILY_LIMIT=190`、`BREVO_DAILY_LIMIT=280`、`BREVO_FROM`、`BREVO_API_KEY` 和一分钟 Cron 保持即可。
+绑定名必须为 `EMAIL`；不要只限制为某一个收件邮箱，否则正常注册用户不能收到邮件。模板中的 `MAIL_MODE=cloudflare`、`MAIL_FROM`、`MAIL_DAILY_LIMIT=360`、`MAIL_PROVIDERS=cloudflare,brevo`、`CLOUDFLARE_DAILY_LIMIT=90`、`BREVO_DAILY_LIMIT=280`、`BREVO_FROM`、`BREVO_API_KEY` 和一分钟 Cron 保持即可。
 
 以下是**应用自身所需 Secrets**，与邮件 API Token 无关：
 
@@ -213,7 +213,7 @@ node scripts/bootstrap-admin.mjs --account-id 替换为已验证账号ID --confi
 
 完整错误边界在测试站另验并回传：验证码 10 分钟过期、连续错误最多 5 次、注册/找回用途隔离、重复提交与模型认领竞争、拉黑/停用和权限隔离。不要为了测额度连发 190 封或伪造供应商失败。未实际触发的 429/超时和真实回执记录为“未验证”，已有本地替身覆盖不能当作真实供应商结论。服务端新对话还有按 IP 的创建限流，连续造数触发时等待窗口，不改生产限额绕过。
 
-邮件预算按 UTC 日期计数，应用侧总预算 460、不设月度限制；Cloudflare 190、Brevo 280，分别计数。180 封写告警日志；单家返回日额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时重试/提示额度已满。同账号其他 Worker 的发送还受两家供应商账号额度约束。明确可重试的限流才有界重试，超时 unknown 不盲目重发。一分钟 Cron 不要删。首轮不需要配置邮件事件 Queue；若以后开通，再单独配置订阅、`queues.consumers`、`MAIL_EVENTS_QUEUE`/`MAIL_EVENTS_ACCOUNT_ID` 并验证 delivered/bounce 及去重，详见 [邮件事件约定](accounts.md#cloudflare-email-sending)。未接入时如实标注回执未验收。
+邮件预算按 UTC 日期计数，应用侧总预算 360、不设应用侧月度限制；Cloudflare 按每天 90 封控制（3,000 封/月，按 31 天留缓冲）、Brevo 280，分别计数。180 封写告警日志；单家返回日额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时重试/提示额度已满。同账号其他 Worker 的发送还受两家供应商账号额度约束。明确可重试的限流才有界重试，超时 unknown 不盲目重发。一分钟 Cron 不要删。首轮不需要配置邮件事件 Queue；若以后开通，再单独配置订阅、`queues.consumers`、`MAIL_EVENTS_QUEUE`/`MAIL_EVENTS_ACCOUNT_ID` 并验证 delivered/bounce 及去重，详见 [邮件事件约定](accounts.md#cloudflare-email-sending)。未接入时如实标注回执未验收。
 
 ## 图片数据必须随正式迁移保留
 
