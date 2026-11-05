@@ -1527,13 +1527,24 @@ function padPoint(event) {
   };
 }
 
+function setPenMode() {
+  erasing = false;
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "true");
+}
+
+function setEraserMode() {
+  erasing = true;
+  $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+}
+
 function openSketch() {
   closePlus();
   strokes = [];
   redoStrokes = [];
   currentStroke = null;
-  erasing = false;
-  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
   sketch.hidden = false;
@@ -1575,30 +1586,25 @@ document.querySelector(".sketch-tools").addEventListener("click", (event) => {
   const swatch = event.target.closest("[data-color]");
   if (size) {
     penSize = Number(size.dataset.size);
-    erasing = false;
-    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    setPenMode();
     for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
     size.setAttribute("aria-pressed", "true");
   }
   if (swatch) {
     penColor = swatch.dataset.color;
     $("#sketch-color").value = penColor;
-    erasing = false;
-    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    setPenMode();
     for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
     swatch.setAttribute("aria-pressed", "true");
   }
 });
 $("#sketch-color").addEventListener("input", (event) => {
   penColor = event.target.value;
-  erasing = false;
-  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  setPenMode();
   for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
 });
-$("#sketch-erase").addEventListener("click", () => {
-  erasing = true;
-  $("#sketch-erase").setAttribute("aria-pressed", "true");
-});
+$("#sketch-pen").addEventListener("click", setPenMode);
+$("#sketch-erase").addEventListener("click", setEraserMode);
 function undoSketch() {
   const stroke = strokes.pop();
   if (!stroke) return;
@@ -1659,11 +1665,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (key === "b") {
-    erasing = false;
-    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    setPenMode();
   } else if (key === "e") {
-    erasing = true;
-    $("#sketch-erase").setAttribute("aria-pressed", "true");
+    setEraserMode();
   } else if (event.key === "[") {
     penSize = Math.max(2, penSize - 1);
   } else if (event.key === "]") {

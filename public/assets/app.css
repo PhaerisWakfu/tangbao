@@ -2168,13 +2168,30 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   border-radius: 8px;
   font-size: 20px;
 }
-.sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0; }
+.sketch-tools { display: grid; gap: 6px; margin: 12px 0; }
+.sketch-tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sketch-tool-row:last-child { justify-content: flex-end; }
 .sketch-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 30px;
   padding: 0 10px;
   border-radius: 999px;
   background: var(--bg);
   font-size: 13px;
+}
+.sketch-tools kbd {
+  padding: 0 3px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 4px;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+@media (hover: none) {
+  .sketch-tools kbd { display: none; }
 }
 .sketch-tools button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .sketch-color {
