@@ -8,7 +8,10 @@ import ts from "typescript";
 const root = path.resolve(import.meta.dirname, "..");
 const sourceRoot = process.env.CLIENT_RACE_SOURCE_DIR || path.join(root, "src/client");
 const sources = Object.fromEntries(await Promise.all(["app", "desk"].map(async name => [name, await readFile(path.join(sourceRoot, `${name}.txt`), "utf8")])));
+const pagerScope = { window: {}, document: {}, URLSearchParams, Set };
+new Script(await readFile(path.join(root, "src/client/messages.txt"), "utf8")).runInNewContext(pagerScope);
 function functions(name, names, context, replySubmit = false) {
+  context.messagePages ||= new pagerScope.window.TangbaoMessagePages((...args) => context.api(...args));
   const source = sources[name], ast = ts.createSourceFile(`${name}.js`, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const code = ast.statements.filter(n => ts.isFunctionDeclaration(n) && names.includes(n.name?.text)).map(n => n.getText(ast));
   assert.equal(code.length, names.length);
@@ -24,12 +27,12 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 function desk() {
   const rendered = [], nodes = new Map(), timers = new Map();
-  const node = () => ({ hidden: false, textContent: "", value: "", focus() {}, scrollIntoView() {}, querySelectorAll: () => [] });
+  const node = () => ({ hidden: false, textContent: "", value: "", focus() {}, replaceChildren() {}, scrollIntoView() {}, querySelectorAll: () => [] });
   const button = { disabled: false };
   const context = { Date, FormData, Set, URL: { revokeObjectURL() {} },
     selected: "a", threadViewVersion: 0, readonly: false, shown: "", waiting: 0, pending: 0, timer: 0, ticking: null, pollingAccountId: null,
     POLL_MS: 60000, deskAccountId: "account", loggedOut: false, replying: false, replyGuard: { key: "", at: 0 }, pendingImages: [],
-    replyErr: node(), answer: node(), reply: { ...node(), querySelector: () => button }, desk: node(), document: { hidden: false },
+    thread: node(), replyErr: node(), answer: node(), reply: { ...node(), querySelector: () => button }, desk: node(), document: { hidden: false },
     TangbaoAccount: { account: { id: "account", verified: true, operatorId: "operator" }, refresh: async () => {} },
     ApiError: class extends Error {}, renderThread: data => rendered.push(data), loadQueue: async () => {}, loadApplications: async () => {}, loadAudit: async () => {},
     clearAttach() { context.pendingImages = []; }, showAttach() {}, resetDeskView() {}, loginErr: node(),
@@ -133,4 +136,13 @@ test("app reopening the same object invalidates an earlier failed refresh", asyn
   f.context.api = () => pending.promise; f.context.ApiError = class extends Error {};
   functions("app", ["refresh"], f.context);
   const old = f.context.refresh(); f.context.viewVersion++; pending.reject(new Error("old failure")); await assert.doesNotReject(old);
+});
+test("switching desk thread hides the old reply form until the new read completes", async () => {
+  const f = desk(), pending = deferred(); f.context.api = () => pending.promise;
+  functions("desk", ["openSlip", "showPane"], f.context);
+  const opening = f.context.openSlip("b");
+  assert.equal(f.context.reply.hidden, true);
+  assert.equal(f.context.$("#block").hidden, true);
+  assert.equal(f.context.$("#shelve").hidden, true);
+  pending.resolve({}); await opening;
 });

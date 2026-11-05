@@ -88,6 +88,11 @@
           </div>
           <h1>需要我做什么？</h1>
         </div>
+        <nav class="message-nav" id="message-nav" aria-label="对话消息" hidden>
+          <button type="button" id="messages-older" hidden>查看较早消息</button>
+          <button type="button" id="messages-newer" hidden>继续加载新消息</button>
+          <span id="messages-error" role="alert"></span>
+        </nav>
         <div class="log" id="log" aria-live="polite"></div>
       </section>
 
@@ -180,6 +185,7 @@
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/messages.js"></script>
   <script src="/assets/modal.js"></script>
   <script src="/assets/account.js"></script>
   <script src="/assets/app.js"></script>

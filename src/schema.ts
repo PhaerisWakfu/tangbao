@@ -13,7 +13,7 @@ const CORE_SCHEMA = `SELECT t.reported_at, t.report_reason, t.last_role, t.accou
   m.draw, i.image_key, a.session_version, s.revoked_at, o.operator_uid,
   j.image_key, audit.event, mail.payload_ciphertext
   FROM threads t
-  LEFT JOIN messages m ON 0
+  LEFT JOIN messages m INDEXED BY idx_messages_thread_order ON 0
   LEFT JOIN message_images i ON 0
   LEFT JOIN accounts a ON 0
   LEFT JOIN account_sessions s ON 0
@@ -34,7 +34,7 @@ export function assertSchemaReady(database: D1Database): Promise<void> {
          LEFT JOIN (${CORE_SCHEMA}) required ON 0
          WHERE version.key = ?`,
       ).bind("app_schema_version").first<{ value: string }>();
-      if (version?.value !== "24") throw new SchemaNotReadyError();
+      if (version?.value !== "25") throw new SchemaNotReadyError();
       entry.expiresAt = Date.now() + SUCCESS_TTL;
     } catch {
       entry.expiresAt = Date.now() + FAILURE_TTL;

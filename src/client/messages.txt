@@ -1,0 +1,83 @@
+/* Shared, view-scoped message pages for chat, desk and audit. */
+window.TangbaoMessagePages = class {
+  constructor(fetchPage) { this.fetchPage = fetchPage; this.serial = 0; this.clear(); }
+  clear(key = "") {
+    this.serial++; this.key = key; this.items = []; this.oldest = null; this.newest = null;
+    this.hasOlder = false; this.hasNewer = false; this.pending = null; this.errors = {}; this.controls();
+  }
+  get error() { return this.errors.older || this.errors.newer || this.errors.initial || ""; }
+  controls() {
+    const older = document.getElementById?.("messages-older");
+    const newer = document.getElementById?.("messages-newer");
+    const error = document.getElementById?.("messages-error");
+    const nav = document.getElementById?.("message-nav");
+    if (!nav) return;
+    older.hidden = !this.hasOlder; newer.hidden = !this.hasNewer && !this.errors.newer && !this.errors.initial;
+    newer.textContent = this.errors.newer || this.errors.initial ? "重试刷新" : "继续加载新消息";
+    older.disabled = newer.disabled = Boolean(this.pending);
+    error.textContent = this.error;
+    nav.hidden = !this.hasOlder && !this.hasNewer && !this.error;
+  }
+  load(key, path, options = {}, direction = "newer") {
+    if (key !== this.key) this.clear(key);
+    if (this.pending) return this.pending;
+    const serial = this.serial;
+    const mode = direction === "older" && this.oldest ? "older" : this.newest ? "newer" : "initial";
+    const query = new URLSearchParams();
+    if (mode === "older") query.set("before", this.oldest);
+    if (mode === "newer") query.set("after", this.newest);
+    this.errors[mode] = "";
+    const request = Promise.resolve().then(() => this.fetchPage(path + (query.size ? `?${query}` : ""), options)).then(data => {
+      if (serial !== this.serial) return data;
+      const page = data.messagePage;
+      const incoming = data.messages || [];
+      if (!page) return data; // Allows an old response during a rolling release.
+      const combined = mode === "initial" ? incoming : mode === "older" ? [...incoming, ...this.items] : [...this.items, ...incoming];
+      const seen = new Set();
+      this.items = combined.filter(message => !seen.has(message.id) && seen.add(message.id));
+      if (mode !== "newer") { this.oldest = page.oldest; this.hasOlder = page.hasOlder; }
+      if (mode !== "older") { this.newest = page.newest; this.hasNewer = page.hasNewer; }
+      return { ...data, messages: this.items };
+    }).catch(error => {
+      if (serial === this.serial) this.errors[mode] = error.message || "消息暂时未刷新，请稍后重试。";
+      throw error;
+    }).finally(() => {
+      if (serial === this.serial && this.pending === request) { this.pending = null; this.controls(); }
+    });
+    this.pending = request; this.controls();
+    return request;
+  }
+  async fresh(key, path, options = {}) {
+    if (this.pending && key === this.key) {
+      const serial = this.serial;
+      await this.pending.catch(() => {});
+      if (serial !== this.serial) return {};
+    }
+    return this.load(key, path, options);
+  }
+  static async imageSource(src, token) {
+    const url = new URL(src, location.origin);
+    const expires = Number(url.searchParams.get("e"));
+    if (!expires || expires > Date.now()) return src;
+    if (url.origin !== location.origin || !url.pathname.startsWith("/api/images/")) throw new Error("图片地址不正确。");
+    const response = await fetch(src, { credentials: "same-origin", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!response.ok) throw new Error("图片暂时无法打开，请回到有权访问的对话重试。");
+    return URL.createObjectURL(await response.blob());
+  }
+  static thumbnail(img, src, token) {
+    img.loading = "lazy";
+    img.src = src;
+    img.addEventListener("error", async () => {
+      if (img.dataset.retried) return;
+      img.dataset.retried = "1";
+      try {
+        const renewed = await this.imageSource(src, token);
+        if (renewed === src) return;
+        if (!img.isConnected) { URL.revokeObjectURL(renewed); return; }
+        img.addEventListener("load", () => URL.revokeObjectURL(renewed), { once: true });
+        img.addEventListener("error", () => URL.revokeObjectURL(renewed), { once: true });
+        img.src = renewed;
+      } catch { img.alt = "图片暂时无法加载，请重新打开对话"; }
+    });
+  }
+};

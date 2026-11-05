@@ -6,6 +6,7 @@ const desk = $("#desk");
 const pile = $("#pile");
 const thread = $("#thread");
 const reply = $("#reply");
+const messagePages = new TangbaoMessagePages(api);
 const answer = $("#answer");
 const presence = $("#presence");
 const presenceLabel = $("#presence-label");
@@ -239,6 +240,8 @@ function renderThread(data) {
     : "写一句可能没用的话";
   const key = JSON.stringify(data.messages);
   if (key === shown) return;
+  const top = thread.scrollTop;
+  const reading = Boolean(shown) && thread.scrollHeight - thread.clientHeight - top > 100;
   shown = key;
   thread.replaceChildren();
   for (const message of data.messages) {
@@ -282,7 +285,7 @@ function renderThread(data) {
     wrap.append(meta);
     thread.append(wrap);
   }
-  thread.scrollTop = thread.scrollHeight;
+  thread.scrollTop = reading ? top : thread.scrollHeight;
 }
 
 async function loadQueue() {
@@ -368,11 +371,18 @@ async function openSlip(id, fromAudit) {
   const version = ++threadViewVersion;
   readonly = Boolean(fromAudit);
   showPane("thread", readonly ? "audit" : "thread");
-  if (id !== selected) shown = "";
+  if (id !== selected) {
+    shown = "";
+    reply.hidden = true;
+    $("#block").hidden = true;
+    $("#shelve").hidden = true;
+    thread.replaceChildren();
+    $("#slip-title").textContent = "正在读取…";
+  }
   selected = id;
   replyErr.textContent = "";
   try {
-    const data = await api(`/api/admin/threads/${id}`);
+    const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
     if (selected !== id || version !== threadViewVersion) return;
     renderThread(data);
     await loadQueue();
@@ -405,7 +415,7 @@ async function tick() {
       const id = selected;
       const version = threadViewVersion;
       if (id && !$("#pane-thread").hidden) {
-        const data = await api(`/api/admin/threads/${id}`);
+        const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
         if (selected === id && version === threadViewVersion && !$("#pane-thread").hidden) renderThread(data);
       }
       if (!$("#pane-apply").hidden) await loadApplications();
@@ -490,6 +500,7 @@ let replying = false;
 let replyGuard = { key: "", at: 0 };
 
 function resetDeskView() {
+  messagePages.clear();
   clearTimeout(timer); applyToken++; auditToken++;
   threadViewVersion++;
   selected = null; shown = ""; readonly = false;
@@ -1254,7 +1265,7 @@ reply.addEventListener("submit", async (event) => {
       pendingImages = pendingImages.filter(image => !sentImages.has(image));
       showAttach();
       shown = "";
-      const data = await api(`/api/admin/threads/${id}`);
+      const data = await messagePages.fresh(`${version}:${id}`, `/api/admin/threads/${id}`);
       if (selected === id && version === threadViewVersion) renderThread(data);
     }
     await loadQueue();
@@ -1560,3 +1571,17 @@ void TangbaoAccount.ready.then(syncDeskAccount);
 
 TangbaoModal.bind($("#viewer"), closeViewer);
 TangbaoModal.bind(sketch, closeSketch);
+
+async function loadOlderMessages() {
+  const id = selected, version = threadViewVersion;
+  if (!id || !messagePages.hasOlder || messagePages.pending) return;
+  try {
+    const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`, {}, "older");
+    if (id !== selected || version !== threadViewVersion) return;
+    const top = thread.scrollTop, height = thread.scrollHeight;
+    renderThread(data);
+    thread.scrollTop = top + thread.scrollHeight - height;
+  } catch { /* The shared pager exposes a recoverable error beside the button. */ }
+}
+$("#messages-older").addEventListener("click", () => void loadOlderMessages());
+$("#messages-newer").addEventListener("click", () => void tick());

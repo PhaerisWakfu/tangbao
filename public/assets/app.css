@@ -2031,3 +2031,11 @@ dialog.apply, dialog.viewer, dialog.sketch {
   color: var(--ink);
 }
 dialog.apply::backdrop, dialog.viewer::backdrop, dialog.sketch::backdrop { background: transparent; }
+
+.message-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; }
+.message-nav[hidden], .message-nav button[hidden] { display: none; }
+.message-nav button { min-height: 40px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.message-nav button:disabled { opacity: .6; cursor: wait; }
+.message-nav span { color: var(--muted); font-size: 13px; }
+.stage > .message-nav { width: min(var(--col), calc(100% - 48px)); margin: 0 auto; }
+.message-nav span { min-width: 0; overflow-wrap: anywhere; }

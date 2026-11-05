@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { Script } from "node:vm";
 
-for (const file of ["src/client/app.txt", "src/client/desk.txt", "src/client/account.txt", "src/client/md.txt", "src/client/sw.txt", "src/client/modal.txt"]) {
+for (const file of ["src/client/app.txt", "src/client/desk.txt", "src/client/account.txt", "src/client/md.txt", "src/client/sw.txt", "src/client/modal.txt", "src/client/messages.txt"]) {
   new Script(readFileSync(file, "utf8"), { filename: file });
   console.log(`ok ${file}`);
 }

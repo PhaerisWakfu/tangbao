@@ -14,6 +14,7 @@ import swJs from "./client/sw.txt";
 import manifestJson from "./client/manifest.txt";
 import accountJs from "./client/account.txt";
 import modalJs from "./client/modal.txt";
+import messagesJs from "./client/messages.txt";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
@@ -544,7 +545,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   const script =
-    path === "/assets/modal.js" ? modalJs : path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
+    path === "/assets/messages.js" ? messagesJs : path === "/assets/modal.js" ? modalJs : path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },
@@ -953,7 +954,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
   const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   const [messages, operator] = await Promise.all([
-    listMessages(env, id),
+    listMessages(env, id, new URL(request.url).searchParams),
     operatorPresence(env, thread.operator_id),
   ]);
   const status = statusPayload(publicPresence(operator.status));
@@ -964,7 +965,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     queued: thread.queued === 1,
     reported: thread.reported_at > 0,
     blocked: seen.blocked,
-    messages,
+    ...messages,
     status,
     operatorStatus: status,
   });
@@ -1976,7 +1977,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       updatedAt: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
-  const messages = await listMessages(env, id);
+  const messages = await listMessages(env, id, new URL(request.url).searchParams);
   const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
@@ -1987,7 +1988,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       updatedAt: thread.updatedAt,
       blocked,
     },
-    messages,
+    ...messages,
   });
 }
 
@@ -2032,31 +2033,54 @@ async function serveImage(request: Request, env: AppEnv, id: string): Promise<Re
   return new Response(bytes, { headers: { "content-type": row.image_type || "application/octet-stream", "cache-control": "private, no-store" } });
 }
 
-async function listMessages(env: AppEnv, threadId: string) {
-  const messages = await env.DB.prepare(
-    "SELECT id, role, body, draw, created_at AS createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
-  )
-    .bind(threadId)
-    .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+async function listMessages(env: AppEnv, threadId: string, query = new URLSearchParams()) {
+  const after = query.get("after"), before = query.get("before");
+  if ((after && before) || query.has("after") && !after || query.has("before") && !before ||
+      [after, before].some(cursor => cursor && !/^[A-Za-z0-9_-]{1,80}$/.test(cursor))) {
+    throw new HttpError(400, "消息位置不正确，请重新打开对话。");
+  }
+  const cursor = after || before;
+  let anchor: number | undefined;
+  if (cursor) {
+    const row = await env.DB.prepare("SELECT rowid AS position FROM messages WHERE id=? AND thread_id=?")
+      .bind(cursor, threadId).first<{ position: number }>();
+    if (!row) throw new HttpError(400, "消息位置已失效，请重新打开对话。");
+    anchor = row.position;
+  }
+  // The thread index contains SQLite's implicit rowid suffix. Unlike timestamps,
+  // a retained message anchor cannot miss a later commit in the same millisecond.
+  const direction = after ? "ASC" : "DESC";
+  const rows = await env.DB.prepare(
+    `SELECT id, role, body, draw, created_at AS createdAt FROM messages
+     WHERE thread_id=? ${cursor ? `AND rowid ${after ? ">" : "<"} ?` : ""}
+     ORDER BY rowid ${direction} LIMIT 51`,
+  ).bind(threadId, ...(cursor ? [anchor] : [])).all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+  const more = rows.results.length > 50;
+  const selected = rows.results.slice(0, 50);
+  if (!after) selected.reverse();
   const grouped = new Map<string, { id: string; type: string; url: string }[]>();
-  const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
-  if (messages.results.length) {
+  if (selected.length) {
     const images = await env.DB.prepare(
-      `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
-       FROM messages m JOIN message_images i ON i.message_id = m.id
-       WHERE m.thread_id = ? ORDER BY i.position ASC`,
-    )
-      .bind(threadId)
-      .all<{ id: string; messageId: string; imageType: string }>();
-    for (const image of images.results) {
-      const list = grouped.get(image.messageId) ?? [];
+      `SELECT id, message_id AS messageId, image_type AS imageType FROM message_images
+       WHERE message_id IN (${selected.map(() => "?").join(",")}) ORDER BY position ASC, id ASC`,
+    ).bind(...selected.map(message => message.id)).all<{ id: string; messageId: string; imageType: string }>();
+    if (images.results.length) {
+      const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?")
+        .bind(threadId).first<{ token_hash: string; account_id: string | null }>();
       const expires = Date.now() + 5 * 60_000;
-      const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
-      list.push({ id: image.id, type: image.imageType, url });
-      grouped.set(image.messageId, list);
+      for (const image of images.results) {
+        const list = grouped.get(image.messageId) ?? [];
+        const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
+        list.push({ id: image.id, type: image.imageType, url });
+        grouped.set(image.messageId, list);
+      }
     }
   }
-  return messages.results.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] }));
+  return {
+    messages: selected.map(message => ({ ...message, images: grouped.get(message.id) ?? [] })),
+    messagePage: { oldest: selected[0]?.id || null, newest: selected.at(-1)?.id || after || null,
+      hasOlder: !after && more, hasNewer: Boolean(after) && more },
+  };
 }
 
 async function writeMessage(

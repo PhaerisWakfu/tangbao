@@ -27,10 +27,11 @@ async function fixture(t, complete = true) {
   const database = new scope.Database(client), statements = [];
   const binding = { prepare(sql) { statements.push(sql); return database.prepare(sql); } };
   return { client, binding, statements, check: scope.exports.assertSchemaReady, advance: n => { now += n; },
-    upgrade: () => client.executeMultiple(migration24),
+    upgrade: () => client.executeMultiple(migration24 + "\n" + migration25),
   };
 }
 const migration24 = await readFile(path.join(root, "migrations/0024_app_schema_version.sql"), "utf8");
+const migration25 = await readFile(path.join(root, "migrations/0025_message_paging.sql"), "utf8");
 const missing = error => error.code === "SCHEMA_NOT_READY" && !error.message.includes("SELECT");
 
 test("missing migration fails without schema repair or user-data writes", async t => {
@@ -66,4 +67,8 @@ test("manual marker changes are detected after positive cache expiry", async t =
   await f.client.execute("DELETE FROM settings WHERE key='app_schema_version'");
   await f.check(f.binding); assert.equal(f.statements.length, 1);
   f.advance(60_001); await assert.rejects(f.check(f.binding), missing);
+});
+test("a version marker cannot hide a missing message paging index", async t => {
+  const f = await fixture(t); await f.client.execute("DROP INDEX idx_messages_thread_order");
+  await assert.rejects(f.check(f.binding), missing);
 });

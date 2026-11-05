@@ -36,9 +36,9 @@ node --test scripts/migrations.test.mjs
 
 ## 严格迁移与缺失提示
 
-对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
+对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql` 和 `0025_message_paging.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
 
-`0024` 写入专用 `app_schema_version=24`，不复用旧请求可能覆盖的 `schema_v`。Worker 不再在请求中建表、加列或回填。API、会创建匿名身份的 `/chat` 入口、定时及邮件事件处理先进行只读版本/核心字段检查；不就绪时 API 返回 `503 SCHEMA_NOT_READY`，聊天入口显示升级/不可用提示，后台工作不启动。静态资源和说明页仍可读取，维护模式规则保留。
+`0024` 建立专用版本标记，`0025` 增加对话消息顺序索引并升级为 `app_schema_version=25`，不复用旧请求可能覆盖的 `schema_v`。Worker 不再在请求中建表、加列或回填。API、会创建匿名身份的 `/chat` 入口、定时及邮件事件处理先进行只读版本/核心字段检查；不就绪时 API 返回 `503 SCHEMA_NOT_READY`，聊天入口显示升级/不可用提示，后台工作不启动。静态资源和说明页仍可读取，维护模式规则保留。
 
 检查按实际数据库绑定隔离并合并并发，每次为一条只读语句：版本按 key 点查，核心表/字段用零行子查询解析，不扫描用户内容。成功缓存 60 秒，失败缓存 1 秒；补迁移后无需重启即可恢复。人工破坏已校验的结构可能到成功缓存过期后才被检查器识别，不能将它当作逐请求完整结构审计。Turso 复用同一配置的适配器对象以保持缓存有效，更换绑定或连接配置不会复用原库结论。
 
