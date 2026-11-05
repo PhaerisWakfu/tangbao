@@ -70,7 +70,10 @@
         <span class="presence-dot" aria-hidden="true"></span>
         <b id="presence-label">在线</b>
       </div>
-      <button class="work-state" id="work-state" type="button" aria-pressed="true" hidden>接单中</button>
+      <button class="work-state" id="work-state" type="button" role="switch" aria-checked="true" hidden>
+        <span class="work-state-label">接单中</span>
+        <span class="work-switch-track" aria-hidden="true"><span class="work-switch-knob"></span></span>
+      </button>
       <p class="count" id="count"></p>
       <nav class="pile" id="pile" aria-label="消息"></nav>
     </aside>

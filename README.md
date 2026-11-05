@@ -19,7 +19,7 @@ src/                  站点逻辑和页面
   pages/              对话页、关于页、隐私页、后台页
   client/             页面脚本
 public/               样式、字体、图标和公开图片
-migrations/           D1 表结构（0001–0025）
+migrations/           D1 表结构（0001–0026）
 design/               设计稿和截图，不参与 Worker 运行
 scripts/              本地预览、测试、截图和字体生成
 wrangler.jsonc        Cloudflare 配置

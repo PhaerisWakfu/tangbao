@@ -50,6 +50,8 @@ let threadLoadingMore = false;
 let threadData = null;
 let threadMessagesId = null;
 let timer = 0;
+let heartbeatTimer = 0;
+let presenceWarmup = false;
 let pendingImages = [];
 let readonly = false;
 let seat = { super: false, operatorId: "" };
@@ -133,8 +135,8 @@ function paintTitle() {
 }
 
 function applyWorkState(accepting) {
-  workState.setAttribute("aria-pressed", String(accepting));
-  workState.textContent = accepting ? "接单中" : "暂停接单";
+  workState.setAttribute("aria-checked", String(accepting));
+  workState.querySelector(".work-state-label").textContent = accepting ? "接单中" : "暂停接单";
 }
 
 function applyPresence(status) {
@@ -430,6 +432,7 @@ async function loadOlderThread() {
 }
 
 async function loadQueue() {
+  if (!heartbeatTimer && TangbaoAccount.account?.verified && !document.hidden) await sendPresence(false);
   const data = await api("/api/admin/queue");
   waiting = (data.waiting || []).length;
   unread = (data.waiting || []).filter((item) => item.unread).length;
@@ -437,6 +440,13 @@ async function loadQueue() {
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
   workState.hidden = !seat.operatorId;
   applyWorkState(data.accepting !== false);
+  startPresenceHeartbeat();
+  if (!document.hidden && data.status?.status === "away" && !presenceWarmup) {
+    presenceWarmup = true;
+    window.setTimeout(() => {
+      if (!document.hidden) void loadQueue();
+    }, 300);
+  }
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
   renderQueue(data);
@@ -546,17 +556,50 @@ async function openSlip(id, fromAudit) {
   if (!reply.hidden) answer.focus();
 }
 
+function sendPresence(away, preferBeacon = false) {
+  if (!TangbaoAccount.account?.verified) return Promise.resolve();
+  const body = JSON.stringify({ away });
+  if (preferBeacon && navigator.sendBeacon) {
+    try {
+      if (navigator.sendBeacon("/api/admin/presence", new Blob([body], { type: "application/json" }))) return Promise.resolve();
+    } catch {}
+  }
+  return fetch("/api/admin/presence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    credentials: "same-origin",
+    keepalive: away,
+  }).catch(() => {});
+}
+
+function startPresenceHeartbeat() {
+  if (!seat.operatorId || document.hidden) return;
+  if (heartbeatTimer) return;
+  void sendPresence(false);
+  heartbeatTimer = window.setInterval(() => {
+    if (!document.hidden) sendPresence(false);
+  }, 25000);
+}
+
+function stopPresenceHeartbeat(away, preferBeacon = false) {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = 0;
+  if (away) sendPresence(true, preferBeacon);
+}
+
 function arm() {
   clearTimeout(timer);
-  if (desk.hidden) return;
+  if (desk.hidden || document.hidden) return;
   const fresh = waiting > 0 || pending > 0;
-  const wait = document.hidden ? 120000 : fresh ? 30000 : POLL_MS;
+  const wait = fresh ? 30000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);
 }
 
 async function tick() {
+  if (document.hidden) return;
   const account = TangbaoAccount.account;
   if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
   try {
@@ -626,7 +669,7 @@ deskRename.addEventListener("click", (event) => {
 document.addEventListener("click", closeSlipMenus);
 workState.addEventListener("click", async () => {
   if (!seat.operatorId || workState.disabled) return;
-  const accepting = workState.getAttribute("aria-pressed") !== "true";
+  const accepting = workState.getAttribute("aria-checked") !== "true";
   workState.disabled = true;
   try {
     await api("/api/admin/work-state", { method: "POST", body: { accepting } });
@@ -692,6 +735,8 @@ let replyGuard = { key: "", at: 0 };
 
 function resetDeskView() {
   clearTimeout(timer); applyToken++; auditToken++;
+  presenceWarmup = false;
+  stopPresenceHeartbeat(true);
   selected = null; shown = ""; readonly = false;
   threadMessages = []; threadHasMore = false; threadLoadingMore = false; threadData = null; threadMessagesId = null;
   seat = { super: false, operatorId: "" };
@@ -1813,7 +1858,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (!desk.hidden) void tick();
+  if (desk.hidden) return;
+  if (document.hidden) {
+    clearTimeout(timer);
+    stopPresenceHeartbeat(true);
+  } else {
+    presenceWarmup = false;
+    startPresenceHeartbeat();
+    void tick();
+  }
 });
+window.addEventListener("pagehide", () => stopPresenceHeartbeat(true, true));
 
 void TangbaoAccount.ready.then(syncDeskAccount);

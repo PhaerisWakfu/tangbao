@@ -59,6 +59,7 @@ type PresenceRow = {
   pending: number;
   oldest_pending_at: number | null;
   accepting: number;
+  away_at: number;
 };
 type Presence = {
   id: string;
@@ -70,6 +71,7 @@ type Presence = {
   pending: number;
   oldestPendingAt: number;
   accepting: number;
+  awayAt: number;
   status: PresenceState;
   home: boolean;
 };
@@ -95,14 +97,15 @@ const HOME_MODEL = "tangbao-vme50-flash";
 const POOL_MODEL = "tangbao-pool";
 const HOME_BLURB = "糖包本人。什么都聊一点。";
 const LIST_SIZE = 10;
-const ONLINE_TTL = 120_000;
-const HEARTBEAT_WRITE = 30_000;
+const ONLINE_TTL = 90_000;
+const HEARTBEAT_WRITE = 20_000;
 const PENDING_CAP = 2;
 const REPLY_TIMEOUT = 10 * 60_000;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
 const HOME_ACCEPTING_KEY = "home_accepting";
+const HOME_AWAY_KEY = "home_away_at";
 const AUTO_APPROVE_KEY = "auto_approve";
 
 const encoder = new TextEncoder();
@@ -490,6 +493,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/profile" && method === "GET") return readProfile(request, env);
   if (path === "/api/admin/profile" && method === "POST") return saveProfile(request, env);
   if (path === "/api/admin/work-state" && method === "POST") return setWorkState(request, env);
+  if (path === "/api/admin/presence" && method === "POST") return setPresence(request, env);
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/pool" && method === "GET") return pool(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
@@ -631,8 +635,10 @@ function statusOf(
   oldestPendingAt: number,
   now: number,
   accepting = 1,
+  awayAt = 0,
 ): PresenceState {
   if (!active) return "off";
+  if (awayAt > 0) return "away";
   if (!lastSeen || lastSeen < now - ONLINE_TTL) return "away";
   if (!accepting) return "busy";
   if (pending >= PENDING_CAP) return "busy";
@@ -659,8 +665,8 @@ function statusPayload(state: PresenceState): StatusPayload {
 
 async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
   const [settings, pending] = await Promise.all([
-    env.DB.prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)")
-      .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY, HOME_ACCEPTING_KEY)
+    env.DB.prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?)")
+      .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY, HOME_ACCEPTING_KEY, HOME_AWAY_KEY)
       .all<{ key: string; value: string }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${unblockedThread("threads")}`,
@@ -673,6 +679,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
   const lastReplyAt = values.get(HOME_REPLY_KEY) || 0;
   const lastAssignedAt = values.get(HOME_ASSIGNED_KEY) || 0;
   const accepting = values.get(HOME_ACCEPTING_KEY) === 0 ? 0 : 1;
+  const awayAt = values.get(HOME_AWAY_KEY) || 0;
   const pendingCount = Number(pending?.n) || 0;
   const oldestPendingAt = Number(pending?.oldest) || 0;
   return {
@@ -685,7 +692,8 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
     pending: pendingCount,
     oldestPendingAt,
     accepting,
-    status: statusOf(1, lastSeenAt, pendingCount, oldestPendingAt, now, accepting),
+    awayAt,
+    status: statusOf(1, lastSeenAt, pendingCount, oldestPendingAt, now, accepting, awayAt),
     home: true,
   };
 }
@@ -694,7 +702,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
   const [home, rows] = await Promise.all([
     homePresence(env, now),
     env.DB.prepare(
-      `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -723,7 +731,8 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
       pending,
       oldestPendingAt,
       accepting: Number(row.accepting) ? 1 : 0,
-      status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting),
+      awayAt: Number(row.away_at) || 0,
+      status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting, row.away_at),
       home: false,
     };
   });
@@ -743,7 +752,8 @@ function presenceFromRow(row: PresenceRow, now: number): Presence {
     pending,
     oldestPendingAt,
     accepting: Number(row.accepting) ? 1 : 0,
-    status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting),
+    awayAt: Number(row.away_at) || 0,
+    status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting, row.away_at),
     home: false,
   };
 }
@@ -752,7 +762,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
   if (operatorId === HOME_MODEL) return homePresence(env, now);
   const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   const row = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
        (SELECT COUNT(*) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
@@ -781,6 +791,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
       pending: 0,
       oldestPendingAt: 0,
       accepting: 0,
+      awayAt: 0,
       status: "away",
       home: false,
     };
@@ -796,33 +807,24 @@ async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean
 async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
   try {
     if (seat.super && seat.operatorId === HOME_MODEL) {
-      await env.DB.prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value
-         WHERE CAST(settings.value AS INTEGER) < ?`,
-      )
-        .bind(HOME_SEEN_KEY, String(now), now - HEARTBEAT_WRITE)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(HOME_SEEN_KEY, String(now)),
+        env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(HOME_AWAY_KEY, "0"),
+      ]);
       return;
     }
-    if (seat.super && !seat.operatorId) return;
+    if (!seat.operatorId) return;
     if (seat.super) {
-      await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE id = ? AND owner_account_id = ? AND last_seen_at < ?")
-        .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE)
-        .run();
+      await env.DB.prepare("UPDATE operators SET last_seen_at=?, away_at=0 WHERE id=? AND owner_account_id=? AND (last_seen_at < ? OR away_at != 0)")
+        .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE).run();
       return;
     }
-    await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE operator_uid = ? AND owner_account_id = ? AND last_seen_at < ?")
-      .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE)
-      .run();
+    await env.DB.prepare("UPDATE operators SET last_seen_at=?, away_at=0 WHERE operator_uid=? AND owner_account_id=? AND (last_seen_at < ? OR away_at != 0)")
+      .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE).run();
   } catch (err) {
-    console.log(
-      JSON.stringify({
-        event: "heartbeat_error",
-        operatorId: seat.operatorId,
-        message: err instanceof Error ? err.message : "unknown",
-      }),
-    );
+    console.log(JSON.stringify({ event: "heartbeat_error", message: err instanceof Error ? err.message : "unknown" }));
   }
 }
 
@@ -1132,6 +1134,29 @@ async function readProfile(request: Request, env: AppEnv): Promise<Response> {
   });
 }
 
+async function setPresence(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再更新在线状态。");
+  const payload = await readJson(request);
+  const away = payload.away === true;
+  const now = Date.now();
+  if (seat.super && seat.operatorId === HOME_MODEL) {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(HOME_AWAY_KEY, away ? String(now) : "0"),
+      ...(away ? [] : [env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(HOME_SEEN_KEY, String(now))]),
+    ]);
+  } else if (seat.super) {
+    await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE id=? AND owner_account_id=? AND active=1")
+      .bind(away ? 1 : 0, now, away ? now : 0, seat.operatorId, seat.accountId).run();
+  } else {
+    await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE operator_uid=? AND owner_account_id=? AND active=1")
+      .bind(away ? 1 : 0, now, away ? now : 0, seat.operatorUid, seat.accountId).run();
+  }
+  return json({ ok: true, away });
+}
+
 async function setWorkState(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再设置接单状态。");
@@ -1221,7 +1246,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
   if (!browse) {
     const home = await homePresence(env, now);
     const rows = await env.DB.prepare(
-      `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -1231,7 +1256,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
-         AND o.last_seen_at >= ?
+         AND o.last_seen_at >= ? AND o.away_at = 0
        ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
     )
       .bind(now - ONLINE_TTL)
@@ -1262,7 +1287,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     bindings.push(like, like);
   }
   const rows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -1304,7 +1329,7 @@ async function listModelStatuses(env: AppEnv, url: URL): Promise<Response> {
     ids.includes(HOME_MODEL) ? homePresence(env, now) : Promise.resolve(null),
     operatorIds.length
       ? env.DB.prepare(
-        `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+        `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
           (SELECT COUNT(*) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS pending,
           (SELECT MIN(t.updated_at) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS oldest_pending_at
          FROM operators o WHERE o.id IN (${operatorIds.map(() => "?").join(",")})`,
@@ -1377,6 +1402,7 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
      ) p ON p.operator_id = o.id
      WHERE o.active = 1 AND ${OWNER_READY}
        AND o.accepting = 1
+       AND o.away_at = 0
        AND o.last_seen_at >= ?
        AND COALESCE(p.n, 0) < ?
        AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
@@ -1653,7 +1679,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operatorPages = Math.max(1, Math.ceil(operatorTotal / AUDIT_MODEL_PAGE_SIZE));
   const operatorPage = Math.min(operatorPageRequested, operatorPages);
   const operatorRows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -2631,7 +2657,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();

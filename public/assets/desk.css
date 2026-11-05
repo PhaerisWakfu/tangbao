@@ -627,20 +627,47 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .presence[data-state="busy"] b { color: var(--accent); }
 .presence[data-state="away"] b { color: var(--muted); }
 .work-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: calc(100% - 18px);
   margin: 0 9px;
-  height: 30px;
-  padding: 0 11px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink-2);
   font-size: 12px;
   cursor: pointer;
 }
-.work-state[aria-pressed="true"] { border-color: color-mix(in srgb, var(--dot) 40%, var(--line)); color: var(--dot); }
-.work-state[aria-pressed="false"] { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.work-state:hover { background: var(--hover); color: var(--ink); }
+.work-state:hover { border-color: var(--line-2); background: var(--hover); color: var(--ink); }
 .work-state[hidden] { display: none; }
+.work-switch-track {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line-2) 70%, var(--panel));
+  transition: background-color 0.18s ease;
+}
+.work-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(31, 29, 26, 0.22);
+  transition: transform 0.18s ease;
+}
+.work-state[aria-checked="true"] .work-switch-track { background: var(--dot); }
+.work-state[aria-checked="true"] .work-switch-knob { transform: translateX(14px); }
+.work-state[aria-checked="false"] .work-switch-track { background: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.work-state[aria-checked="false"] { color: var(--accent); }
 
 .count { margin: 14px 10px 2px; font-size: 12.5px; line-height: 1.6; color: var(--faint); }
 .pile { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 8px; }
