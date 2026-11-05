@@ -15,7 +15,8 @@ const ast = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true
 const names = ["writeMessage", "storeImages", "imageInserts", "caption", "previewFrom"];
 const functions = ast.statements.filter(n => ts.isFunctionDeclaration(n) && names.includes(n.name?.text));
 assert.equal(functions.length, names.length);
-const adapter = source.slice(source.indexOf("function d1Meta("), source.indexOf("let reportsSchemaReady"));
+const adapter = ast.statements.filter(n => (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
+  ["d1Meta", "TursoStatement", "TursoDatabase"].includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
 const code = ts.transpileModule(adapter + "\n" + cleanup + "\n" + functions.map(n => n.getText(ast)).join("\n") +
   "\nglobalThis.Database=TursoDatabase;globalThis.append=writeMessage;", {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },

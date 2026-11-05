@@ -10,7 +10,9 @@ const root = path.resolve(import.meta.dirname, "..");
 await mkdir(path.join(root, ".tmp"), { recursive: true, mode: 0o700 });
 const source = await readFile(path.join(root, "src/index.ts"), "utf8");
 const cleanupSource = await readFile(path.join(root, "src/image-cleanup.ts"), "utf8");
-const adapterSource = source.slice(source.indexOf("function d1Meta("), source.indexOf("let reportsSchemaReady"));
+const ast = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true);
+const adapterSource = ast.statements.filter(n => (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
+  ["d1Meta", "TursoStatement", "TursoDatabase"].includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
 const deletionSource = "async function deleteThread(" + source.split("async function deleteThread(")[1].split("\nfunction reportReasonOf")[0];
 const compile = text => ts.transpileModule(text, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },

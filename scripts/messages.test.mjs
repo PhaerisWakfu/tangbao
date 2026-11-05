@@ -11,7 +11,8 @@ await mkdir(path.join(root, ".tmp"), { recursive: true, mode: 0o700 });
 const source = await readFile(path.join(root, "src/index.ts"), "utf8");
 const ast = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true);
 const list = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "listMessages");
-const adapter = source.slice(source.indexOf("function d1Meta("), source.indexOf("let reportsSchemaReady"));
+const adapter = ast.statements.filter(n => (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
+  ["d1Meta", "TursoStatement", "TursoDatabase"].includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
 
 test("long conversation images use one bound thread ID and preserve image order/isolation", async t => {
   const directory = await mkdtemp(path.join(root, ".tmp/messages-test-"));

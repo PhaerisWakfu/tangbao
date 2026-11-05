@@ -17,6 +17,7 @@ import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disable
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
 import { processImageCleanup, cleanupUncommittedImages, isDefiniteDatabaseRejection } from "./image-cleanup";
+import { assertSchemaReady, SchemaNotReadyError } from "./schema";
 
 class HttpError extends Error {
   constructor(
@@ -172,66 +173,21 @@ class TursoDatabase {
   }
 }
 
-let reportsSchemaReady = false;
-const SCHEMA_KEY = "schema_v";
-const SCHEMA_VERSION = "2";
-
-async function ensureReportSchema(env: AppEnv): Promise<void> {
-  if (reportsSchemaReady) return;
-  try {
-    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
-      .bind(SCHEMA_KEY)
-      .first<{ value: string }>();
-    if (row?.value === SCHEMA_VERSION) {
-      reportsSchemaReady = true;
-      return;
-    }
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN reported_at INTEGER NOT NULL DEFAULT 0").run();
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN report_reason TEXT").run();
-  } catch {}
-  try {
-    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_threads_reported ON threads (reported_at)").run();
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN last_role TEXT NOT NULL DEFAULT ''").run();
-  } catch {}
-  try {
-    await env.DB.prepare(
-      `UPDATE threads
-       SET last_role = COALESCE((
-         SELECT role FROM messages m WHERE m.thread_id = threads.id ORDER BY m.created_at DESC LIMIT 1
-       ), '')
-       WHERE last_role = ''`,
-    ).run();
-  } catch {}
-  try {
-    await env.DB.prepare(
-      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-      .bind(SCHEMA_KEY, SCHEMA_VERSION)
-      .run();
-  } catch {}
-  reportsSchemaReady = true;
-}
-
-let tursoCache: { url: string; token: string; client: Client } | null = null;
+let tursoCache: { url: string; token: string; database: TursoDatabase } | null = null;
 
 function useTurso(env: AppEnv): AppEnv {
   if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) return env;
   if (!tursoCache || tursoCache.url !== env.TURSO_DATABASE_URL || tursoCache.token !== env.TURSO_AUTH_TOKEN) {
+    const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
     tursoCache = {
       url: env.TURSO_DATABASE_URL,
       token: env.TURSO_AUTH_TOKEN,
-      client: createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN }),
+      database: new TursoDatabase(client),
     };
   }
   return {
     ...env,
-    DB: new TursoDatabase(tursoCache.client) as unknown as D1Database,
+    DB: tursoCache.database as unknown as D1Database,
   };
 }
 
@@ -399,7 +355,9 @@ export default {
     }
     try {
       const scoped = useTurso(env);
-      await ensureReportSchema(scoped);
+      if (requestUrl.pathname.startsWith("/api/") || ["/chat", "/chat.html"].includes(requestUrl.pathname)) {
+        await assertSchemaReady(scoped.DB);
+      }
       const url = new URL(request.url);
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
@@ -425,6 +383,13 @@ export default {
       }
       return await route(request, scoped, ctx);
     } catch (err) {
+      if (err instanceof SchemaNotReadyError) {
+        const api = requestUrl.pathname.startsWith("/api/");
+        return new Response(api ? JSON.stringify({ error: err.message, code: err.code }) : err.message, {
+          status: 503,
+          headers: { "content-type": api ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "cache-control": "no-store", "retry-after": "1" },
+        });
+      }
       if (err instanceof AuthError) return json({ error: err.message, code: err.code }, err.status);
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.log(
@@ -438,16 +403,20 @@ export default {
   },
   async scheduled(_controller, env, ctx): Promise<void> {
     if (env.MAINTENANCE === "1") return;
-    ctx.waitUntil(refreshHomePresence(useTurso(env)));
-    ctx.waitUntil(processMailOutbox(useTurso(env)));
-    ctx.waitUntil(processImageCleanup(useTurso(env)));
+    const scoped = useTurso(env);
+    await assertSchemaReady(scoped.DB);
+    ctx.waitUntil(refreshHomePresence(scoped));
+    ctx.waitUntil(processMailOutbox(scoped));
+    ctx.waitUntil(processImageCleanup(scoped));
   },
   async queue(batch, env): Promise<void> {
     if (env.MAINTENANCE === "1") {
       batch.retryAll({ delaySeconds: 60 });
       return;
     }
-    await consumeMailEvents(batch, useTurso(env));
+    const scoped = useTurso(env);
+    await assertSchemaReady(scoped.DB);
+    await consumeMailEvents(batch, scoped);
   },
 } satisfies ExportedHandler<AppEnv>;
 
