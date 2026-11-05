@@ -2068,15 +2068,15 @@ async function listMessages(env: AppEnv, threadId: string) {
   )
     .bind(threadId)
     .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
-  const ids = messages.results.map((message) => message.id);
   const grouped = new Map<string, { id: string; type: string; url: string }[]>();
   const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
-  if (ids.length) {
-    const marks = ids.map(() => "?").join(", ");
+  if (messages.results.length) {
     const images = await env.DB.prepare(
-      `SELECT id, message_id AS messageId, image_type AS imageType FROM message_images WHERE message_id IN (${marks}) ORDER BY position ASC`,
+      `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
+       FROM messages m JOIN message_images i ON i.message_id = m.id
+       WHERE m.thread_id = ? ORDER BY i.position ASC`,
     )
-      .bind(...ids)
+      .bind(threadId)
       .all<{ id: string; messageId: string; imageType: string }>();
     for (const image of images.results) {
       const list = grouped.get(image.messageId) ?? [];
