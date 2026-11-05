@@ -72,3 +72,7 @@ test("a version marker cannot hide a missing message paging index", async t => {
   const f = await fixture(t); await f.client.execute("DROP INDEX idx_messages_thread_order");
   await assert.rejects(f.check(f.binding), missing);
 });
+test("a pre-merge schema marker cannot hide the missing pin migration", async t => {
+  const f = await fixture(t); await f.client.execute("DROP TABLE thread_pins");
+  await assert.rejects(f.check(f.binding), missing);
+});

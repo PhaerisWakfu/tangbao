@@ -185,15 +185,29 @@
         <button type="button" id="sketch-close" aria-label="关闭">×</button>
       </header>
       <div class="sketch-tools">
-        <button type="button" data-size="2.5">细</button>
-        <button type="button" data-size="6" aria-pressed="true">中</button>
-        <button type="button" data-size="14">粗</button>
-        <button type="button" class="swatch" data-color="#1f1d1a" style="--c:#1f1d1a" aria-pressed="true" aria-label="墨色"></button>
-        <button type="button" class="swatch" data-color="#a8622a" style="--c:#a8622a" aria-label="红糖"></button>
-        <button type="button" class="swatch" data-color="#2f5d50" style="--c:#2f5d50" aria-label="松绿"></button>
-        <button type="button" id="sketch-erase">橡皮</button>
-        <button type="button" id="sketch-undo">撤销</button>
-        <button type="button" id="sketch-clear">清空</button>
+        <div class="sketch-tool-group">
+          <button type="button" id="sketch-pen" aria-pressed="true">画笔 <kbd>B</kbd></button>
+          <button type="button" id="sketch-erase">橡皮 <kbd>E</kbd></button>
+        </div>
+        <div class="sketch-tool-group">
+          <button type="button" data-size="2.5">细</button>
+          <button type="button" data-size="6" aria-pressed="true">中</button>
+          <button type="button" data-size="14">粗</button>
+        </div>
+        <div class="sketch-tool-group sketch-colors">
+          <button type="button" class="swatch" data-color="#1f1d1a" style="--c:#1f1d1a" aria-pressed="true" aria-label="墨色"></button>
+          <button type="button" class="swatch" data-color="#a8622a" style="--c:#a8622a" aria-label="红糖"></button>
+          <button type="button" class="swatch" data-color="#2f5d50" style="--c:#2f5d50" aria-label="松绿"></button>
+          <button type="button" class="swatch" data-color="#2e5f8a" style="--c:#2e5f8a" aria-label="靛蓝"></button>
+          <button type="button" class="swatch" data-color="#a33a32" style="--c:#a33a32" aria-label="朱砂"></button>
+          <button type="button" class="swatch" data-color="#b58a2a" style="--c:#b58a2a" aria-label="姜黄"></button>
+          <label class="sketch-color"><input type="color" id="sketch-color" value="#1f1d1a" aria-label="自定义颜色"><span>自选</span></label>
+        </div>
+        <div class="sketch-tool-group sketch-actions">
+          <button type="button" id="sketch-undo">撤销 <kbd>Ctrl Z</kbd></button>
+          <button type="button" id="sketch-redo">重做 <kbd>Ctrl ⇧ Z</kbd></button>
+          <button type="button" id="sketch-clear">清空</button>
+        </div>
       </div>
       <canvas id="sketch-pad"></canvas>
       <p class="sketch-err" id="sketch-err"></p>
@@ -203,6 +217,26 @@
       </footer>
     </div>
   </dialog>
+  <dialog class="apply" id="desk-rename" aria-labelledby="desk-rename-title" hidden>
+    <div class="apply-card rename-card">
+      <header>
+        <h2 id="desk-rename-title">重命名对话</h2>
+        <button type="button" id="desk-rename-close" aria-label="关闭">×</button>
+      </header>
+      <form id="desk-rename-form">
+        <label class="field">
+          <span>对话名称</span>
+          <input id="desk-rename-input" maxlength="80" autocomplete="off">
+          <small>1–80 个字符。</small>
+        </label>
+        <div class="rename-actions">
+          <button type="button" id="desk-rename-cancel">取消</button>
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <dialog class="viewer" id="viewer" aria-label="查看图片" hidden>
     <button type="button" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">

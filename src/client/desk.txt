@@ -13,6 +13,11 @@ const presenceLabel = $("#presence-label");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
+const deskRename = $("#desk-rename");
+const deskRenameInput = $("#desk-rename-input");
+const PIN_ICON = '<svg class="pin-solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5h8a1 1 0 0 1 .3 1.95l-.8.25v5.05l2.2 1.7a1 1 0 0 1 .4.8v.75a1 1 0 0 1-1 1h-4.1v4.7a1 1 0 0 1-2 0v-4.7H7a1 1 0 0 1-1-1v-.75a1 1 0 0 1 .4-.8l2.2-1.7V5.7l-.8-.25A1 1 0 0 1 8 3.5Z"/></svg>';
+const UNPIN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v2.34"/><path d="m2 2 20 20"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11"/></svg>';
+let renameTarget = null;
 const legacyBind = $("#desk-legacy-bind");
 const replyErr = $("#reply-err");
 const auditSearch = $("#audit-model-search");
@@ -137,7 +142,27 @@ function applyPresence(status) {
   presenceLabel.textContent = status?.label || (state === "online" ? "在线" : "离开");
 }
 
+function closeSlipMenus() {
+  for (const menu of document.querySelectorAll(".slip-menu:not([hidden])")) {
+    menu.hidden = true;
+    menu.closest(".slip-row")?.querySelector(".slip-more")?.setAttribute("aria-expanded", "false");
+  }
+}
+
+async function toggleSlipPin(item) {
+  try {
+    await api(`/api/admin/threads/${item.id}/pin`, { method: "POST", body: { pinned: !item.pinned } });
+    await tick();
+  } catch (error) {
+    replyErr.textContent = error.message || "固定操作没有保存。";
+  }
+}
+
 function slip(item, kind) {
+  const row = document.createElement("div");
+  row.className = "slip-row";
+  if (item.id === selected) row.dataset.current = "true";
+  if (item.pinned) row.dataset.pinned = "true";
   const button = document.createElement("button");
   button.type = "button";
   button.className = kind === "wait" ? "slip waiting" : "slip";
@@ -164,7 +189,61 @@ function slip(item, kind) {
   button.addEventListener("click", () => {
     void openSlip(item.id);
   });
-  return button;
+  row.append(button);
+  if (item.pinned) {
+    const mark = document.createElement("span");
+    mark.className = "slip-pin-mark";
+    mark.setAttribute("aria-label", "已固定");
+    mark.innerHTML = PIN_ICON;
+    row.append(mark);
+  }
+
+  if (kind === "wait" || kind === "done") {
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "slip-more";
+    more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-expanded", "false");
+    more.setAttribute("aria-label", "对话操作");
+    more.title = "对话操作";
+    more.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4.2" r="1.25"/><circle cx="10" cy="10" r="1.25"/><circle cx="10" cy="15.8" r="1.25"/></svg>';
+    const menu = document.createElement("div");
+    menu.className = "slip-menu";
+    menu.hidden = true;
+    menu.setAttribute("role", "menu");
+    const pin = document.createElement("button");
+    pin.type = "button";
+    pin.className = "slip-menu-item";
+    pin.setAttribute("role", "menuitem");
+    pin.innerHTML = `${item.pinned ? UNPIN_ICON : PIN_ICON}<span>${item.pinned ? "取消固定" : "固定"}</span>`;
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "slip-menu-item";
+    rename.setAttribute("role", "menuitem");
+    rename.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></svg><span>重命名</span>';
+    menu.append(pin, rename);
+    more.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const opening = menu.hidden;
+      closeSlipMenus();
+      if (!opening) return;
+      menu.hidden = false;
+      more.setAttribute("aria-expanded", "true");
+      pin.focus();
+    });
+    menu.addEventListener("click", (event) => event.stopPropagation());
+    pin.addEventListener("click", () => {
+      closeSlipMenus();
+      void toggleSlipPin(item);
+    });
+    rename.addEventListener("click", () => {
+      closeSlipMenus();
+      openDeskRename(item.id, item.title);
+    });
+    row.append(more, menu);
+  }
+  return row;
 }
 
 function renderQueue(data) {
@@ -392,7 +471,16 @@ async function openSlip(id, fromAudit) {
     renderThread(data);
     await loadQueue();
   } catch (err) {
-    if (version === threadViewVersion) replyErr.textContent = err.message;
+    if (version !== threadViewVersion) return;
+    replyErr.textContent = err.message;
+    $("#slip-title").textContent = "打不开这条对话";
+    $("#slip-meta").textContent = err.message;
+    reply.hidden = true;
+    thread.replaceChildren();
+    const note = document.createElement("p");
+    note.className = "quiet";
+    note.textContent = "这条对话暂时打不开。可以点左上角刷新后再试。";
+    thread.append(note);
   }
   if (version !== threadViewVersion) return;
   if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
@@ -452,6 +540,47 @@ $("#profile-back").addEventListener("click", () => {
 
 profileForm.addEventListener("submit", saveProfile);
 
+function closeDeskRename() {
+  TangbaoModal.close(deskRename);
+  renameTarget = null;
+}
+
+function openDeskRename(id, title) {
+  renameTarget = id;
+  deskRenameInput.value = title || "";
+  TangbaoModal.open(deskRename);
+  deskRenameInput.focus();
+  deskRenameInput.select();
+}
+
+async function saveDeskRename() {
+  if (!renameTarget) return;
+  const title = deskRenameInput.value.trim().replace(/\s+/g, " ");
+  if (!title || [...title].length > 80) {
+    replyErr.textContent = "对话名称需要是1至80个字符。";
+    deskRenameInput.focus();
+    return;
+  }
+  try {
+    const data = await api(`/api/admin/threads/${renameTarget}/rename`, { method: "POST", body: { title } });
+    if (selected === renameTarget) $("#slip-title").textContent = data.title || title;
+    closeDeskRename();
+    await tick();
+  } catch (error) {
+    replyErr.textContent = error.message || "对话名称没有保存。";
+  }
+}
+
+$("#desk-rename-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveDeskRename();
+});
+$("#desk-rename-close").addEventListener("click", closeDeskRename);
+$("#desk-rename-cancel").addEventListener("click", closeDeskRename);
+deskRename.addEventListener("click", (event) => {
+  if (event.target === deskRename) closeDeskRename();
+});
+document.addEventListener("click", closeSlipMenus);
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
@@ -518,6 +647,7 @@ function resetDeskView() {
   pendingImages = []; showAttach();
   $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
   closeViewer(); closeSketch();
+  closeSlipMenus(); closeDeskRename();
   showPane("thread"); showDesk(false);
 }
 
@@ -1397,6 +1527,7 @@ const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
 let strokes = [];
+let redoStrokes = [];
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
@@ -1440,7 +1571,13 @@ function paintStroke(stroke) {
   }
   pen.beginPath();
   pen.moveTo(first.x, first.y);
-  for (let i = 1; i < stroke.points.length; i += 1) pen.lineTo(stroke.points[i].x, stroke.points[i].y);
+  for (let i = 1; i < stroke.points.length - 1; i += 1) {
+    const point = stroke.points[i];
+    const next = stroke.points[i + 1];
+    pen.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+  }
+  const last = stroke.points[stroke.points.length - 1];
+  pen.lineTo(last.x, last.y);
   pen.stroke();
 }
 
@@ -1452,12 +1589,25 @@ function padPoint(event) {
   };
 }
 
+function setPenMode() {
+  erasing = false;
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "true");
+}
+
+function setEraserMode() {
+  erasing = true;
+  $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+}
+
 function openSketch() {
   closePlus();
   strokes = [];
+  redoStrokes = [];
   currentStroke = null;
-  erasing = false;
-  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  setPenMode();
+  $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
   TangbaoModal.open(sketch, $("#plus"));
   requestAnimationFrame(preparePad);
@@ -1488,6 +1638,7 @@ function endStroke(event) {
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
   if (currentStroke.points.length) strokes.push(currentStroke);
   currentStroke = null;
+  redoStrokes = [];
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -1497,29 +1648,44 @@ document.querySelector(".sketch-tools").addEventListener("click", (event) => {
   const swatch = event.target.closest("[data-color]");
   if (size) {
     penSize = Number(size.dataset.size);
-    erasing = false;
-    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    setPenMode();
     for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
     size.setAttribute("aria-pressed", "true");
   }
   if (swatch) {
     penColor = swatch.dataset.color;
-    erasing = false;
-    $("#sketch-erase").setAttribute("aria-pressed", "false");
+    $("#sketch-color").value = penColor;
+    setPenMode();
     for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
     swatch.setAttribute("aria-pressed", "true");
   }
 });
-$("#sketch-erase").addEventListener("click", () => {
-  erasing = true;
-  $("#sketch-erase").setAttribute("aria-pressed", "true");
+$("#sketch-color").addEventListener("input", (event) => {
+  penColor = event.target.value;
+  setPenMode();
+  for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
 });
-$("#sketch-undo").addEventListener("click", () => {
-  strokes.pop();
+$("#sketch-pen").addEventListener("click", setPenMode);
+$("#sketch-erase").addEventListener("click", setEraserMode);
+function undoSketch() {
+  const stroke = strokes.pop();
+  if (!stroke) return;
+  redoStrokes.push(stroke);
   redrawPad();
-});
+}
+
+function redoSketch() {
+  const stroke = redoStrokes.pop();
+  if (!stroke) return;
+  strokes.push(stroke);
+  redrawPad();
+}
+
+$("#sketch-undo").addEventListener("click", undoSketch);
+$("#sketch-redo").addEventListener("click", redoSketch);
 $("#sketch-clear").addEventListener("click", () => {
   strokes = [];
+  redoStrokes = [];
   redrawPad();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
@@ -1545,6 +1711,31 @@ $("#sketch-ok").addEventListener("click", () => {
   }, "image/png");
 });
 $("#draw-image").addEventListener("click", openSketch);
+document.addEventListener("keydown", (event) => {
+  if (sketch.hidden) return;
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redoSketch();
+    else undoSketch();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && key === "y") {
+    event.preventDefault();
+    redoSketch();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (key === "b") {
+    setPenMode();
+  } else if (key === "e") {
+    setEraserMode();
+  } else if (event.key === "[") {
+    penSize = Math.max(2, penSize - 1);
+  } else if (event.key === "]") {
+    penSize = Math.min(30, penSize + 1);
+  }
+});
 
 function openViewer(src) {
   $("#viewer-img").src = src;
@@ -1561,6 +1752,14 @@ $("#viewer").addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (!deskRename.hidden) {
+    closeDeskRename();
+    return;
+  }
+  if (document.querySelector(".slip-menu:not([hidden])")) {
+    closeSlipMenus();
+    return;
+  }
   if (!$("#viewer").hidden) {
     closeViewer();
     return;
@@ -1591,3 +1790,5 @@ async function loadOlderMessages() {
 }
 $("#messages-older").addEventListener("click", () => void loadOlderMessages());
 $("#messages-newer").addEventListener("click", () => void tick());
+
+TangbaoModal.bind(deskRename, closeDeskRename);

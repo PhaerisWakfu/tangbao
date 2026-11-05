@@ -6,6 +6,8 @@ const WAIT = {
   awake: "他在看这句，不是在生成。",
   asleep: "他不在，这句会留到他回来。",
 };
+const PIN_ICON = '<svg class="pin-solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3.5h8a1 1 0 0 1 .3 1.95l-.8.25v5.05l2.2 1.7a1 1 0 0 1 .4.8v.75a1 1 0 0 1-1 1h-4.1v4.7a1 1 0 0 1-2 0v-4.7H7a1 1 0 0 1-1-1v-.75a1 1 0 0 1 .4-.8l2.2-1.7V5.7l-.8-.25A1 1 0 0 1 8 3.5Z"/></svg>';
+const UNPIN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17v5"/><path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v2.34"/><path d="m2 2 20 20"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11"/></svg>';
 const STEAM =
   '<svg class="steam" viewBox="0 0 26 18" aria-hidden="true">' +
   '<path d="M8 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M13 17c-3-3 3-5 0-8s3-5 0-8"/><path d="M18 17c-3-3 3-5 0-8s3-5 0-8"/></svg>';
@@ -20,12 +22,17 @@ const composer = $("#composer");
 const sys = $("#sys");
 const card = $("#card");
 const modelBtn = $("#model");
+const modelScrim = $("#model-scrim");
+const modelClose = $("#model-close");
 const modelSearch = $("#model-search");
 const history = $("#history");
 const titleEl = $("#title");
 const messagePages = new TangbaoMessagePages(api);
 const claimPrompt = $("#claim-prompt");
 const claimPromptCount = $("#claim-prompt-count");
+const renamePrompt = $("#rename-prompt");
+const renameInput = $("#rename-input");
+let renameTarget = null;
 const accountGear = $("#account-gear");
 const accountMenu = $("#account-menu");
 
@@ -353,6 +360,7 @@ function visibleThreads() {
   return [...ownedThreads, ...store.threads];
 }
 
+
 function renderHistory() {
   history.replaceChildren();
   if (!visibleThreads().length) {
@@ -370,23 +378,14 @@ function renderHistory() {
   const sections = [["账号对话", ownedThreads], ["此浏览器的匿名对话", store.threads]];
   for (const [label, threads] of sections) {
     if (!threads.length) continue;
+    threads.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
     const heading = document.createElement("h3"); heading.textContent = label; history.append(heading);
     for (const thread of threads) {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
+      if (thread.pinned) row.dataset.pinned = "true";
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
       link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "hist-x"; remove.setAttribute("aria-label", "删除这段对话");
-      const icon = '<svg class="i"><use href="#i-x"/></svg>'; remove.innerHTML = icon;
-      remove.addEventListener("click", (event) => {
-        event.preventDefault(); event.stopPropagation();
-        if (remove.dataset.confirm !== "1") {
-          remove.dataset.confirm = "1"; remove.setAttribute("aria-label", "确认删除"); remove.textContent = "删";
-          window.setTimeout(() => { if (remove.dataset.confirm === "1") { remove.dataset.confirm = ""; remove.setAttribute("aria-label", "删除这段对话"); remove.innerHTML = icon; } }, 2200);
-          return;
-        }
-        void removeThread(thread);
-      });
       row.append(link);
       const model = historyModel(thread);
       const initial = historyInitial(thread);
@@ -400,7 +399,76 @@ function renderHistory() {
         badge.setAttribute("aria-label", `模型：${model}`);
         row.append(badge);
       }
-      row.append(remove); history.append(row);
+      if (thread.pinned) {
+        const mark = document.createElement("span");
+        mark.className = "hist-pin-mark";
+        mark.setAttribute("aria-label", "已固定");
+        mark.innerHTML = PIN_ICON;
+        row.append(mark);
+      }
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "hist-more";
+      more.setAttribute("aria-haspopup", "menu");
+      more.setAttribute("aria-expanded", "false");
+      more.setAttribute("aria-label", "对话操作");
+      more.title = "对话操作";
+      more.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4.2" r="1.25"/><circle cx="10" cy="10" r="1.25"/><circle cx="10" cy="15.8" r="1.25"/></svg>';
+      const menu = document.createElement("div");
+      menu.className = "hist-menu";
+      menu.hidden = true;
+      menu.setAttribute("role", "menu");
+      const pinAction = document.createElement("button");
+      pinAction.type = "button";
+      pinAction.className = "hist-menu-item";
+      pinAction.setAttribute("role", "menuitem");
+      pinAction.innerHTML = `${thread.pinned ? UNPIN_ICON : PIN_ICON}<span>${thread.pinned ? "取消固定" : "固定"}</span>`;
+      const renameAction = document.createElement("button");
+      renameAction.type = "button";
+      renameAction.className = "hist-menu-item";
+      renameAction.setAttribute("role", "menuitem");
+      renameAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.2 3.8 16.2 7.8 7.4 16.6 3.2 16.8 3.4 12.6Z"/><path d="m11 5 4 4"/></svg><span>重命名</span>';
+      const deleteAction = document.createElement("button");
+      deleteAction.type = "button";
+      deleteAction.className = "hist-menu-item";
+      deleteAction.setAttribute("role", "menuitem");
+      deleteAction.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10M9 9v4M11 9v4"/></svg><span>删除</span>';
+      menu.append(pinAction, renameAction, deleteAction);
+      more.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const opening = menu.hidden;
+        closeHistoryMenus();
+        if (!opening) return;
+        menu.hidden = false;
+        more.setAttribute("aria-expanded", "true");
+        pinAction.focus();
+      });
+      menu.addEventListener("click", (event) => event.stopPropagation());
+      pinAction.addEventListener("click", () => {
+        closeHistoryMenus();
+        void toggleThreadPin(thread);
+      });
+      renameAction.addEventListener("click", () => {
+        closeHistoryMenus();
+        openRenamePrompt(thread);
+      });
+      deleteAction.addEventListener("click", async () => {
+        if (deleteAction.dataset.confirm !== "1") {
+          deleteAction.dataset.confirm = "1";
+          deleteAction.querySelector("span").textContent = "确认删除";
+          window.setTimeout(() => {
+            if (deleteAction.dataset.confirm === "1") {
+              deleteAction.dataset.confirm = "";
+              deleteAction.querySelector("span").textContent = "删除";
+            }
+          }, 2200);
+          return;
+        }
+        closeHistoryMenus();
+        await removeThread(thread);
+      });
+      row.append(more, menu); history.append(row);
       if (!thread.owned && TangbaoAccount.account?.verified) {
         const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim history-claim-one"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
         claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
@@ -426,6 +494,69 @@ function remember(thread, activate = true) {
     saveStore();
   }
   renderHistory();
+}
+
+async function toggleThreadPin(thread) {
+  const next = !thread.pinned;
+  if (thread.owned) {
+    try {
+      await api(`/api/account/threads/${thread.id}/pin`, { method: "POST", body: { pinned: next } });
+      thread.pinned = next;
+      renderHistory();
+    } catch (error) {
+      showSys(error.message || "固定操作没有保存。");
+    }
+    return;
+  }
+  thread.pinned = next;
+  saveStore();
+  renderHistory();
+}
+
+function closeHistoryMenus() {
+  for (const menu of document.querySelectorAll(".hist-menu:not([hidden])")) {
+    menu.hidden = true;
+    menu.closest(".hist-row")?.querySelector(".hist-more")?.setAttribute("aria-expanded", "false");
+  }
+}
+
+function openRenamePrompt(thread) {
+  if (!renamePrompt || !renameInput) return;
+  renameTarget = thread;
+  renameInput.value = thread.title || "";
+  TangbaoModal.open(renamePrompt);
+  renameInput.focus();
+  renameInput.select();
+}
+
+function closeRenamePrompt() {
+  if (!renamePrompt) return;
+  TangbaoModal.close(renamePrompt);
+  renameTarget = null;
+}
+
+async function saveRename() {
+  if (!renameTarget || !renameInput) return;
+  const title = renameInput.value.trim().replace(/\s+/g, " ");
+  if (!title || [...title].length > 80) {
+    showSys("对话名称需要是1至80个字符。");
+    renameInput.focus();
+    return;
+  }
+  const thread = renameTarget;
+  try {
+    if (thread.owned) await api(`/api/account/threads/${thread.id}/rename`, { method: "POST", body: { title } });
+    thread.title = title;
+    if (!thread.owned) saveStore();
+    if (current?.id === thread.id) {
+      current.title = title;
+      titleEl.textContent = title;
+    }
+    closeRenamePrompt();
+    renderHistory();
+  } catch (error) {
+    showSys(error.message || "对话名称没有保存。");
+  }
 }
 
 async function loadOwnedThreads(append = false) {
@@ -464,6 +595,7 @@ async function claimThreads(threads, options = {}) {
     for (const thread of threads) {
       if (TangbaoAccount.account?.id !== accountId) break;
       await api("/api/account/threads/claim", { method: "POST", body: { threadId: thread.id, token: thread.token } });
+      if (thread.pinned) await api(`/api/account/threads/${thread.id}/pin`, { method: "POST", body: { pinned: true } }).catch(() => {});
       store.threads = store.threads.filter((item) => item.id !== thread.id);
       if (store.activeId === thread.id) store.activeId = null;
       saveStore(); completed++;
@@ -524,6 +656,16 @@ claimPrompt?.addEventListener("click", (event) => {
 $("#claim-prompt-close")?.addEventListener("click", closeClaimPrompt);
 $("#claim-prompt-later")?.addEventListener("click", closeClaimPrompt);
 $("#claim-prompt-all")?.addEventListener("click", () => void promptClaimAll());
+$("#rename-form")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveRename();
+});
+$("#rename-close")?.addEventListener("click", closeRenamePrompt);
+$("#rename-cancel")?.addEventListener("click", closeRenamePrompt);
+renamePrompt?.addEventListener("click", (event) => {
+  if (event.target === renamePrompt) closeRenamePrompt();
+});
+document.addEventListener("click", () => closeHistoryMenus());
 
 async function syncAccountHistory() {
   if (loggedOut) return;
@@ -675,6 +817,7 @@ async function openThread(id) {
   if (!found) return;
   const version = ++viewVersion;
   current = found;
+  messages = [];
   threadModel = "";
   threadQueued = false;
   updateReportEntry();
@@ -698,6 +841,7 @@ function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
   current = null;
+  messages = [];
   applyBlocked(false);
   threadModel = "";
   threadQueued = false;
@@ -965,6 +1109,7 @@ async function sendText(text) {
 
 function closeCard() {
   card.hidden = true;
+  modelScrim.hidden = true;
   modelBtn.setAttribute("aria-expanded", "false");
 }
 
@@ -972,8 +1117,11 @@ modelBtn.addEventListener("click", (event) => {
   event.stopPropagation();
   const open = card.hidden;
   card.hidden = !open;
+  modelScrim.hidden = !open;
   modelBtn.setAttribute("aria-expanded", String(open));
 });
+modelClose.addEventListener("click", closeCard);
+modelScrim.addEventListener("click", closeCard);
 card.addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", closeCard);
 
@@ -1011,6 +1159,18 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (claimPrompt && !claimPrompt.hidden) {
     closeClaimPrompt();
+    return;
+  }
+  if (renamePrompt && !renamePrompt.hidden) {
+    closeRenamePrompt();
+    return;
+  }
+  if (document.querySelector(".hist-menu:not([hidden])")) {
+    closeHistoryMenus();
+    return;
+  }
+  if (!$("#sketch").hidden) {
+    closeSketch();
     return;
   }
   if (!$("#viewer").hidden) {
@@ -1225,43 +1385,48 @@ function paintModels() {
   if (!id) auto.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
   auto.addEventListener("click", () => {
     if (current) {
+      closeCard();
       newChat(AUTO);
       return;
     }
     chosen = AUTO;
     paintModels();
+    closeCard();
   });
   list.append(auto);
 
   const visible = modelSearchMode
     ? models.slice()
-    : models.filter((model) => model.id === id || model.status === "online" || model.online === true);
+    : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
+    const selectable = online || state === "busy";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
     button.dataset.state = state;
-    button.disabled = !online;
-    button.setAttribute("aria-disabled", String(!online));
+    button.disabled = !selectable;
+    button.setAttribute("aria-disabled", String(!selectable));
     button.setAttribute("aria-pressed", String(model.id === id));
     button.innerHTML =
-      `<i data-on="${online ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
+      `<i data-on="${selectable ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
     button.querySelector("b").textContent = model.id;
     button.querySelector(".who small").textContent = model.blurb || "";
     button.querySelector(".model-state").textContent =
       state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
-      if (!online) return;
+      if (!selectable) return;
       if (current) {
+        closeCard();
         newChat(model.id);
         return;
       }
       chosen = model.id;
       paintModels();
+      closeCard();
     });
     list.append(button);
   };
@@ -1420,3 +1585,221 @@ async function loadOlderMessages() {
 }
 $("#messages-older").addEventListener("click", () => void loadOlderMessages());
 $("#messages-newer").addEventListener("click", () => void refresh().catch(error => showSys(error.message)));
+const sketch = $("#sketch");
+const pad = $("#sketch-pad");
+const pen = pad.getContext("2d");
+const PAPER = "#fffaf3";
+let strokes = [];
+let redoStrokes = [];
+let currentStroke = null;
+let penSize = 6;
+let penColor = "#1f1d1a";
+let erasing = false;
+let padSize = { w: 1, h: 1, dpr: 1 };
+
+function preparePad() {
+  const width = Math.min(720, window.innerWidth - 64);
+  const height = Math.min(420, Math.round(window.innerHeight * 0.52));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  padSize = { w: width, h: height, dpr };
+  pad.width = Math.round(width * dpr);
+  pad.height = Math.round(height * dpr);
+  pen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  redrawPad();
+}
+
+function redrawPad() {
+  pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  pen.fillStyle = PAPER;
+  pen.fillRect(0, 0, padSize.w, padSize.h);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  for (const stroke of strokes) paintStroke(stroke);
+  if (currentStroke) paintStroke(currentStroke);
+}
+
+function paintStroke(stroke) {
+  if (!stroke.points.length) return;
+  pen.strokeStyle = stroke.color;
+  pen.fillStyle = stroke.color;
+  pen.lineWidth = stroke.size;
+  const first = stroke.points[0];
+  if (stroke.points.length === 1) {
+    pen.beginPath();
+    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    pen.fill();
+    return;
+  }
+  pen.beginPath();
+  pen.moveTo(first.x, first.y);
+  for (let i = 1; i < stroke.points.length - 1; i += 1) {
+    const point = stroke.points[i];
+    const next = stroke.points[i + 1];
+    pen.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+  }
+  const last = stroke.points[stroke.points.length - 1];
+  pen.lineTo(last.x, last.y);
+  pen.stroke();
+}
+
+function padPoint(event) {
+  const rect = pad.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (padSize.w / rect.width),
+    y: (event.clientY - rect.top) * (padSize.h / rect.height),
+  };
+}
+
+function setPenMode() {
+  erasing = false;
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "true");
+}
+
+function setEraserMode() {
+  erasing = true;
+  $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+}
+
+function openSketch() {
+  closePlus();
+  strokes = [];
+  redoStrokes = [];
+  currentStroke = null;
+  setPenMode();
+  $("#sketch-color").value = penColor;
+  $("#sketch-err").textContent = "";
+  TangbaoModal.open(sketch, $("#plus"));
+  requestAnimationFrame(preparePad);
+}
+
+function closeSketch() {
+  TangbaoModal.close(sketch);
+}
+
+pad.addEventListener("pointerdown", (event) => {
+  if (sketch.hidden) return;
+  $("#sketch-err").textContent = "";
+  pad.setPointerCapture(event.pointerId);
+  currentStroke = {
+    color: erasing ? PAPER : penColor,
+    size: erasing ? Math.max(penSize * 4, 16) : penSize,
+    points: [padPoint(event)],
+  };
+  redrawPad();
+});
+pad.addEventListener("pointermove", (event) => {
+  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  currentStroke.points.push(padPoint(event));
+  redrawPad();
+});
+function endStroke(event) {
+  if (!currentStroke) return;
+  if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
+  if (currentStroke.points.length) strokes.push(currentStroke);
+  currentStroke = null;
+  redoStrokes = [];
+}
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+
+document.querySelector(".sketch-tools").addEventListener("click", (event) => {
+  const size = event.target.closest("[data-size]");
+  const swatch = event.target.closest("[data-color]");
+  if (size) {
+    penSize = Number(size.dataset.size);
+    setPenMode();
+    for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
+    size.setAttribute("aria-pressed", "true");
+  }
+  if (swatch) {
+    penColor = swatch.dataset.color;
+    $("#sketch-color").value = penColor;
+    setPenMode();
+    for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
+    swatch.setAttribute("aria-pressed", "true");
+  }
+});
+$("#sketch-color").addEventListener("input", (event) => {
+  penColor = event.target.value;
+  setPenMode();
+  for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
+});
+$("#sketch-pen").addEventListener("click", setPenMode);
+$("#sketch-erase").addEventListener("click", setEraserMode);
+function undoSketch() {
+  const stroke = strokes.pop();
+  if (!stroke) return;
+  redoStrokes.push(stroke);
+  redrawPad();
+}
+
+function redoSketch() {
+  const stroke = redoStrokes.pop();
+  if (!stroke) return;
+  strokes.push(stroke);
+  redrawPad();
+}
+
+$("#sketch-undo").addEventListener("click", undoSketch);
+$("#sketch-redo").addEventListener("click", redoSketch);
+$("#sketch-clear").addEventListener("click", () => {
+  strokes = [];
+  redoStrokes = [];
+  redrawPad();
+});
+$("#sketch-close").addEventListener("click", closeSketch);
+$("#sketch-cancel").addEventListener("click", closeSketch);
+$("#sketch-ok").addEventListener("click", () => {
+  if (!strokes.length) {
+    $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
+    return;
+  }
+  if (pendingImages.length >= MAX_IMAGES) {
+    $("#sketch-err").textContent = `一次最多 ${MAX_IMAGES} 张。`;
+    return;
+  }
+  pad.toBlob((blob) => {
+    if (!blob) {
+      $("#sketch-err").textContent = "这张画没能留下来。再试一次。";
+      return;
+    }
+    const file = new File([blob], "sketch.png", { type: "image/png" });
+    pendingImages.push({ file, url: URL.createObjectURL(file) });
+    showAttach();
+    grow();
+    closeSketch();
+  }, "image/png");
+});
+$("#draw-image").addEventListener("click", openSketch);
+document.addEventListener("keydown", (event) => {
+  if (sketch.hidden) return;
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redoSketch();
+    else undoSketch();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && key === "y") {
+    event.preventDefault();
+    redoSketch();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (key === "b") {
+    setPenMode();
+  } else if (key === "e") {
+    setEraserMode();
+  } else if (event.key === "[") {
+    penSize = Math.max(2, penSize - 1);
+  } else if (event.key === "]") {
+    penSize = Math.min(30, penSize + 1);
+  }
+});
+
+TangbaoModal.bind(renamePrompt, closeRenamePrompt);
+TangbaoModal.bind(sketch, closeSketch);

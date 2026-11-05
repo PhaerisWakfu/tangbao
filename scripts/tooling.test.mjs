@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { createClient } from "@libsql/client";
@@ -15,7 +15,7 @@ async function fixture(t) {
 }
 test("Turso entry applies all migrations and reruns without duplicating", async t => {
   const { client } = await fixture(t);
-  assert.equal((await migrate(client, new URL("../migrations/", import.meta.url))).length, 25);
+  assert.equal((await migrate(client, new URL("../migrations/", import.meta.url))).length, 26);
   assert.deepEqual(await migrate(client, new URL("../migrations/", import.meta.url)), []);
   assert.equal((await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows[0].value, "25");
 });
@@ -24,6 +24,22 @@ test("Turso refuses untracked populated schema", async t => {
   await assert.rejects(migrate(client, new URL("../migrations/", import.meta.url)), /缺少/);
   assert.equal((await client.execute("SELECT count(*) n FROM sqlite_master WHERE name='_tangbao_migrations'")).rows[0].n, 0);
 });
+for (const missing of ["0023_thread_pins.sql", "0023_image_cleanup_jobs.sql"]) {
+  test(`Turso merges branch migration history without replaying applied files: ${missing}`, async t => {
+    const { client, dir } = await fixture(t);
+    const baseline = path.join(dir, "baseline"); await mkdir(baseline);
+    const directory = new URL("../migrations/", import.meta.url);
+    for (const file of (await readdir(directory)).filter(n => n.endsWith(".sql") && n !== missing)) {
+      await writeFile(path.join(baseline, file), await readFile(new URL(file, directory)));
+    }
+    await migrate(client, baseline);
+    await client.execute("INSERT INTO settings(key,value) VALUES('synthetic-keep','unchanged')");
+    assert.deepEqual(await migrate(client, directory), [missing]);
+    assert.equal((await client.execute("SELECT value FROM settings WHERE key='synthetic-keep'")).rows[0].value, "unchanged");
+    assert.equal((await client.execute("SELECT count(*) n FROM _tangbao_migrations")).rows[0].n, 26);
+    assert.deepEqual(await migrate(client, directory), []);
+  });
+}
 test("Turso rolls back the whole failed batch and rejects changed history", async t => {
   const { client, dir } = await fixture(t); const sql = path.join(dir, "sql"); await mkdir(sql);
   await writeFile(path.join(sql, "0001_test.sql"), "CREATE TABLE sample(id INT);");

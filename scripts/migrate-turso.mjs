@@ -19,10 +19,12 @@ export async function migrate(client, directory) {
       const sql = await readFile(path.join(directory, name), "utf8");
       return { name, sql, hash: createHash("sha256").update(sql).digest("hex") };
     }));
-    for (let i = 0; i < history.length; i++) {
-      if (history[i].name !== migrations[i]?.name || history[i].sha256 !== migrations[i]?.hash) throw new Error("已执行迁移与当前文件不一致，停止；请核对版本和迁移基线。");
+    const byName = new Map(migrations.map(migration => [migration.name, migration]));
+    for (const previous of history) {
+      if (byName.get(previous.name)?.hash !== previous.sha256) throw new Error("已执行迁移与当前文件不一致，停止；请核对版本和迁移基线。");
     }
-    for (const migration of migrations.slice(history.length)) {
+    const appliedNames = new Set(history.map(previous => previous.name));
+    for (const migration of migrations.filter(migration => !appliedNames.has(migration.name))) {
       await tx.executeMultiple(migration.sql);
       await tx.execute({ sql: "INSERT INTO _tangbao_migrations(name,sha256) VALUES(?,?)", args: [migration.name, migration.hash] });
       applied.push(migration.name);

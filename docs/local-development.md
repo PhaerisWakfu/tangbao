@@ -22,7 +22,7 @@ npm run local:verify -- --instance epic-5-run-01
 
 `local:verify` 创建全新本地实例、随机测试密钥、独立 D1/KV，动态应用并核对全部 SQL migration，启动 Worker，通过正式 HTTP API 执行多身份场景，最后停止自己启动的服务。它拒绝已存在的 instance、远程基址和 Wrangler 任意透传参数。
 
-`npm run check` 覆盖 app、desk、account、md、sw 五个客户端入口，以及 `src/pages/*.html` 内联 JavaScript；外链不执行，JSON 等数据脚本不作为 JavaScript 解析。语法检查不替代浏览器、权限、数据库或邮件验证。旧 smoke/browser 脚本不在本回归流程内。
+`npm run check` 覆盖 app、desk、account、md、sw、modal、messages 七个客户端入口，以及 `src/pages/*.html` 内联 JavaScript；外链不执行，JSON 等数据脚本本身不作为 JavaScript 解析。语法检查不替代浏览器、权限、数据库或邮件验证。旧 smoke/browser 脚本不在本回归流程内。
 
 可独立执行本地定向检查：
 
@@ -37,6 +37,8 @@ node --test scripts/migrations.test.mjs
 ## 严格迁移与缺失提示
 
 对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql` 和 `0025_message_paging.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
+
+合并并行分支后同时保留 `0023_image_cleanup_jobs.sql` 与 `0023_thread_pins.sql`，不重命名已经存在于迁移台账的文件。完整目录共 26 份 SQL，结构标记仍为 `app_schema_version=25`，标记不是文件计数。D1 按完整文件名记录；Turso 工具按文件名及摘要核验既有历史，只执行尚未登记的文件，并拒绝修改或删除已登记 SQL。旧实例升级也须补齐置顶表，缺少时相关请求明确不可用。
 
 `0024` 建立专用版本标记，`0025` 增加对话消息顺序索引并升级为 `app_schema_version=25`，不复用旧请求可能覆盖的 `schema_v`。Worker 不再在请求中建表、加列或回填。API、会创建匿名身份的 `/chat` 入口、定时及邮件事件处理先进行只读版本/核心字段检查；不就绪时 API 返回 `503 SCHEMA_NOT_READY`，聊天入口显示升级/不可用提示，后台工作不启动。静态资源和说明页仍可读取，维护模式规则保留。
 
