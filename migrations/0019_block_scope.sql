@@ -18,9 +18,9 @@ SELECT
         WHEN t.operator_id = 'tangbao-vme50-flash' THEN '*'
         ELSE t.operator_id
       END
-      FROM threads t
+      FROM threads t JOIN blocks_old origin ON origin.id = b.id
       WHERE t.token_hash = b.id OR t.visitor_hash = b.id OR t.ip_hash = b.id
-      ORDER BY ABS(t.updated_at - b.created_at) ASC, t.updated_at DESC
+      ORDER BY ABS(t.updated_at - origin.created_at) ASC, t.updated_at DESC
       LIMIT 1
     ),
     '__drop__'

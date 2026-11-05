@@ -22,7 +22,17 @@ npm run local:verify -- --instance epic-5-run-01
 
 `local:verify` 创建全新本地实例、随机测试密钥、独立 D1/KV，动态应用并核对全部 SQL migration，启动 Worker，通过正式 HTTP API 执行多身份场景，最后停止自己启动的服务。它拒绝已存在的 instance、远程基址和 Wrangler 任意透传参数。
 
-`npm run check` 覆盖 app、desk、account 三个客户端入口的语法，不替代浏览器、权限、数据库或邮件验证。旧 smoke/browser 脚本不在本回归流程内。
+`npm run check` 覆盖 app、desk、account、md、sw 五个客户端入口，以及 `src/pages/*.html` 内联 JavaScript；外链不执行，JSON 等数据脚本不作为 JavaScript 解析。语法检查不替代浏览器、权限、数据库或邮件验证。旧 smoke/browser 脚本不在本回归流程内。
+
+可独立执行本地定向检查：
+
+```sh
+node --test scripts/migrations.test.mjs
+```
+
+迁移测试在本地 libSQL 从零执行当前全部 SQL，并用合成旧封禁数据验证 `0019` 的归属规则。这些本地结果不代表真实 Turso 或生产迁移验收。
+
+`0019_block_scope.sql` 的兼容修复只将关联排序所需的封禁时间改为子查询内可见的值，不改“距离封禁时间最近、同距离取较新对话”的规则或表结构。已应用该版本的 D1 不需要重新运行 `0019`；通过迁移清单正常接续即可，不在现有库手工重放建表/改名语句。
 
 ## 留一个可操作的验收站点
 
