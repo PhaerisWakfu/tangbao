@@ -2101,23 +2101,21 @@ async function listMessages(env: AppEnv, threadId: string) {
   )
     .bind(threadId)
     .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
-  const ids = messages.results.map((message) => message.id);
   const grouped = new Map<string, { id: string; type: string; url: string }[]>();
   const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
-  if (ids.length) {
-    const marks = ids.map(() => "?").join(", ");
-    const images = await env.DB.prepare(
-      `SELECT id, message_id AS messageId, image_type AS imageType FROM message_images WHERE message_id IN (${marks}) ORDER BY position ASC`,
-    )
-      .bind(...ids)
-      .all<{ id: string; messageId: string; imageType: string }>();
-    for (const image of images.results) {
-      const list = grouped.get(image.messageId) ?? [];
-      const expires = Date.now() + 5 * 60_000;
-      const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
-      list.push({ id: image.id, type: image.imageType, url });
-      grouped.set(image.messageId, list);
-    }
+  const images = await env.DB.prepare(
+    `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
+     FROM message_images i JOIN messages m ON m.id = i.message_id
+     WHERE m.thread_id = ? ORDER BY i.position ASC`,
+  )
+    .bind(threadId)
+    .all<{ id: string; messageId: string; imageType: string }>();
+  for (const image of images.results) {
+    const list = grouped.get(image.messageId) ?? [];
+    const expires = Date.now() + 5 * 60_000;
+    const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
+    list.push({ id: image.id, type: image.imageType, url });
+    grouped.set(image.messageId, list);
   }
   return messages.results.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] }));
 }

@@ -449,6 +449,14 @@ async function openSlip(id, fromAudit) {
     await loadQueue();
   } catch (err) {
     replyErr.textContent = err.message;
+    $("#slip-title").textContent = "打不开这条对话";
+    $("#slip-meta").textContent = err.message;
+    reply.hidden = true;
+    thread.replaceChildren();
+    const note = document.createElement("p");
+    note.className = "quiet";
+    note.textContent = "这条对话暂时打不开。可以点左上角刷新后再试。";
+    thread.append(note);
   }
   if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
   if (!reply.hidden) answer.focus();
