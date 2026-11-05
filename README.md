@@ -67,8 +67,8 @@ MAIL_PAYLOAD_KEY=另一个独立的至少32字节随机值
 
 可选：
 
-- `FEISHU_WEBHOOK`：访客发消息时推送到飞书群
-- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：浏览器推送
+- `FEISHU_WEBHOOK`：保留的飞书配置；当前新消息/申请触发入口未接通，配置后也不会自动通知
+- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：保留的 Web Push 订阅配置；当前没有新消息主动推送保证，通知用途与恢复由 [#21](https://github.com/PhaerisWakfu/tangbao/issues/21) 继续讨论
 - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`：改用 Turso
 - 不填 Turso 变量时使用 D1
 - `ADMIN_PASSWORD` 仅用于识别旧管理员迁移，不是新账号登录密码；管理员资格通过受控引导授予已验证账号
