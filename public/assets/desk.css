@@ -604,11 +604,12 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 
 .presence {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   margin-top: 12px;
-  padding: 12px 14px;
+  padding: 10px 11px 10px 14px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
@@ -628,18 +629,17 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .presence[data-state="away"] b { color: var(--muted); }
 .work-state {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: calc(100% - 18px);
-  margin: 0 9px;
-  height: 32px;
-  padding: 0 10px;
+  gap: 7px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0 7px 0 9px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--ink-2);
-  font-size: 12px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
   cursor: pointer;
 }
 .work-state:hover { border-color: var(--line-2); background: var(--hover); color: var(--ink); }
@@ -647,8 +647,8 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .work-switch-track {
   position: relative;
   flex: none;
-  width: 30px;
-  height: 16px;
+  width: 28px;
+  height: 15px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--line-2) 70%, var(--panel));
   transition: background-color 0.18s ease;
@@ -657,15 +657,15 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: var(--panel);
   box-shadow: 0 1px 3px rgba(31, 29, 26, 0.22);
   transition: transform 0.18s ease;
 }
 .work-state[aria-checked="true"] .work-switch-track { background: var(--dot); }
-.work-state[aria-checked="true"] .work-switch-knob { transform: translateX(14px); }
+.work-state[aria-checked="true"] .work-switch-knob { transform: translateX(13px); }
 .work-state[aria-checked="false"] .work-switch-track { background: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .work-state[aria-checked="false"] { color: var(--accent); }
 
