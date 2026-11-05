@@ -273,7 +273,7 @@
       $("#apply-email").value = account.email;
       $("#apply").hidden = false;
       $("#apply-err").textContent = "";
-      if (account.operatorId) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
+      if (account.operatorId || account.home || account.roles?.includes("admin")) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
       showOath();
       $("#apply-next").focus();
       try {
@@ -285,7 +285,8 @@
     }
 
     function syncJoinButtons() {
-      const model = Boolean(TangbaoAccount.account?.operatorId);
+      const account = TangbaoAccount.account;
+      const model = Boolean(account?.operatorId || account?.home || account?.roles?.includes("admin"));
       document.querySelectorAll("[data-join]").forEach((button) => {
         button.textContent = model ? "进入笼屉" : button.dataset.joinLabel || "成为AI";
         button.dataset.desk = model ? "1" : "0";

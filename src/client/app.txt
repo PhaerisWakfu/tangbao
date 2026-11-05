@@ -218,7 +218,8 @@ function statusFromModel(model) {
 function syncApplyEntry() {
   const link = document.querySelector(".apply-top");
   if (!link) return;
-  const model = Boolean(TangbaoAccount.account?.operatorId);
+  const account = TangbaoAccount.account;
+  const model = Boolean(account?.operatorId || account?.home || account?.roles?.includes("admin"));
   link.textContent = model ? "进入笼屉" : "成为AI";
   link.href = model ? "/desk" : "/?apply=1";
 }
