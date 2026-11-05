@@ -632,17 +632,17 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   flex: none;
   align-items: center;
   gap: 7px;
-  height: 26px;
+  height: 24px;
   margin-left: auto;
-  padding: 0 7px 0 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--muted);
   font-size: 11px;
   cursor: pointer;
 }
-.work-state:hover { border-color: var(--line-2); background: var(--hover); color: var(--ink); }
+.work-state:hover { background: transparent; color: var(--ink); }
+.work-state:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 3px; border-radius: 6px; }
 .work-state[hidden] { display: none; }
 .work-switch-track {
   position: relative;
