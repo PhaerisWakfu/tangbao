@@ -1097,6 +1097,10 @@ async function sendText(text) {
     input.value = ""; pendingImages = []; $("#file").value = ""; showAttach();
     for (const image of images) URL.revokeObjectURL(image.url);
     if (data.queued) showSys("消息已进入等待队列，模型上线后会接单。");
+    // The server has accepted this message. Drop the optimistic copy before
+    // merging the server page, otherwise it keeps a second "local" bubble.
+    messages = messages.filter((message) => message.id !== "local");
+    painted = "";
     try { await refresh(true); } catch (err) { showSys("消息已送达，页面暂时未刷新。" + err.message); }
   } catch (err) {
     sentGuard.key = "";
