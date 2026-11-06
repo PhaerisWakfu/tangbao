@@ -601,12 +601,12 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
-  const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.8\.js$/.exec(path);
+  const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.9\.js$/.exec(path);
   const script =
-    path === "/assets/account.js" || path === "/assets/account-1.5.8.js" ? accountJs
-      : path === "/assets/app.js" || path === "/assets/app-1.5.8.js" ? appJs
-        : path === "/assets/desk.js" || path === "/assets/desk-1.5.8.js" ? deskJs
-          : path === "/assets/md.js" || path === "/assets/md-1.5.8.js" ? mdJs
+    path === "/assets/account.js" || path === "/assets/account-1.5.9.js" ? accountJs
+      : path === "/assets/app.js" || path === "/assets/app-1.5.9.js" ? appJs
+        : path === "/assets/desk.js" || path === "/assets/desk-1.5.9.js" ? deskJs
+          : path === "/assets/md.js" || path === "/assets/md-1.5.9.js" ? mdJs
             : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {

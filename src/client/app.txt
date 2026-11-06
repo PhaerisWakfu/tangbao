@@ -955,7 +955,9 @@ async function closeThreadNotification(id) {
 async function openThread(id) {
   const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
+  const switched = current?.id !== id;
   viewVersion++;
+  if (switched) clearDraft();
   current = found;
   setThreadUrl(id);
   void closeThreadNotification(id);
@@ -991,6 +993,7 @@ async function openThread(id) {
 function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
+  clearDraft();
   setThreadUrl(null);
   current = null;
   messages = [];
@@ -1143,6 +1146,11 @@ function clearAttach() {
   $("#file").value = "";
   showAttach();
   grow();
+}
+
+function clearDraft() {
+  input.value = "";
+  clearAttach();
 }
 
 async function addImages(files) {
