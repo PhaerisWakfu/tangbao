@@ -801,6 +801,7 @@ async function syncAccountHistory() {
 window.addEventListener("tb:account-change", () => { syncApplyEntry(); void syncAccountHistory(); });
 window.addEventListener("tb:logout", () => {
   syncApplyEntry();
+  setThreadUrl(null);
 
   loggedOut = true; historySequence++; viewVersion++;
   clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
@@ -929,11 +930,27 @@ function closeSide() {
   body.classList.remove("drawer");
 }
 
+function setThreadUrl(id) {
+  const next = id ? `/chat?thread=${encodeURIComponent(id)}` : "/chat";
+  if (`${location.pathname}${location.search}` !== next) window.history.replaceState(null, "", next);
+}
+
+async function closeThreadNotification(id) {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const notifications = await registration?.getNotifications({ tag: `user:${id}` }) || [];
+    for (const notification of notifications) notification.close();
+  } catch {}
+}
+
 async function openThread(id) {
   const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
   viewVersion++;
   current = found;
+  setThreadUrl(id);
+  void closeThreadNotification(id);
   if (found.owned) void markAccountRead(found);
   else {
     found.unread = false;
@@ -966,6 +983,7 @@ async function openThread(id) {
 function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
+  setThreadUrl(null);
   current = null;
   messages = [];
   messagesThreadId = null;
@@ -1207,6 +1225,7 @@ async function sendText(text) {
     if (relevantAccount) remember(result, version === viewVersion);
     if (version !== viewVersion || !relevantAccount) return;
     current = result; threadQueued = Boolean(result.queued); threadModel = result.queued ? "" : result.operator || "";
+    setThreadUrl(result.id);
     titleEl.textContent = result.title || "";
     input.value = ""; pendingImages = []; $("#file").value = ""; showAttach();
     for (const image of images) URL.revokeObjectURL(image.url);
@@ -1697,6 +1716,12 @@ void (async () => {
   syncApplyEntry();
   await syncAccountHistory();
   await loadModels(true);
+  const linkedThread = new URLSearchParams(location.search).get("thread");
+  if (linkedThread && visibleThreads().some((item) => item.id === linkedThread)) {
+    await openThread(linkedThread);
+  } else if (linkedThread) {
+    setThreadUrl(null);
+  }
   if (current) {
     body.dataset.state = "chat";
     titleEl.textContent = current.title || "";

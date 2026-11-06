@@ -59,6 +59,8 @@ let seat = { super: false, operatorId: "" };
 let deskAccountId = null;
 let deskSyncSequence = 0;
 let loggedOut = TangbaoAccount.logoutPending;
+const deepLinkThread = new URLSearchParams(location.search).get("thread");
+let deepLinkOpened = false;
 const MAX_IMAGES = 6;
 
 class ApiError extends Error {
@@ -457,6 +459,9 @@ async function loadQueue() {
     profileRequested = false;
     if (location.search) window.history.replaceState(null, "", "/desk");
     if (!seat.super) void openProfilePane();
+  } else if (!deepLinkOpened && deepLinkThread) {
+    deepLinkOpened = true;
+    if (/^[A-Za-z0-9_-]{16,80}$/.test(deepLinkThread)) void openSlip(deepLinkThread);
   }
 }
 
@@ -522,8 +527,24 @@ function showPane(name, nav) {
   }
 }
 
+function setDeskThreadUrl(id) {
+  const next = id ? `/desk?thread=${encodeURIComponent(id)}` : "/desk";
+  if (`${location.pathname}${location.search}` !== next) window.history.replaceState(null, "", next);
+}
+
+async function closeDeskThreadNotification(id) {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const notifications = await registration?.getNotifications({ tag: `desk:${id}` }) || [];
+    for (const notification of notifications) notification.close();
+  } catch {}
+}
+
 async function openSlip(id, fromAudit) {
   readonly = Boolean(fromAudit);
+  setDeskThreadUrl(id);
+  void closeDeskThreadNotification(id);
   showPane("thread", readonly ? "audit" : "thread");
   if (id !== selected) {
     shown = "";
@@ -819,7 +840,7 @@ legacyBind.addEventListener("click", async () => {
   }
 });
 window.addEventListener("tb:account-change", () => { void syncDeskAccount(); });
-window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });
+window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; setDeskThreadUrl(null); resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });
 
 $("#look").addEventListener("click", () => {
   void tick();

@@ -867,6 +867,7 @@ async function touchAssigned(env: AppEnv, operatorId: string, now: number, seat?
 async function notifyOperator(
   env: AppEnv,
   operatorId: string,
+  threadId: string,
   title: string,
   preview: string,
   heading = "有人在等你",
@@ -881,7 +882,13 @@ async function notifyOperator(
     .bind(operatorId)
     .all<{ endpoint: string; p256dh: string; auth: string }>();
   const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
-  const payload = JSON.stringify({ title: heading, body, url: "/desk" });
+  const payload = JSON.stringify({
+    title: heading,
+    body,
+    url: `/desk?thread=${encodeURIComponent(threadId)}`,
+    tag: `desk:${threadId}`,
+    threadId,
+  });
   await Promise.all(
     rows.results.map(async (target) => {
       try {
@@ -903,6 +910,7 @@ async function notifyOperator(
 async function notifyAccount(
   env: AppEnv,
   accountId: string,
+  threadId: string,
   title: string,
   preview: string,
 ): Promise<void> {
@@ -916,7 +924,13 @@ async function notifyAccount(
     .bind(accountId)
     .all<{ endpoint: string; p256dh: string; auth: string }>();
   const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
-  const payload = JSON.stringify({ title: "糖包回复了", body, url: "/chat" });
+  const payload = JSON.stringify({
+    title: "糖包回复了",
+    body,
+    url: `/chat?thread=${encodeURIComponent(threadId)}`,
+    tag: `user:${threadId}`,
+    threadId,
+  });
   await Promise.all(
     rows.results.map(async (target) => {
       try {
@@ -1029,7 +1043,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   await touchAssigned(env, operator, now);
   noteVisitor(ctx, env, request, title, preview, operator, true);
-  if (operator !== POOL_MODEL) ctx.waitUntil(notifyOperator(env, operator, title, preview));
+  if (operator !== POOL_MODEL) ctx.waitUntil(notifyOperator(env, operator, id, title, preview));
   return json(payload);
 }
 
@@ -1134,7 +1148,7 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
     thread.awaiting !== 1,
   );
   if (thread.operator_id !== POOL_MODEL) {
-    ctx.waitUntil(notifyOperator(env, thread.operator_id, thread.title, preview));
+    ctx.waitUntil(notifyOperator(env, thread.operator_id, id, thread.title, preview));
   }
   return json({ ok: true, status: await publicStatus(env) });
 }
@@ -2259,7 +2273,7 @@ async function adminReply(request: Request, env: AppEnv, id: string, ctx: Execut
   await writeMessage(env, id, "tangbao", incoming, 0);
   await touchReply(env, seat, Date.now());
   if (exists.account_id) {
-    ctx.waitUntil(notifyAccount(env, exists.account_id, exists.title, caption(incoming.body, incoming.images.length)));
+    ctx.waitUntil(notifyAccount(env, exists.account_id, id, exists.title, caption(incoming.body, incoming.images.length)));
   }
   return json({ ok: true });
 }

@@ -9,15 +9,23 @@ self.addEventListener("push", (event) => {
   const url = typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/desk";
   event.waitUntil((async () => {
     try {
-      const target = new URL(url, self.location.origin).pathname;
+      const target = new URL(url, self.location.origin);
+      const targetThread = target.searchParams.get("thread");
       const list = await clients.matchAll({ type: "window", includeUncontrolled: true });
-      if (list.some((client) => new URL(client.url).pathname === target && client.visibilityState === "visible")) return;
+      if (list.some((client) => {
+        if (client.visibilityState !== "visible") return false;
+        const current = new URL(client.url);
+        if (current.pathname !== target.pathname) return false;
+        return !targetThread || current.searchParams.get("thread") === targetThread;
+      })) return;
     } catch {}
-    await self.registration.showNotification(title, {
+    const options = {
       body: data.body || "",
       icon: "/favicon.svg",
       data: { url },
-    });
+    };
+    if (typeof data.tag === "string" && data.tag) options.tag = data.tag;
+    await self.registration.showNotification(title, options);
   })());
 });
 
@@ -25,10 +33,13 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || "/desk";
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      const target = new URL(url, self.location.origin).pathname;
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (list) => {
+      const target = new URL(url, self.location.origin);
       for (const client of list) {
-        if (new URL(client.url).pathname === target && "focus" in client) return client.focus();
+        if (new URL(client.url).pathname !== target.pathname) continue;
+        if ("focus" in client) await client.focus();
+        if (client.url !== target.href && "navigate" in client) await client.navigate(target.href);
+        return;
       }
       return clients.openWindow(url);
     }),
