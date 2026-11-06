@@ -575,7 +575,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
             ? aboutSiteHtml
             : path === "/privacy" || path === "/privacy.html"
               ? privacyHtml
-              : path === "/desk" || path === "/desk.html" || path === "/desk-start"
+              : path === "/desk" || path === "/desk.html"
                 ? deskHtml
                 : null;
   if (page && (method === "GET" || method === "HEAD")) {
@@ -601,22 +601,19 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
-  // 升级版本时同步修改 src/pages/*.html；npm run check 会检查一致性。
-  // 任意历史版本路径都回当前脚本，避免旧 HTML 引用旧版本时 404、整个笼屉卡在加载中。
-  const versionedScript = /^\/assets\/(app|account|desk|md)-\d+\.\d+\.\d+\.js$/.exec(path);
-  const scripts = { app: appJs, account: accountJs, desk: deskJs, md: mdJs } as const;
-  const script = versionedScript
-    ? scripts[versionedScript[1] as keyof typeof scripts]
-    : path === "/assets/account.js" ? accountJs
-      : path === "/assets/app.js" ? appJs
-        : path === "/assets/desk.js" ? deskJs
-          : path === "/assets/md.js" ? mdJs
+  // 升级版本时同步修改 src/pages/*.html 和下方别名；npm run check 会检查一致性。
+  const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.9\.js$/.exec(path);
+  const script =
+    path === "/assets/account.js" || path === "/assets/account-1.5.9.js" ? accountJs
+      : path === "/assets/app.js" || path === "/assets/app-1.5.9.js" ? appJs
+        : path === "/assets/desk.js" || path === "/assets/desk-1.5.9.js" ? deskJs
+          : path === "/assets/md.js" || path === "/assets/md-1.5.9.js" ? mdJs
             : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: {
         "content-type": "text/javascript; charset=utf-8",
-        "cache-control": versionedScript ? "public, max-age=3600" : "no-cache",
+        "cache-control": versionedScript ? "public, max-age=31536000, immutable" : "no-cache",
       },
     });
   }
