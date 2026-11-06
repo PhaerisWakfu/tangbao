@@ -77,9 +77,39 @@
     return Uint8Array.from(raw, (char) => char.charCodeAt(0));
   }
 
-  async function enablePush(kind) {
+  async function enablePush(kind, action) {
     error.textContent = "";
-    notice.textContent = "正在开启浏览器通知…";
+    notice.textContent = "";
+    const title = action?.querySelector("strong");
+    const note = action?.querySelector("small");
+    if (action && !action.dataset.pushTitle) {
+      action.dataset.pushTitle = title?.textContent || "";
+      action.dataset.pushNote = note?.textContent || "";
+    }
+    const start = () => {
+      action?.classList.remove("is-done");
+      action?.classList.add("is-busy");
+      action?.setAttribute("aria-busy", "true");
+      if (action) action.disabled = true;
+      if (note) note.textContent = "正在请求浏览器权限…";
+    };
+    const finish = (ok, message) => {
+      action?.classList.remove("is-busy");
+      action?.setAttribute("aria-busy", "false");
+      if (action) action.disabled = false;
+      if (!action) return;
+      if (ok) {
+        action.classList.add("is-done");
+        if (title) title.textContent = kind === "operator" ? "模型消息通知已开启" : "糖包回复通知已开启";
+        if (note) note.textContent = "当前浏览器已订阅，可在浏览器设置中关闭";
+      } else {
+        action.classList.remove("is-done");
+        if (title) title.textContent = action.dataset.pushTitle || "";
+        if (note) note.textContent = action.dataset.pushNote || "";
+        error.textContent = message || "浏览器通知没有开启。";
+      }
+    };
+    start();
     try {
       if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
         throw new Error("当前浏览器不支持后台通知，可以继续使用页面标题提醒。");
@@ -87,20 +117,21 @@
       if (Notification.permission === "denied") throw new Error("浏览器已拒绝通知，请在浏览器设置里允许后重试。");
       const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
       if (permission !== "granted") throw new Error("没有获得通知权限。");
+      if (note) note.textContent = "正在连接通知服务…";
       const config = await request(kind === "operator" ? "/api/admin/push" : "/api/account/push");
       if (!config.publicKey) throw new Error("服务器还没有配置浏览器通知。");
       const registration = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
+      if (note) note.textContent = "正在保存这台设备…";
       const existing = await registration.pushManager.getSubscription();
       const subscription = existing || await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: pushKeyBytes(config.publicKey),
       });
       await request(kind === "operator" ? "/api/admin/push" : "/api/account/push", subscription.toJSON());
-      notice.textContent = kind === "operator" ? "模型消息通知已开启。" : "糖包回复通知已开启。";
+      finish(true);
     } catch (err) {
-      notice.textContent = "";
-      error.textContent = err.message || "浏览器通知没有开启。";
+      finish(false, err.message);
     }
   }
 
@@ -361,10 +392,10 @@
         addAction("申请成为 AI", "填写型号和简介，等待审批", null, { href: "/?apply=1" });
       }
       if (account.verified && (account.operatorId || account.home || account.roles?.includes("admin"))) {
-        addAction("开启模型消息通知", "有人发来新对话时提醒；需要允许浏览器通知", () => enablePush("operator"));
+        addAction("开启模型消息通知", "有人发来新对话时提醒；需要允许浏览器通知", (event) => enablePush("operator", event.currentTarget));
       }
       if (account.verified) {
-        addAction("开启糖包回复通知", "糖包回复你的对话时提醒；需要允许浏览器通知", () => enablePush("account"));
+        addAction("开启糖包回复通知", "糖包回复你的对话时提醒；需要允许浏览器通知", (event) => enablePush("account", event.currentTarget));
       }
       addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
       content.append(actions);
