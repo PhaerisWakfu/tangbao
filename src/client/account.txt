@@ -31,6 +31,41 @@
   const links = dialog.querySelector(".account-links");
   const error = dialog.querySelector(".account-error");
   const notice = dialog.querySelector(".account-notice");
+  const helpDialog = document.createElement("dialog");
+  helpDialog.className = "account-help-dialog";
+  helpDialog.setAttribute("aria-labelledby", "account-help-title");
+  helpDialog.innerHTML = '<div class="account-help-card"><header><div><span class="account-help-kicker">通知设置</span><h2 id="account-help-title">各端通知开启说明</h2></div><button class="account-help-close" type="button" aria-label="关闭通知说明">×</button></header><div class="account-help-body"></div></div>';
+  document.body.append(helpDialog);
+  helpDialog.querySelector(".account-help-close").addEventListener("click", () => helpDialog.close());
+  helpDialog.addEventListener("click", (event) => { if (event.target === helpDialog) helpDialog.close(); });
+  const helpBody = helpDialog.querySelector(".account-help-body");
+  function showPushHelp(kind) {
+    const subject = kind === "operator" ? "有人给你发来新消息" : "糖包回复你的对话";
+    helpBody.innerHTML =
+      `<p class="account-help-lead">开启后，${subject}时会尝试通过这台设备提醒你。开启一次即可，不需要每次打开设置都点。</p>` +
+      '<section class="account-help-section"><h3>电脑浏览器</h3><ol>' +
+      '<li>Chrome、Edge、Firefox 或 Safari 打开糖包并登录。</li>' +
+      '<li>点击账号设置里的开启按钮，浏览器询问通知权限时选择“允许”。</li>' +
+      '<li>如果之前点过拒绝，去地址栏左侧的站点设置，把“通知”改成允许，再回来开启。</li>' +
+      '</ol></section>' +
+      '<section class="account-help-section"><h3>iPhone / iPad</h3><ol>' +
+      '<li>需要 iOS 16.4 或更新版本，并用 Safari 打开糖包。</li>' +
+      '<li>点分享按钮，选择“添加到主屏幕”，再从主屏幕上的糖包图标打开。</li>' +
+      '<li>登录后进入账号设置开启通知；普通 Safari 标签页通常不会出现这个入口。</li>' +
+      '</ol></section>' +
+      '<section class="account-help-section"><h3>Android</h3><ol>' +
+      '<li>推荐使用 Chrome 打开糖包，点击开启并允许通知。</li>' +
+      '<li>国内部分浏览器、微信和 QQ 内置浏览器不支持标准 Web Push，可能无法开启或收不到。</li>' +
+      '<li>如果设备没有 Google 推送服务，Chrome 的通知也可能不可用。</li>' +
+      '</ol></section>' +
+      '<section class="account-help-section"><h3>收不到或权限被拒绝</h3><ul>' +
+      '<li>网站不能再次自动弹权限，只能在浏览器的站点通知设置里手动恢复。</li>' +
+      '<li>清除站点数据、换浏览器或退出登录后，需要重新开启一次。</li>' +
+      '<li>通知受浏览器和网络影响，可能延迟或收不到；页面标签和未读点仍会更新，是可靠的兜底。</li>' +
+      '</ul></section>' +
+      '<p class="account-help-note">通知是补充提醒，不是唯一提醒。关键消息仍以页面内容和账号记录为准。</p>';
+    helpDialog.showModal();
+  }
   const NEW_PASSWORD_HINT = "6–20 个字符，数字、英文字母、特殊符号至少包含两类。空格会保留，但不算特殊符号。";
 
   function passwordError(value, policy) {
@@ -406,6 +441,21 @@
         const item = addAction(label, note, (event) => enablePush(kind, event.currentTarget));
         item.dataset.pushTitle = label;
         item.dataset.pushNote = note;
+        const shell = document.createElement("div");
+        shell.className = "account-action-shell";
+        shell.append(item);
+        const info = document.createElement("button");
+        info.type = "button";
+        info.className = "account-action-info";
+        info.textContent = "?";
+        info.title = "查看" + (kind === "operator" ? "笼屉消息通知" : "糖包消息通知") + "开启说明";
+        info.setAttribute("aria-label", info.title);
+        info.addEventListener("click", (event) => {
+          event.stopPropagation();
+          showPushHelp(kind);
+        });
+        shell.append(info);
+        actions.append(shell);
         void syncPushAction(kind, item);
         return item;
       };
