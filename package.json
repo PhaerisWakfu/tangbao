@@ -22,7 +22,7 @@
     "local:legacy:info": "node scripts/local-legacy.mjs info",
     "local:legacy:backup": "node scripts/local-legacy.mjs backup",
     "design": "node scripts/design-server.mjs",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --config wrangler.production.jsonc",
     "types": "wrangler types",
     "check": "node scripts/check-client.mjs",
     "migrate:local": "wrangler d1 migrations apply DB --local",
