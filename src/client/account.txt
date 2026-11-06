@@ -77,13 +77,46 @@
     return Uint8Array.from(raw, (char) => char.charCodeAt(0));
   }
 
+  function pushPath(kind, suffix = "") {
+    return (kind === "operator" ? "/api/admin/push" : "/api/account/push") + suffix;
+  }
+
+  function markPushAction(action, kind, done) {
+    if (!action) return;
+    const title = action.querySelector("strong");
+    const note = action.querySelector("small");
+    action.classList.toggle("is-done", done);
+    if (title) title.textContent = done
+      ? (kind === "operator" ? "笼屉消息通知已开启" : "糖包消息通知已开启")
+      : action.dataset.pushTitle || "";
+    if (note) note.textContent = done
+      ? "当前浏览器已订阅，可在浏览器设置中关闭"
+      : action.dataset.pushNote || "";
+  }
+
+  async function pushSubscribed(kind) {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return false;
+    if (Notification.permission !== "granted") return false;
+    const registration = await navigator.serviceWorker.getRegistration();
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return false;
+    const data = await request(pushPath(kind, "/status"), { endpoint: subscription.endpoint });
+    return data.subscribed === true;
+  }
+
+  async function syncPushAction(kind, action) {
+    if (!action || action.classList.contains("is-busy") || action.classList.contains("is-done")) return;
+    try {
+      markPushAction(action, kind, await pushSubscribed(kind));
+    } catch {}
+  }
+
   async function enablePush(kind, action) {
     error.textContent = "";
     notice.textContent = "";
-    const title = action?.querySelector("strong");
     const note = action?.querySelector("small");
     if (action && !action.dataset.pushTitle) {
-      action.dataset.pushTitle = title?.textContent || "";
+      action.dataset.pushTitle = action.querySelector("strong")?.textContent || "";
       action.dataset.pushNote = note?.textContent || "";
     }
     const start = () => {
@@ -98,14 +131,9 @@
       action?.setAttribute("aria-busy", "false");
       if (action) action.disabled = false;
       if (!action) return;
-      if (ok) {
-        action.classList.add("is-done");
-        if (title) title.textContent = kind === "operator" ? "笼屉消息通知已开启" : "糖包消息通知已开启";
-        if (note) note.textContent = "当前浏览器已订阅，可在浏览器设置中关闭";
-      } else {
-        action.classList.remove("is-done");
-        if (title) title.textContent = action.dataset.pushTitle || "";
-        if (note) note.textContent = action.dataset.pushNote || "";
+      if (ok) markPushAction(action, kind, true);
+      else {
+        markPushAction(action, kind, false);
         error.textContent = message || "浏览器通知没有开启。";
       }
     };
@@ -118,7 +146,7 @@
       const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
       if (permission !== "granted") throw new Error("没有获得通知权限。");
       if (note) note.textContent = "正在连接通知服务…";
-      const config = await request(kind === "operator" ? "/api/admin/push" : "/api/account/push");
+      const config = await request(pushPath(kind));
       if (!config.publicKey) throw new Error("服务器还没有配置浏览器通知。");
       const registration = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
@@ -128,7 +156,7 @@
         userVisibleOnly: true,
         applicationServerKey: pushKeyBytes(config.publicKey),
       });
-      await request(kind === "operator" ? "/api/admin/push" : "/api/account/push", subscription.toJSON());
+      await request(pushPath(kind), subscription.toJSON());
       finish(true);
     } catch (err) {
       finish(false, err.message);
@@ -374,6 +402,13 @@
         actions.append(item);
         return item;
       };
+      const addPushAction = (kind, label, note) => {
+        const item = addAction(label, note, (event) => enablePush(kind, event.currentTarget));
+        item.dataset.pushTitle = label;
+        item.dataset.pushNote = note;
+        void syncPushAction(kind, item);
+        return item;
+      };
 
       if (!account.verified) {
         addAction("验证邮箱", "完成验证后才能开启新对话或申请模型", () => switchMode("verify"), { primary: true });
@@ -392,10 +427,10 @@
         addAction("申请成为 AI", "填写型号和简介，等待审批", null, { href: "/?apply=1" });
       }
       if (account.verified && (account.operatorId || account.home || account.roles?.includes("admin"))) {
-        addAction("开启笼屉消息通知", "有人发来新对话时提醒；需要允许浏览器通知", (event) => enablePush("operator", event.currentTarget));
+        addPushAction("operator", "开启笼屉消息通知", "有人发来新对话时提醒；需要允许浏览器通知");
       }
       if (account.verified) {
-        addAction("开启糖包消息通知", "糖包回复你的对话时提醒；需要允许浏览器通知", (event) => enablePush("account", event.currentTarget));
+        addPushAction("account", "开启糖包消息通知", "糖包回复你的对话时提醒；需要允许浏览器通知");
       }
       addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
       content.append(actions);

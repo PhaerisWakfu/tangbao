@@ -504,9 +504,11 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
   if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
+  if (path === "/api/admin/push/status" && method === "POST") return pushStatus(request, env);
   if (path === "/api/account/push" && method === "GET") return accountPushConfig(request, env);
   if (path === "/api/account/push" && method === "POST") return accountPushSubscribe(request, env);
   if (path === "/api/account/push" && method === "DELETE") return accountPushUnsubscribe(request, env);
+  if (path === "/api/account/push/status" && method === "POST") return accountPushStatus(request, env);
 
   const decision = path.match(/^\/api\/admin\/applications\/([A-Za-z0-9_-]{16,80})\/(approve|reject)$/);
   if (decision && method === "POST") {
@@ -2048,9 +2050,33 @@ async function pushConfig(request: Request, env: AppEnv): Promise<Response> {
   return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
 }
 
+async function pushStatus(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const row = endpoint && seat.operatorId
+    ? await env.DB.prepare("SELECT 1 AS active FROM push_subscriptions WHERE endpoint = ? AND operator_id = ?")
+      .bind(endpoint, seat.operatorId)
+      .first<{ active: number }>()
+    : null;
+  return json({ subscribed: Boolean(row) });
+}
+
 async function accountPushConfig(request: Request, env: AppEnv): Promise<Response> {
   await requireAccount(request, env);
   return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
+}
+
+async function accountPushStatus(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const row = endpoint
+    ? await env.DB.prepare("SELECT 1 AS active FROM push_subscriptions WHERE endpoint = ? AND account_id = ?")
+      .bind(endpoint, account.id)
+      .first<{ active: number }>()
+    : null;
+  return json({ subscribed: Boolean(row) });
 }
 
 async function accountPushSubscribe(request: Request, env: AppEnv): Promise<Response> {
