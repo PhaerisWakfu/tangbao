@@ -924,6 +924,8 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .sketch[hidden] { display: none; }
 .sketch-card {
   width: min(760px, 100%);
+  min-width: 0;
+  max-width: 100%;
   padding: 16px 16px 14px;
   border-radius: 18px;
   background: var(--panel);
@@ -1001,15 +1003,29 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .sketch-color input::-webkit-color-swatch { border: 0; border-radius: 50%; }
 .swatch { width: 22px; height: 22px; padding: 0; border-radius: 999px; background: var(--c) !important; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12); }
 .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
+.sketch-viewport {
+  width: 100%;
+  max-height: min(420px, 52vh);
+  overflow: auto;
+  border-radius: 12px;
+  background: #fffaf3;
+  overscroll-behavior: contain;
+}
+.sketch-viewport::-webkit-scrollbar { width: 9px; height: 9px; }
+.sketch-viewport::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--line-2); }
 #sketch-pad {
   display: block;
-  width: 100%;
-  height: min(420px, 52vh);
-  border-radius: 12px;
+  width: auto;
+  height: auto;
+  border-radius: 0;
   background: #fffaf3;
   touch-action: none;
   cursor: crosshair;
 }
+.sketch-viewport.panning #sketch-pad { cursor: grab; }
+.sketch-viewport.panning.dragging #sketch-pad { cursor: grabbing; }
+.sketch-zoom button:disabled { opacity: 0.4; cursor: default; }
+.sketch-zoom #sketch-zoom-reset { min-width: 52px; justify-content: center; }
 .sketch-err { min-height: 1.2em; margin: 8px 0 0; font-size: 13px; color: #a04b2a; }
 .sketch-card footer { justify-content: flex-end; margin-top: 8px; }
 .sketch-card footer .primary {
