@@ -575,7 +575,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
             ? aboutSiteHtml
             : path === "/privacy" || path === "/privacy.html"
               ? privacyHtml
-              : path === "/desk" || path === "/desk.html"
+              : path === "/desk" || path === "/desk.html" || path === "/desk-start"
                 ? deskHtml
                 : null;
   if (page && (method === "GET" || method === "HEAD")) {
