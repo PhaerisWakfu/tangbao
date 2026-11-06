@@ -564,10 +564,15 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   if (path.startsWith("/api/")) return json({ error: "没有这一格。" }, 404);
 
+  // 旧入口保留跳转：代码不再提供第二个聊天页，但已发出的 /start 链接不能失效。
+  if (path === "/start" && (method === "GET" || method === "HEAD")) {
+    return Response.redirect(`${new URL(request.url).origin}/chat${new URL(request.url).search}`, 302);
+  }
+
   const page =
     path === "/" || path === "/index.html"
       ? homeHtml
-      : path === "/chat" || path === "/chat.html" || path === "/start"
+      : path === "/chat" || path === "/chat.html"
         ? indexHtml
         : path === "/about" || path === "/about.html"
           ? aboutHtml
@@ -582,7 +587,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     const response = new Response(method === "HEAD" ? null : page, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
-    return method === "GET" && ["/chat", "/chat.html", "/start"].includes(path) ? withGuestCookie(request, env, response) : response;
+    return method === "GET" && ["/chat", "/chat.html"].includes(path) ? withGuestCookie(request, env, response) : response;
   }
 
   if (path === "/manifest.webmanifest" && (method === "GET" || method === "HEAD")) {
@@ -601,19 +606,18 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
-  // 升级版本时同步修改 src/pages/*.html 和下方别名；npm run check 会检查一致性。
-  const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.9\.js$/.exec(path);
+  // 资源用裸地址：页面 HTML 是 no-store，脚本每次回源校验，不靠 URL 上的版本号刷缓存。
   const script =
-    path === "/assets/account.js" || path === "/assets/account-1.5.9.js" ? accountJs
-      : path === "/assets/app.js" || path === "/assets/app-1.5.9.js" ? appJs
-        : path === "/assets/desk.js" || path === "/assets/desk-1.5.9.js" ? deskJs
-          : path === "/assets/md.js" || path === "/assets/md-1.5.9.js" ? mdJs
+    path === "/assets/account.js" ? accountJs
+      : path === "/assets/app.js" ? appJs
+        : path === "/assets/desk.js" ? deskJs
+          : path === "/assets/md.js" ? mdJs
             : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: {
         "content-type": "text/javascript; charset=utf-8",
-        "cache-control": versionedScript ? "public, max-age=31536000, immutable" : "no-cache",
+        "cache-control": "no-cache",
       },
     });
   }

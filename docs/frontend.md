@@ -10,13 +10,13 @@
 - 新账号页可增加专用样式/脚本。重复的 API、存储、弹层行为先小范围抽取，不复制第四份实现，也不借机重写整站。
 - `design/` 仅用于参考。检查最终由 Worker 返回的页面，不能用设计稿截图替代验收。
 
-## 静态资源版本与缓存
+## 静态资源与缓存
 
-- JS 必须使用路径级版本：`/assets/app-<version>.js`、`account-<version>.js`、`desk-<version>.js`、`md-<version>.js`。不能只改查询参数，ESA 的缓存 Key 可能忽略查询字符串。
-- CSS 使用同版本的 `?v=<version>`；`src/pages/*.html`、`src/index.ts` 的版本别名和版本正则必须一起升级。
-- 发版后刷新 ESA 的 `/chat`、`/desk` 和 `/assets/`，并确认 `/start` 返回的是新的 `app-<version>.js`。
-- `npm run check` 会校验所有页面的 JS/CSS 版本一致；漏改会直接失败。
-- `/start` 是绕过旧页面缓存的稳定入口，可用于单个用户或客服排障，不替代正常 `/chat`。
+- 页面 HTML 由 Worker 直接返回并设 `no-store`，每次请求都取当前部署；不要给 HTML 加长缓存。
+- 资源使用裸地址：`/assets/app.js`、`account.js`、`desk.js`、`md.js`，以及 `/assets/*.css`。脚本由 Worker 以 `no-cache` 返回，静态文件靠 ETag 协商；不要在 URL 上加 `?v=`。
+- Cloudflare Workers 静态资源的缓存键只取路径，查询串不参与（2026-11-06 实测：任意 `?v=` 都命中同一对象、同一 ETag），所以 `?v=` 没有任何缓存收益，只会制造"已经刷过"的假象。
+- 若将来改回会缓存整页、或忽略查询串的 CDN（如阿里云 ESA），必须改成路径级或内容哈希文件名；同时确认压缩编码协商（源站加 `Vary: Accept-Encoding`，或关掉 CDN 智能压缩）。否则不支持该编码的浏览器（Safari/WebKit 不支持 zstd）会整份解析失败，表现为整页无样式，且换版本号也刷不掉。
+- 发版后检查 `/`、`/chat`、`/desk` 的 HTML 引用与当前部署一致，并确认 `/assets/app.css`、`/assets/app.js` 均返回 200。
 
 ## 视觉基线
 
