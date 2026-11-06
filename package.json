@@ -24,7 +24,7 @@
     "design": "node scripts/design-server.mjs",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
-    "check": "node scripts/check-client.mjs",
+    "check": "node scripts/check-client.mjs && node scripts/check-asset-version.mjs",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "migrate:remote": "wrangler d1 migrations apply DB --remote"
   },

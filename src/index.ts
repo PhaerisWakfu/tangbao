@@ -601,6 +601,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
+  // 升级版本时同步修改 src/pages/*.html 和下方别名；npm run check 会检查一致性。
   const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.9\.js$/.exec(path);
   const script =
     path === "/assets/account.js" || path === "/assets/account-1.5.9.js" ? accountJs
