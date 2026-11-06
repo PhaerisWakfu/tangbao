@@ -34,6 +34,7 @@ type AppEnv = Env & AuthEnv & {
   VAPID_SUBJECT?: string;
   TURSO_DATABASE_URL?: string;
   TURSO_AUTH_TOKEN?: string;
+  ORIGIN_HOST?: string;
   MAINTENANCE?: string;
   MAIL_EVENTS_QUEUE?: string;
   MAIL_EVENTS_ACCOUNT_ID?: string;
@@ -386,7 +387,10 @@ export default {
     if (appOrigin && !localHost(requestUrl.hostname)) {
       try {
         const canonical = new URL(appOrigin);
-        if (requestUrl.protocol !== "https:" || requestUrl.host !== canonical.host) {
+        const originHost = env.ORIGIN_HOST?.trim().toLowerCase();
+        const forwardedHost = (request.headers.get("x-forwarded-host") || "").split(",")[0].trim().toLowerCase();
+        const viaOrigin = (originHost && requestUrl.hostname.toLowerCase() === originHost) || forwardedHost === canonical.hostname;
+        if (requestUrl.protocol !== "https:" || (requestUrl.host !== canonical.host && !viaOrigin)) {
           return Response.redirect(`${canonical.origin}${requestUrl.pathname}${requestUrl.search}`, 308);
         }
       } catch {}
