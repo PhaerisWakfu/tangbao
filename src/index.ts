@@ -504,6 +504,9 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
   if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
+  if (path === "/api/account/push" && method === "GET") return accountPushConfig(request, env);
+  if (path === "/api/account/push" && method === "POST") return accountPushSubscribe(request, env);
+  if (path === "/api/account/push" && method === "DELETE") return accountPushUnsubscribe(request, env);
 
   const decision = path.match(/^\/api\/admin\/applications\/([A-Za-z0-9_-]{16,80})\/(approve|reject)$/);
   if (decision && method === "POST") {
@@ -531,7 +534,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
     if (method === "GET") return adminRead(request, env, adminThread[1]);
-    if (method === "POST") return adminReply(request, env, adminThread[1]);
+    if (method === "POST") return adminReply(request, env, adminThread[1], ctx);
   }
 
   const shelve = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/shelve$/);
@@ -872,7 +875,6 @@ async function notifyOperator(
   const privateKey = env.VAPID_PRIVATE_KEY;
   const subject = env.VAPID_SUBJECT;
   if (!publicKey || !privateKey || !subject) return;
-  if (!(await operatorPresent(env, operatorId))) return;
   const rows = await env.DB.prepare(
     "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE operator_id = ?",
   )
@@ -893,6 +895,39 @@ async function notifyOperator(
         console.log(
           JSON.stringify({ event: "push_notify", message: err instanceof Error ? err.message : "unknown" }),
         );
+      }
+    }),
+  );
+}
+
+async function notifyAccount(
+  env: AppEnv,
+  accountId: string,
+  title: string,
+  preview: string,
+): Promise<void> {
+  const publicKey = env.VAPID_PUBLIC_KEY;
+  const privateKey = env.VAPID_PRIVATE_KEY;
+  const subject = env.VAPID_SUBJECT;
+  if (!publicKey || !privateKey || !subject) return;
+  const rows = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE account_id = ?",
+  )
+    .bind(accountId)
+    .all<{ endpoint: string; p256dh: string; auth: string }>();
+  const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
+  const payload = JSON.stringify({ title: "糖包回复了", body, url: "/chat" });
+  await Promise.all(
+    rows.results.map(async (target) => {
+      try {
+        const status = await sendWebPush({ publicKey, privateKey, subject }, target, payload);
+        if (status === 404 || status === 410) {
+          await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(target.endpoint).run();
+        } else if (status < 200 || status >= 300) {
+          console.log(JSON.stringify({ event: "push_notify_account", status }));
+        }
+      } catch (err) {
+        console.log(JSON.stringify({ event: "push_notify_account", message: err instanceof Error ? err.message : "unknown" }));
       }
     }),
   );
@@ -994,6 +1029,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   await touchAssigned(env, operator, now);
   noteVisitor(ctx, env, request, title, preview, operator, true);
+  if (operator !== POOL_MODEL) ctx.waitUntil(notifyOperator(env, operator, title, preview));
   return json(payload);
 }
 
@@ -1087,15 +1123,19 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   // thread must remain possible even when that cap is full.
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
+  const preview = incoming.draw ? `要一张图 · ${shown}` : shown;
   noteVisitor(
     ctx,
     env,
     request,
     thread.title,
-    incoming.draw ? `要一张图 · ${shown}` : shown,
+    preview,
     thread.operator_id,
     thread.awaiting !== 1,
   );
+  if (thread.operator_id !== POOL_MODEL) {
+    ctx.waitUntil(notifyOperator(env, thread.operator_id, thread.title, preview));
+  }
   return json({ ok: true, status: await publicStatus(env) });
 }
 
@@ -1994,6 +2034,39 @@ async function pushConfig(request: Request, env: AppEnv): Promise<Response> {
   return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
 }
 
+async function accountPushConfig(request: Request, env: AppEnv): Promise<Response> {
+  await requireAccount(request, env);
+  return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
+}
+
+async function accountPushSubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const keys = payload.keys;
+  const p256dh = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { p256dh?: unknown }).p256dh : "");
+  const auth = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { auth?: unknown }).auth : "");
+  if (!endpoint || !p256dh || !auth) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare(
+    `INSERT INTO push_subscriptions (endpoint, account_id, p256dh, auth, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET account_id = excluded.account_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at`,
+  )
+    .bind(endpoint, account.id, p256dh, auth, Date.now())
+    .run();
+  return json({ ok: true });
+}
+
+async function accountPushUnsubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  if (!endpoint) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND account_id = ?")
+    .bind(endpoint, account.id).run();
+  return json({ ok: true });
+}
+
 async function pushSubscribe(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
   const payload = await readJson(request);
@@ -2175,16 +2248,19 @@ async function renameAdminThread(request: Request, env: AppEnv, id: string): Pro
   return json({ ok: true, title });
 }
 
-async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
+async function adminReply(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const seat = await requireSeat(request, env);
   const ownership = seatOwnership(seat, "threads.operator_id");
-  const exists = await env.DB.prepare(`SELECT operator_id FROM threads WHERE id = ? AND ${ownership.sql}`)
+  const exists = await env.DB.prepare(`SELECT operator_id, title, account_id FROM threads WHERE id = ? AND ${ownership.sql}`)
     .bind(id, ...ownership.values)
-    .first<{ operator_id: string }>();
+    .first<{ operator_id: string; title: string; account_id: string | null }>();
   if (!exists) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
   await writeMessage(env, id, "tangbao", incoming, 0);
   await touchReply(env, seat, Date.now());
+  if (exists.account_id) {
+    ctx.waitUntil(notifyAccount(env, exists.account_id, exists.title, caption(incoming.body, incoming.images.length)));
+  }
   return json({ ok: true });
 }
 
