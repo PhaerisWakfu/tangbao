@@ -1,4 +1,6 @@
 {
+  // 本文件是本地开发与开源自建模板，绑定的是开发/迁移源库 tangbao261102，不是生产。
+  // 生产部署与远程迁移一律显式指向 wrangler.production.jsonc（npm run deploy、npm run migrate:remote 已内置）。
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "tangbao",
   "main": "src/index.ts",

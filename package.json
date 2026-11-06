@@ -26,7 +26,7 @@
     "types": "wrangler types",
     "check": "node scripts/check-client.mjs",
     "migrate:local": "wrangler d1 migrations apply DB --local",
-    "migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261019.1",

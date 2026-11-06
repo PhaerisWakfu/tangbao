@@ -103,7 +103,7 @@ npm run check
 
 `scripts/smoke.mjs` 会向本地服务写入测试数据，不要指向生产环境。
 
-旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归；遗留由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。迁移脚本已统一使用 `DB` binding；非默认目标仍须显式追加 `--config`，例如 `npm run migrate:remote -- --config wrangler.production.jsonc`。
+旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归；遗留由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。迁移脚本已统一使用 `DB` binding；`npm run deploy` 与 `npm run migrate:remote` 已固定指向 `wrangler.production.jsonc`，其他目标（例如 `wrangler.accounts-source.jsonc`）仍须显式追加 `--config`。
 
 ## 后续开发入口
 
