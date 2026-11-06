@@ -567,7 +567,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const page =
     path === "/" || path === "/index.html"
       ? homeHtml
-      : path === "/chat" || path === "/chat.html"
+      : path === "/chat" || path === "/chat.html" || path === "/start"
         ? indexHtml
         : path === "/about" || path === "/about.html"
           ? aboutHtml
@@ -582,7 +582,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     const response = new Response(method === "HEAD" ? null : page, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
-    return method === "GET" && ["/chat", "/chat.html"].includes(path) ? withGuestCookie(request, env, response) : response;
+    return method === "GET" && ["/chat", "/chat.html", "/start"].includes(path) ? withGuestCookie(request, env, response) : response;
   }
 
   if (path === "/manifest.webmanifest" && (method === "GET" || method === "HEAD")) {
@@ -601,11 +601,19 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
+  const versionedScript = /^\/assets\/(app|account|desk|md)-1\.5\.8\.js$/.exec(path);
   const script =
-    path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
+    path === "/assets/account.js" || path === "/assets/account-1.5.8.js" ? accountJs
+      : path === "/assets/app.js" || path === "/assets/app-1.5.8.js" ? appJs
+        : path === "/assets/desk.js" || path === "/assets/desk-1.5.8.js" ? deskJs
+          : path === "/assets/md.js" || path === "/assets/md-1.5.8.js" ? mdJs
+            : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
-      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },
+      headers: {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": versionedScript ? "public, max-age=31536000, immutable" : "no-cache",
+      },
     });
   }
   return env.ASSETS.fetch(request);

@@ -25,7 +25,7 @@ const modelBtn = $("#model");
 const modelScrim = $("#model-scrim");
 const modelClose = $("#model-close");
 const modelSearch = $("#model-search");
-const history = $("#history");
+const historyList = $("#history");
 const titleEl = $("#title");
 const claimPrompt = $("#claim-prompt");
 const claimPromptCount = $("#claim-prompt-count");
@@ -474,7 +474,7 @@ stage.addEventListener("scroll", () => {
 });
 
 function renderHistory() {
-  history.replaceChildren();
+  historyList.replaceChildren();
   if (!visibleThreads().length) {
     const empty = document.createElement("p");
     empty.className = "hist-empty";
@@ -484,14 +484,14 @@ function renderHistory() {
     recover.href = "http://tangbao.phaeris.cn/__recover?stage=workers";
     recover.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.4" cy="8.4" r="4.8"/><path d="m12 12 4 4"/><path d="M6.2 8.4h4.4"/></svg><span class="hist-recover-copy"><strong>找不到旧对话？</strong><small>试着从旧页面找回</small></span><span class="hist-recover-arrow" aria-hidden="true">→</span>';
     empty.append(document.createElement("br"), recover);
-    history.append(empty);
+    historyList.append(empty);
     return;
   }
   const sections = [["账号对话", ownedThreads], ["此浏览器的匿名对话", store.threads]];
   for (const [label, threads] of sections) {
     if (!threads.length) continue;
     threads.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
-    const heading = document.createElement("h3"); heading.textContent = label; history.append(heading);
+    const heading = document.createElement("h3"); heading.textContent = label; historyList.append(heading);
     for (const thread of threads) {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
@@ -588,17 +588,17 @@ function renderHistory() {
         closeHistoryMenus();
         await removeThread(thread);
       });
-      row.append(more, menu); history.append(row);
+      row.append(more, menu); historyList.append(row);
       if (!thread.owned && TangbaoAccount.account?.verified) {
         const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim history-claim-one"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
-        claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
+        claim.addEventListener("click", () => void claimThreads([thread])); historyList.append(claim);
       }
     }
     if (label === "账号对话" && ownedHasMore) {
       const more = document.createElement("button"); more.type = "button"; more.className = "history-claim history-claim-more";
       more.textContent = ownedLoading ? "正在加载…" : "加载更多账号对话"; more.disabled = ownedLoading;
       more.addEventListener("click", () => { void loadOwnedThreads(true).catch((err) => showSys(err.message)); });
-      history.append(more);
+      historyList.append(more);
     }
   }
 }
