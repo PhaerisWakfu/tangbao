@@ -447,7 +447,7 @@
         const info = document.createElement("button");
         info.type = "button";
         info.className = "account-action-info";
-        info.textContent = "?";
+        info.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9.3v4.4M10 6.6v.1"/></svg>';
         info.title = "查看" + (kind === "operator" ? "笼屉消息通知" : "糖包消息通知") + "开启说明";
         info.setAttribute("aria-label", info.title);
         info.addEventListener("click", (event) => {

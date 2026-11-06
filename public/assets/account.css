@@ -405,28 +405,35 @@ body[data-presence="asleep"] .account-error { color: #ffb3a8; }
   position: absolute;
   z-index: 2;
   top: 50%;
-  right: 30px;
+  right: 28px;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   transform: translateY(-50%);
-  border: 1px solid var(--line-2);
+  border: 0;
   border-radius: 50%;
-  background: var(--panel);
+  background: transparent;
   color: var(--faint);
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 500;
+  opacity: 0.78;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+}
+.account-action-info svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .account-action-info:hover {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--line-2));
-  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--accent);
+  opacity: 1;
 }
 .account-action-info:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
