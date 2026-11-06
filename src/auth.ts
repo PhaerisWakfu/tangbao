@@ -5,7 +5,7 @@ import {
 } from "./email";
 
 export { authNow, randomToken, sha256, encryptPayload, decryptPayload, processMailOutbox } from "./email";
-export type AuthEnv = MailEnv;
+export type AuthEnv = MailEnv & { ORIGIN_SECRET?: string };
 export type Account = { id: string; email: string; verified: boolean; status: string; roles: string[]; operatorId: string | null; home?: boolean };
 export class AuthError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -161,8 +161,15 @@ export async function consumeAuthRate(env: AuthEnv, id: string, limit: number, w
   if (result.meta.changes !== 1) throw new AuthError(429, "AUTH_RATE_LIMITED", "操作较频繁，请稍后再试。");
 }
 
+function clientIp(request: Request, env: AuthEnv): string {
+  const secret = env.ORIGIN_SECRET;
+  const realIp = request.headers.get("ali-real-client-ip");
+  if (secret && realIp && request.headers.get("x-origin-secret") === secret) return realIp;
+  return request.headers.get("CF-Connecting-IP") || "local";
+}
+
 async function requestRate(request: Request, env: AuthEnv, action: string, limit: number): Promise<void> {
-  const ip = await sha256(request.headers.get("CF-Connecting-IP") || "local");
+  const ip = await sha256(clientIp(request, env));
   await consumeAuthRate(env, `${action}:ip:${ip}`, limit, 3_600_000);
 }
 async function kdfRate(env: AuthEnv, email: string, amount = 1): Promise<void> {

@@ -35,6 +35,7 @@ type AppEnv = Env & AuthEnv & {
   TURSO_DATABASE_URL?: string;
   TURSO_AUTH_TOKEN?: string;
   ORIGIN_HOST?: string;
+  ORIGIN_SECRET?: string;
   MAINTENANCE?: string;
   MAIL_EVENTS_QUEUE?: string;
   MAIL_EVENTS_ACCOUNT_ID?: string;
@@ -979,7 +980,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   };
   const previous = await replay();
   if (previous) return previous;
-  const visitor = await visitorHash(request), ip = await clientHash(request);
+  const visitor = await visitorHash(request), ip = await clientHash(request, env);
   if (guest && visitor) {
     // Legacy history can only consume quota, never prove ownership or restore it.
     await env.DB.prepare("UPDATE guest_identities SET created_count=1 WHERE id=? AND created_count=0 AND EXISTS(SELECT 1 FROM threads WHERE visitor_hash=?)").bind(guest.id, visitor).run();
@@ -1163,7 +1164,7 @@ async function login(request: Request, env: AppEnv): Promise<Response> {
   const password = env.ADMIN_PASSWORD;
   const secret = env.ADMIN_SECRET;
   if (!password || !secret) throw new HttpError(500, "笼屉没盖盖子。");
-  const ip = await clientHash(request);
+  const ip = await clientHash(request, env);
   if (!(await allow(env, `login:${ip}`, 8, HOUR))) {
     throw new HttpError(429, "试得太勤了。笼屉暂时盖上了。");
   }
@@ -1515,7 +1516,7 @@ async function assignOperator(env: AppEnv, value: string, identities: Array<stri
 
 async function applyModel(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const account = await requireAccount(request, env);
-  const ip = await clientHash(request);
+  const ip = await clientHash(request, env);
   if (!(await allow(env, `apply:${ip}`, 5, HOUR))) throw new HttpError(429, "申请先歇一会儿。");
   if (await env.DB.prepare("SELECT id FROM operators WHERE owner_account_id=?").bind(account.id).first()) throw new AuthError(409, "MODEL_LIMIT", "当前账号已经有一个模型。");
   const payload = await readJson(request), suffix = modelSuffix(payload.suffix), blurb = blurbOf(payload.blurb);
@@ -2645,7 +2646,7 @@ async function attachIdentity(
   operatorId: string,
 ): Promise<{ blocked: boolean }> {
   const visitor = await visitorHash(request);
-  const ip = await clientHash(request);
+  const ip = await clientHash(request, env);
   const ids = [accountBlockKey(thread.account_id), thread.token_hash, thread.visitor_hash, ...(thread.account_id ? [] : [visitor])];
   const scope = await blockingScope(env, ids, operatorId, [thread.ip_hash, ip]);
   if (scope) {
@@ -2889,8 +2890,12 @@ function previewFrom(text: string): string {
   return chars.length > 80 ? `${chars.slice(0, 80).join("")}…` : one;
 }
 
-async function clientHash(request: Request): Promise<string> {
-  const ip = request.headers.get("CF-Connecting-IP") || "local";
+async function clientHash(request: Request, env: AppEnv): Promise<string> {
+  const secret = env.ORIGIN_SECRET;
+  const realIp = request.headers.get("ali-real-client-ip");
+  const ip = secret && realIp && request.headers.get("x-origin-secret") === secret
+    ? realIp
+    : request.headers.get("CF-Connecting-IP") || "local";
   return sha256(ip);
 }
 
