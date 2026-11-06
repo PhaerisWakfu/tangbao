@@ -408,22 +408,21 @@ body[data-presence="asleep"] .account-error { color: #ffb3a8; }
   right: 28px;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   transform: translateY(-50%);
   border: 0;
   border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  opacity: 0.86;
+  background: var(--hover);
+  color: var(--ink-2);
   line-height: 1;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, opacity 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
 .account-action-info svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.55;
@@ -431,9 +430,8 @@ body[data-presence="asleep"] .account-error { color: #ffb3a8; }
   stroke-linejoin: round;
 }
 .account-action-info:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--hover));
   color: var(--accent);
-  opacity: 1;
 }
 .account-action-info:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
