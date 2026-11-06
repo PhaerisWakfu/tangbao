@@ -1440,11 +1440,19 @@ log.addEventListener("click", async (event) => {
 });
 
 input.addEventListener("input", grow);
+let inputComposing = false;
+let inputCompositionEnded = 0;
+input.addEventListener("compositionstart", () => { inputComposing = true; });
+input.addEventListener("compositionend", () => {
+  inputComposing = false;
+  inputCompositionEnded = performance.now();
+});
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-    event.preventDefault();
-    composer.requestSubmit();
-  }
+  if (event.key !== "Enter" || event.shiftKey) return;
+  if (event.isComposing || inputComposing || event.keyCode === 229) return;
+  if (inputCompositionEnded && performance.now() - inputCompositionEnded < 80) return;
+  event.preventDefault();
+  composer.requestSubmit();
 });
 composer.addEventListener("submit", (event) => {
   event.preventDefault();

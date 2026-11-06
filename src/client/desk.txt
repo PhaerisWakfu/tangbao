@@ -1481,11 +1481,19 @@ $("#back-audit").addEventListener("click", () => {
   void loadAudit();
 });
 
+let answerComposing = false;
+let answerCompositionEnded = 0;
+answer.addEventListener("compositionstart", () => { answerComposing = true; });
+answer.addEventListener("compositionend", () => {
+  answerComposing = false;
+  answerCompositionEnded = performance.now();
+});
 answer.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
-    event.preventDefault();
-    reply.requestSubmit();
-  }
+  if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
+  if (event.isComposing || answerComposing || event.keyCode === 229) return;
+  if (answerCompositionEnded && performance.now() - answerCompositionEnded < 80) return;
+  event.preventDefault();
+  reply.requestSubmit();
 });
 
 reply.addEventListener("submit", async (event) => {
