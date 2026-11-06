@@ -160,6 +160,11 @@
           <p class="page-sub">改型号后面那截，前缀 tangbao- 是固定的。</p>
         </header>
         <form class="profile-form" id="profile-form">
+          <div class="profile-card-head">
+            <span class="profile-kicker">模型资料</span>
+            <h3>笼屉里的名片</h3>
+            <p>型号决定别人怎么找到你，简介是一句话的自我介绍。</p>
+          </div>
           <label class="field" for="profile-suffix">
             模型 ID
             <span class="profile-id">
@@ -174,7 +179,9 @@
           <p class="profile-hint">简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
           <p class="err" id="profile-err" role="alert"></p>
           <p class="profile-ok" id="profile-ok"></p>
-          <button class="primary" type="submit">保存</button>
+          <div class="profile-actions">
+            <button class="primary" type="submit">保存资料</button>
+          </div>
         </form>
       </div>
     </section>
