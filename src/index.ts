@@ -580,7 +580,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
                 : null;
   if (page && (method === "GET" || method === "HEAD")) {
     const response = new Response(method === "HEAD" ? null : page, {
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
     return method === "GET" && ["/chat", "/chat.html"].includes(path) ? withGuestCookie(request, env, response) : response;
   }

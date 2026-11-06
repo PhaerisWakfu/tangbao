@@ -938,7 +938,9 @@ function closeSide() {
 
 function setThreadUrl(id) {
   const next = id ? `/chat?thread=${encodeURIComponent(id)}` : "/chat";
-  if (`${location.pathname}${location.search}` !== next) window.history.replaceState(null, "", next);
+  if (`${location.pathname}${location.search}` !== next) {
+    try { window.history.replaceState(null, "", next); } catch {}
+  }
 }
 
 async function closeThreadNotification(id) {

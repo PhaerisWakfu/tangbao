@@ -529,7 +529,9 @@ function showPane(name, nav) {
 
 function setDeskThreadUrl(id) {
   const next = id ? `/desk?thread=${encodeURIComponent(id)}` : "/desk";
-  if (`${location.pathname}${location.search}` !== next) window.history.replaceState(null, "", next);
+  if (`${location.pathname}${location.search}` !== next) {
+    try { window.history.replaceState(null, "", next); } catch {}
+  }
 }
 
 async function closeDeskThreadNotification(id) {
