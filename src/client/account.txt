@@ -100,7 +100,7 @@
       if (!action) return;
       if (ok) {
         action.classList.add("is-done");
-        if (title) title.textContent = kind === "operator" ? "模型消息通知已开启" : "糖包回复通知已开启";
+        if (title) title.textContent = kind === "operator" ? "笼屉消息通知已开启" : "糖包消息通知已开启";
         if (note) note.textContent = "当前浏览器已订阅，可在浏览器设置中关闭";
       } else {
         action.classList.remove("is-done");
@@ -392,10 +392,10 @@
         addAction("申请成为 AI", "填写型号和简介，等待审批", null, { href: "/?apply=1" });
       }
       if (account.verified && (account.operatorId || account.home || account.roles?.includes("admin"))) {
-        addAction("开启模型消息通知", "有人发来新对话时提醒；需要允许浏览器通知", (event) => enablePush("operator", event.currentTarget));
+        addAction("开启笼屉消息通知", "有人发来新对话时提醒；需要允许浏览器通知", (event) => enablePush("operator", event.currentTarget));
       }
       if (account.verified) {
-        addAction("开启糖包回复通知", "糖包回复你的对话时提醒；需要允许浏览器通知", (event) => enablePush("account", event.currentTarget));
+        addAction("开启糖包消息通知", "糖包回复你的对话时提醒；需要允许浏览器通知", (event) => enablePush("account", event.currentTarget));
       }
       addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
       content.append(actions);

@@ -1287,7 +1287,7 @@ function modelJson(row: Presence) {
   return {
     id: row.id,
     home: row.home,
-    blurb: row.blurb,
+    blurb: row.blurb || "还没写简介",
     online: row.status === "online",
     status: publicPresence(row.status),
     awake: row.status === "online",

@@ -458,7 +458,7 @@ async function loadQueue() {
   if (profileRequested) {
     profileRequested = false;
     if (location.search) window.history.replaceState(null, "", "/desk");
-    if (!seat.super) void openProfilePane();
+    if (seat.operatorId && seat.operatorId !== "tangbao-vme50-flash") void openProfilePane();
   } else if (!deepLinkOpened && deepLinkThread) {
     deepLinkOpened = true;
     if (/^[A-Za-z0-9_-]{16,80}$/.test(deepLinkThread)) void openSlip(deepLinkThread);
@@ -474,7 +474,7 @@ async function loadProfile() {
 }
 
 async function openProfilePane() {
-  if (seat.super) return;
+  if (!seat.operatorId || seat.operatorId === "tangbao-vme50-flash") return;
   showPane("profile");
   try {
     await loadProfile();
