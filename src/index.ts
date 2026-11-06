@@ -1614,7 +1614,7 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
   const page = Math.min(asked, pages);
   const rows = await env.DB.prepare(
-    `SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt
+    `SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt, account_id AS accountId
      FROM applications
      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC
      LIMIT ? OFFSET ?`,
@@ -1628,6 +1628,7 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
       status: string;
       reason: string | null;
       createdAt: number;
+      accountId: string | null;
     }>();
   return json({
     applications: rows.results,
