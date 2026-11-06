@@ -1740,15 +1740,20 @@ void (async () => {
 })();
 
 const sketch = $("#sketch");
+const sketchViewport = $("#sketch-viewport");
 const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
 let strokes = [];
 let redoStrokes = [];
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
 let erasing = false;
+let panning = false;
+let panStart = null;
+let zoom = 1;
 let padSize = { w: 1, h: 1, dpr: 1 };
 
 function preparePad() {
@@ -1758,10 +1763,47 @@ function preparePad() {
   padSize = { w: width, h: height, dpr };
   pad.width = Math.round(width * dpr);
   pad.height = Math.round(height * dpr);
+  applyZoomSize();
   pen.setTransform(dpr, 0, 0, dpr, 0, 0);
   pen.lineCap = "round";
   pen.lineJoin = "round";
   redrawPad();
+}
+
+function applyZoomSize() {
+  pad.style.width = `${padSize.w * zoom}px`;
+  pad.style.height = `${padSize.h * zoom}px`;
+  updateZoomControls();
+}
+
+function updateZoomControls() {
+  const percent = `${Math.round(zoom * 100)}%`;
+  $("#sketch-zoom-reset").textContent = percent;
+  $("#sketch-zoom-reset").setAttribute("aria-label", `当前缩放 ${percent}，点击恢复 100%`);
+  $("#sketch-zoom-out").disabled = zoom <= ZOOM_STEPS[0];
+  $("#sketch-zoom-in").disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+}
+
+function applyZoom(next, anchorX, anchorY) {
+  if (currentStroke) return;
+  const target = Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], next));
+  if (Math.abs(target - zoom) < 0.001) return;
+  const oldWidth = padSize.w * zoom;
+  const oldHeight = padSize.h * zoom;
+  const viewX = anchorX ?? sketchViewport.clientWidth / 2;
+  const viewY = anchorY ?? sketchViewport.clientHeight / 2;
+  const worldX = ((sketchViewport.scrollLeft + viewX) / oldWidth) * padSize.w;
+  const worldY = ((sketchViewport.scrollTop + viewY) / oldHeight) * padSize.h;
+  zoom = target;
+  applyZoomSize();
+  sketchViewport.scrollLeft = (worldX / padSize.w) * padSize.w * zoom - viewX;
+  sketchViewport.scrollTop = (worldY / padSize.h) * padSize.h * zoom - viewY;
+}
+
+function zoomStep(direction) {
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + direction))];
+  applyZoom(next);
 }
 
 function redrawPad() {
@@ -1808,14 +1850,30 @@ function padPoint(event) {
 
 function setPenMode() {
   erasing = false;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging");
   $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "true");
 }
 
 function setEraserMode() {
   erasing = true;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging");
   $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "false");
+}
+
+function setPanMode() {
+  erasing = false;
+  panning = true;
+  currentStroke = null;
+  sketchViewport.classList.add("panning");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "true");
 }
 
 function openSketch() {
@@ -1823,10 +1881,13 @@ function openSketch() {
   strokes = [];
   redoStrokes = [];
   currentStroke = null;
+  zoom = 1;
   setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
   sketch.hidden = false;
+  sketchViewport.scrollLeft = 0;
+  sketchViewport.scrollTop = 0;
   requestAnimationFrame(preparePad);
 }
 
@@ -1838,6 +1899,16 @@ pad.addEventListener("pointerdown", (event) => {
   if (sketch.hidden) return;
   $("#sketch-err").textContent = "";
   pad.setPointerCapture(event.pointerId);
+  if (panning) {
+    panStart = {
+      x: event.clientX,
+      y: event.clientY,
+      left: sketchViewport.scrollLeft,
+      top: sketchViewport.scrollTop,
+    };
+    sketchViewport.classList.add("dragging");
+    return;
+  }
   currentStroke = {
     color: erasing ? PAPER : penColor,
     size: erasing ? Math.max(penSize * 4, 16) : penSize,
@@ -1846,13 +1917,24 @@ pad.addEventListener("pointerdown", (event) => {
   redrawPad();
 });
 pad.addEventListener("pointermove", (event) => {
-  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  if (!pad.hasPointerCapture(event.pointerId)) return;
+  if (panning && panStart) {
+    sketchViewport.scrollLeft = panStart.left - (event.clientX - panStart.x);
+    sketchViewport.scrollTop = panStart.top - (event.clientY - panStart.y);
+    return;
+  }
+  if (!currentStroke) return;
   currentStroke.points.push(padPoint(event));
   redrawPad();
 });
 function endStroke(event) {
-  if (!currentStroke) return;
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
+  if (panning) {
+    panStart = null;
+    sketchViewport.classList.remove("dragging");
+    return;
+  }
+  if (!currentStroke) return;
   if (currentStroke.points.length) strokes.push(currentStroke);
   currentStroke = null;
   redoStrokes = [];
@@ -1884,6 +1966,19 @@ $("#sketch-color").addEventListener("input", (event) => {
 });
 $("#sketch-pen").addEventListener("click", setPenMode);
 $("#sketch-erase").addEventListener("click", setEraserMode);
+$("#sketch-pan").addEventListener("click", setPanMode);
+$("#sketch-zoom-out").addEventListener("click", () => zoomStep(-1));
+$("#sketch-zoom-in").addEventListener("click", () => zoomStep(1));
+$("#sketch-zoom-reset").addEventListener("click", () => applyZoom(1));
+sketchViewport.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  if (currentStroke) return;
+  const rect = sketchViewport.getBoundingClientRect();
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + (event.deltaY < 0 ? 1 : -1)))];
+  applyZoom(next, event.clientX - rect.left, event.clientY - rect.top);
+}, { passive: false });
 function undoSketch() {
   const stroke = strokes.pop();
   if (!stroke) return;
