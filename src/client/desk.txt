@@ -623,8 +623,8 @@ function arm() {
   }, wait);
 }
 
-async function tick() {
-  if (document.hidden) return;
+async function tick(force = false) {
+  if (document.hidden && !force) return;
   const account = TangbaoAccount.account;
   if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
   try {
@@ -792,7 +792,7 @@ async function syncDeskAccount() {
   $("#desk-claim").hidden = Boolean(account?.operatorId || account?.roles?.includes("admin"));
   if (account?.verified && (account.operatorId || account.roles?.includes("admin"))) {
     note.textContent = "正在进入笼屉…";
-    await tick();
+    await tick(true);
     if (desk.hidden) {
       gateCard.classList.remove("is-booting");
       gateCard.setAttribute("aria-busy", "false");
@@ -1986,15 +1986,21 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (desk.hidden) return;
   if (document.hidden) {
+    if (desk.hidden) return;
     clearTimeout(timer);
     stopPresenceHeartbeat(true, false, HIDDEN_GRACE);
-  } else {
-    presenceWarmup = false;
-    startPresenceHeartbeat();
-    void tick();
+    return;
   }
+  // 手机从后台打开链接时，首次 sync 可能因为 document.hidden 提前返回。
+  // 回到前台后如果笼屉还没显示，重新走一次入口同步。
+  if (desk.hidden) {
+    void syncDeskAccount();
+    return;
+  }
+  presenceWarmup = false;
+  startPresenceHeartbeat();
+  void tick();
 });
 window.addEventListener("pagehide", () => stopPresenceHeartbeat(true, true));
 

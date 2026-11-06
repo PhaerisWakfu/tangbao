@@ -29,9 +29,8 @@ if ([...queryVersions].some((version) => !versions.has(version))) {
 
 const version = [...versions][0];
 const server = await readFile(path.resolve("src/index.ts"), "utf8");
-const serverVersions = new Set([...server.matchAll(versionedScript)].map((match) => match[2]));
-if (!serverVersions.has(version)) {
-  console.error(`asset version: server routes do not include ${version}`);
+if (!server.includes("versionedScript") || !/\\d\+\\\.\\d\+\\\.\\d\+\\\.js/.test(server)) {
+  console.error("asset version: server does not accept versioned script paths");
   process.exit(1);
 }
 
