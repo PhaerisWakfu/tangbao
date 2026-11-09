@@ -64,7 +64,7 @@
 ## 键盘和可访问性
 
 - 保留 `:focus-visible`。输入框移除默认 outline 时必须有同等可辨识的替代焦点样式。
-- 聊天 Enter 发送、Shift+Enter 换行；后台 Ctrl/Cmd+Enter 提交；始终检查 `event.isComposing`，不打断中文输入法。
+- 聊天桌面端 Enter 发送、Shift+Enter 换行；触屏设备软键盘 Enter 只换行，发送用发送按钮；后台 Ctrl/Cmd+Enter 提交；始终检查 `event.isComposing`，不打断中文输入法。
 - 弹层设置 dialog 语义、标题和 `aria-modal`；打开时移动焦点，Tab 限定在弹层，背景 inert，关闭后恢复触发点。Escape 只关闭最上层。
 - 状态更新使用适度的 `role="status"` / `aria-live="polite"`，错误用 `role="alert"`；不要整页反复播报历史消息。
 - 展开控件同步 `aria-expanded`、禁用同步原生 disabled 或语义。兼顾 `prefers-reduced-motion`。

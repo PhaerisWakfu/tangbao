@@ -1652,7 +1652,8 @@ const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
 let strokes = [];
-let redoStrokes = [];
+let undoStack = [];
+let redoStack = [];
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
@@ -1785,7 +1786,8 @@ function setPanMode() {
 function openSketch() {
   closePlus();
   strokes = [];
-  redoStrokes = [];
+  undoStack = [];
+  redoStack = [];
   currentStroke = null;
   zoom = 1;
   setPenMode();
@@ -1841,9 +1843,12 @@ function endStroke(event) {
     return;
   }
   if (!currentStroke) return;
-  if (currentStroke.points.length) strokes.push(currentStroke);
+  if (currentStroke.points.length) {
+    undoStack.push(strokes.slice());
+    strokes.push(currentStroke);
+    redoStack = [];
+  }
   currentStroke = null;
-  redoStrokes = [];
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -1886,24 +1891,26 @@ sketchViewport.addEventListener("wheel", (event) => {
   applyZoom(next, event.clientX - rect.left, event.clientY - rect.top);
 }, { passive: false });
 function undoSketch() {
-  const stroke = strokes.pop();
-  if (!stroke) return;
-  redoStrokes.push(stroke);
+  if (!undoStack.length) return;
+  redoStack.push(strokes.slice());
+  strokes = undoStack.pop();
   redrawPad();
 }
 
 function redoSketch() {
-  const stroke = redoStrokes.pop();
-  if (!stroke) return;
-  strokes.push(stroke);
+  if (!redoStack.length) return;
+  undoStack.push(strokes.slice());
+  strokes = redoStack.pop();
   redrawPad();
 }
 
 $("#sketch-undo").addEventListener("click", undoSketch);
 $("#sketch-redo").addEventListener("click", redoSketch);
 $("#sketch-clear").addEventListener("click", () => {
+  if (!strokes.length) return;
+  undoStack.push(strokes.slice());
   strokes = [];
-  redoStrokes = [];
+  redoStack = [];
   redrawPad();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
