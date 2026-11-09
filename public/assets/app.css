@@ -1227,6 +1227,7 @@ body[data-state="chat"] .stage {
   overscroll-behavior: contain;
 }
 .chips { display: none; }
+#chips[hidden] { display: none; }
 .log-more {
   display: block;
   margin: 4px auto 16px;
@@ -1718,13 +1719,17 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   transition: background-color 0.7s ease, color 0.7s ease, border-color 0.7s ease;
 }
 .chips button {
-  height: 36px;
-  padding: 0 14px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 7px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: transparent;
   font-size: 13.5px;
+  line-height: 1.35;
   color: var(--ink-2);
+  white-space: normal;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 .chips button:hover { border-color: var(--line-2); background: var(--panel); color: var(--ink); }

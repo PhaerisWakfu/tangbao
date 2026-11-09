@@ -25,8 +25,53 @@ const profileForm = $("#profile-form");
 let profileRequested = new URLSearchParams(location.search).get("profile") === "1";
 const profileSuffix = $("#profile-suffix");
 const profileBlurb = $("#profile-blurb");
+const openingList = $("#opening-list");
+const openingAdd = $("#opening-add");
 const profileErr = $("#profile-err");
 const profileOk = $("#profile-ok");
+
+function openingFields() {
+  return [...openingList.querySelectorAll("input")];
+}
+
+function syncOpeningAdd() {
+  const full = openingFields().length >= 4;
+  openingAdd.disabled = full;
+  openingAdd.title = full ? "最多四条开场问题" : "";
+}
+
+function addOpeningRow(value = "", focus = false) {
+  if (openingFields().length >= 4) return;
+  const row = document.createElement("div");
+  row.className = "opening-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 20;
+  input.autocomplete = "off";
+  input.placeholder = "二十个字以内";
+  input.value = value;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "opening-remove";
+  remove.setAttribute("aria-label", "删除这条开场问题");
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    row.remove();
+    syncOpeningAdd();
+  });
+  row.append(input, remove);
+  openingList.append(row);
+  syncOpeningAdd();
+  if (focus) input.focus();
+}
+
+function paintOpeningRows(values = []) {
+  openingList.replaceChildren();
+  values.slice(0, 4).forEach((value) => addOpeningRow(value));
+  syncOpeningAdd();
+}
+
+openingAdd.addEventListener("click", () => addOpeningRow("", true));
 
 let waiting = 0;
 let unread = 0;
@@ -471,6 +516,8 @@ async function loadProfile() {
   const data = await api("/api/admin/profile");
   profileSuffix.value = data.suffix || "";
   profileBlurb.value = data.blurb || "";
+  const openings = Array.isArray(data.openingQuestions) ? data.openingQuestions : [];
+  paintOpeningRows(openings);
 }
 
 async function openProfilePane() {
@@ -493,12 +540,17 @@ async function saveProfile(event) {
     const oldId = seat.operatorId;
     const data = await api("/api/admin/profile", {
       method: "POST",
-      body: { suffix: profileSuffix.value.trim(), blurb: profileBlurb.value.trim() },
+      body: {
+        suffix: profileSuffix.value.trim(),
+        blurb: profileBlurb.value.trim(),
+        openingQuestions: openingFields().map((field) => field.value.trim()).filter(Boolean),
+      },
     });
     seat.operatorId = data.id;
     profileSuffix.value = data.suffix;
     profileBlurb.value = data.blurb;
-    profileOk.textContent = data.id === oldId ? "简介换好了。" : "型号换好了。旧对话都还在。";
+    paintOpeningRows(Array.isArray(data.openingQuestions) ? data.openingQuestions : []);
+    profileOk.textContent = data.id === oldId ? "资料换好了。" : "型号换好了。旧对话都还在。";
     if (data.id !== oldId) {
       selected = null;
       shown = "";
@@ -771,7 +823,7 @@ function resetDeskView() {
   reply.hidden = true; answer.value = "";
   for (const image of pendingImages) URL.revokeObjectURL(image.url);
   pendingImages = []; showAttach();
-  $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
+  $("#profile-suffix").value = ""; $("#profile-blurb").value = ""; paintOpeningRows([]);
   $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
   closeSlipMenus(); closeDeskRename();
   showPane("thread"); showDesk(false);

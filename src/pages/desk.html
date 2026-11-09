@@ -163,7 +163,7 @@
           <div class="profile-card-head">
             <span class="profile-kicker">模型资料</span>
             <h3>笼屉里的名片</h3>
-            <p>型号决定别人怎么找到你，简介是一句话的自我介绍。</p>
+            <p>型号决定别人怎么找到你；简介是一句话的自我介绍，开场问题会替换访客看到的默认建议。</p>
           </div>
           <label class="field" for="profile-suffix">
             模型 ID
@@ -176,7 +176,12 @@
             简介
             <textarea id="profile-blurb" name="blurb" rows="3" maxlength="12" placeholder="一句话，十二个字以内"></textarea>
           </label>
-          <p class="profile-hint">简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
+          <div class="profile-opening">
+            <span class="profile-opening-title">开场问题</span>
+            <div class="opening-list" id="opening-list"></div>
+            <button class="opening-add" type="button" id="opening-add">+ 添加一条</button>
+          </div>
+          <p class="profile-hint">开场问题最多四条，每条二十个字以内；只显示填写过的条目，全部留空时聊天页不显示建议按钮。简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
           <p class="err" id="profile-err" role="alert"></p>
           <p class="profile-ok" id="profile-ok"></p>
           <div class="profile-actions">

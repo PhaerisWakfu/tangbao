@@ -1486,17 +1486,41 @@ $("#pick-image").addEventListener("click", () => {
   closePlus();
   $("#file").click();
 });
-const ASK_CHIPS = ["How are you", "哈基米", "咕咕", "锟斤拷"];
 const DRAW_CHIPS = ["画一只猫", "画一只兔子", "画一朵花", "画一轮月亮"];
+
+function openingQuestionsForActiveModel() {
+  const id = activeModel();
+  if (!id) return [];
+  const model = models.find((item) => item.id === id);
+  if (!Array.isArray(model?.openingQuestions)) return [];
+  return model.openingQuestions.filter((question) => typeof question === "string" && question.trim()).slice(0, 4);
+}
+
+function paintChips() {
+  const labels = making ? DRAW_CHIPS : openingQuestionsForActiveModel();
+  const box = $("#chips");
+  const current = [...box.querySelectorAll("button")].map((button) => button.textContent || "");
+  if (!labels.length) {
+    box.hidden = true;
+    if (current.length) box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  if (current.length === labels.length && current.every((label, index) => label === labels[index])) return;
+  box.replaceChildren();
+  for (const label of labels) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    box.append(button);
+  }
+}
 
 function setMaking(on) {
   making = on;
   $("#make").hidden = !on;
   input.placeholder = on ? "描述要画的东西" : "给糖包发消息";
-  const labels = on ? DRAW_CHIPS : ASK_CHIPS;
-  [...$("#chips").querySelectorAll("button")].forEach((button, index) => {
-    button.textContent = labels[index] || "";
-  });
+  paintChips();
   grow();
   if (on) input.focus();
 }
@@ -1621,6 +1645,7 @@ function paintModels() {
     more.addEventListener("click", () => void loadMoreModels());
     list.append(more);
   }
+  paintChips();
   if (!current) applyModelStatus();
 }
 

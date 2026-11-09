@@ -53,6 +53,7 @@ type PresenceRow = {
   id: string;
   active: number;
   blurb: string | null;
+  opening_questions: string | null;
   last_seen_at: number;
   last_reply_at: number;
   last_assigned_at: number;
@@ -65,6 +66,7 @@ type Presence = {
   id: string;
   active: number;
   blurb: string;
+  openingQuestions: string[];
   lastSeenAt: number;
   lastReplyAt: number;
   lastAssignedAt: number;
@@ -712,6 +714,7 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
     id: HOME_MODEL,
     active: 1,
     blurb: HOME_BLURB,
+    openingQuestions: [],
     lastSeenAt,
     lastReplyAt,
     lastAssignedAt,
@@ -728,7 +731,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
   const [home, rows] = await Promise.all([
     homePresence(env, now),
     env.DB.prepare(
-      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -751,6 +754,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
       id: row.id,
       active: row.active,
       blurb: row.blurb || "",
+      openingQuestions: parseOpeningQuestions(row.opening_questions),
       lastSeenAt: Number(row.last_seen_at) || 0,
       lastReplyAt: Number(row.last_reply_at) || 0,
       lastAssignedAt: Number(row.last_assigned_at) || 0,
@@ -772,6 +776,7 @@ function presenceFromRow(row: PresenceRow, now: number): Presence {
     id: row.id,
     active: row.active,
     blurb: row.blurb || "",
+    openingQuestions: parseOpeningQuestions(row.opening_questions),
     lastSeenAt: Number(row.last_seen_at) || 0,
     lastReplyAt: Number(row.last_reply_at) || 0,
     lastAssignedAt: Number(row.last_assigned_at) || 0,
@@ -788,7 +793,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
   if (operatorId === HOME_MODEL) return homePresence(env, now);
   const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   const row = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
        (SELECT COUNT(*) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
@@ -811,6 +816,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
       id: operatorId,
       active: 0,
       blurb: "",
+      openingQuestions: [],
       lastSeenAt: 0,
       lastReplyAt: 0,
       lastAssignedAt: 0,
@@ -1199,16 +1205,17 @@ function logout(request: Request): Response {
 
 async function readProfile(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (seat.super && !seat.operatorId) return json({ super: true, operatorId: null, id: null, needsModel: true });
-  if (seat.super && seat.operatorId === HOME_MODEL) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL });
-  const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
+  if (seat.super && !seat.operatorId) return json({ super: true, operatorId: null, id: null, needsModel: true, openingQuestions: [] });
+  if (seat.super && seat.operatorId === HOME_MODEL) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL, openingQuestions: [] });
+  const row = await env.DB.prepare("SELECT id, blurb, opening_questions FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
     .bind(seat.operatorUid, seat.accountId)
-    .first<{ id: string; blurb: string | null }>();
+    .first<{ id: string; blurb: string | null; opening_questions: string | null }>();
   if (!row) throw new HttpError(404, "这个型号不在了。");
   return json({
     id: row.id,
     suffix: row.id.startsWith("tangbao-") ? row.id.slice("tangbao-".length) : row.id,
     blurb: row.blurb || "",
+    openingQuestions: parseOpeningQuestions(row.opening_questions),
   });
 }
 
@@ -1264,13 +1271,14 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
   if (suffix === "vme50-flash" || suffix === "pool") throw new HttpError(400, "这个型号留给自己用。");
   const blurb = blurbOf(payload.blurb);
+  const openingQuestions = openingQuestionsOf(payload.openingQuestions);
   const oldId = seat.operatorId;
   const newId = `tangbao-${suffix}`;
   if (newId === oldId) {
-    const result = await env.DB.prepare("UPDATE operators SET blurb = ? WHERE id = ? AND operator_uid = ? AND owner_account_id = ? AND active = 1 AND EXISTS(SELECT 1 FROM accounts WHERE id = ? AND status = 'active' AND verified_at > 0)")
-      .bind(blurb, oldId, seat.operatorUid, seat.accountId, seat.accountId).run();
+    const result = await env.DB.prepare("UPDATE operators SET blurb = ?, opening_questions = ? WHERE id = ? AND operator_uid = ? AND owner_account_id = ? AND active = 1 AND EXISTS(SELECT 1 FROM accounts WHERE id = ? AND status = 'active' AND verified_at > 0)")
+      .bind(blurb, JSON.stringify(openingQuestions), oldId, seat.operatorUid, seat.accountId, seat.accountId).run();
     if (!result.meta.changes) throw new AuthError(409, "MODEL_CHANGED", "模型资料刚刚发生变化，请刷新后重试。");
-    return json({ ok: true, id: oldId, suffix, blurb });
+    return json({ ok: true, id: oldId, suffix, blurb, openingQuestions });
   }
   const conflict = await env.DB.prepare(
     `SELECT 1 AS hit FROM operators WHERE id = ?
@@ -1292,12 +1300,12 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
       env.DB.prepare(`UPDATE push_subscriptions SET operator_id = ? WHERE operator_id = ? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
       env.DB.prepare(`INSERT OR IGNORE INTO blocks(id,operator_id,created_at) SELECT id,?,created_at FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
       env.DB.prepare(`DELETE FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(oldId, ...guard.values),
-      env.DB.prepare(`UPDATE operators SET id = ?, blurb = ? WHERE id = ? AND ${guard.sql}`)
-        .bind(newId, blurb, oldId, ...guard.values),
+      env.DB.prepare(`UPDATE operators SET id = ?, blurb = ?, opening_questions = ? WHERE id = ? AND ${guard.sql}`)
+        .bind(newId, blurb, JSON.stringify(openingQuestions), oldId, ...guard.values),
     ]);
   } catch { throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。"); }
   if (!results[results.length - 1].meta.changes) throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。");
-  return json({ ok: true, id: newId, suffix, blurb });
+  return json({ ok: true, id: newId, suffix, blurb, openingQuestions });
 }
 
 function modelJson(row: Presence) {
@@ -1305,6 +1313,7 @@ function modelJson(row: Presence) {
     id: row.id,
     home: row.home,
     blurb: row.blurb || "还没写简介",
+    openingQuestions: row.openingQuestions,
     online: row.status === "online",
     status: publicPresence(row.status),
     awake: row.status === "online",
@@ -1326,7 +1335,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
   if (!browse) {
     const home = await homePresence(env, now);
     const rows = await env.DB.prepare(
-      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -1367,7 +1376,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     bindings.push(like, like);
   }
   const rows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -1409,7 +1418,7 @@ async function listModelStatuses(env: AppEnv, url: URL): Promise<Response> {
     ids.includes(HOME_MODEL) ? homePresence(env, now) : Promise.resolve(null),
     operatorIds.length
       ? env.DB.prepare(
-        `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+        `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
           (SELECT COUNT(*) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS pending,
           (SELECT MIN(t.updated_at) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS oldest_pending_at
          FROM operators o WHERE o.id IN (${operatorIds.map(() => "?").join(",")})`,
@@ -1430,6 +1439,7 @@ function modelStatusJson(row: Presence) {
     accepting: row.accepting === 1,
     pending: row.pending,
     lastSeenAt: row.lastSeenAt,
+    openingQuestions: row.openingQuestions,
   };
 }
 
@@ -1452,6 +1462,34 @@ function blurbOf(value: unknown): string {
   if (!text) return "";
   if ([...text].length > 12) throw new HttpError(400, "模型说明太长了。十二个字以内。");
   return text;
+}
+
+function parseOpeningQuestions(value: string | null): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+function openingQuestionsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const questions: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const text = maskAbuse(sanitize(item)).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    if ([...text].length > 20) throw new HttpError(400, "每条开场问题最多二十个字。");
+    questions.push(text);
+    if (questions.length > 4) throw new HttpError(400, "最多设置四个开场问题。");
+  }
+  return questions;
 }
 
 function reasonOf(value: unknown): string {
@@ -1759,7 +1797,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operatorPages = Math.max(1, Math.ceil(operatorTotal / AUDIT_MODEL_PAGE_SIZE));
   const operatorPage = Math.min(operatorPageRequested, operatorPages);
   const operatorRows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -2801,7 +2839,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown; graceMs?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; openingQuestions?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown; graceMs?: unknown }> {
   const declared = Number(request.headers.get("content-length") || "0");
   if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
   const text = await request.text();
@@ -2820,6 +2858,7 @@ async function readJson(
       email?: unknown;
       reason?: unknown;
       blurb?: unknown;
+      openingQuestions?: unknown;
       endpoint?: unknown;
       keys?: unknown;
     };
