@@ -78,6 +78,8 @@ type Presence = {
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const NEW_THREADS_PER_IP_HOUR = 16;
+const MESSAGES_PER_THREAD_HOUR = 60;
 
 function localHost(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
@@ -999,7 +1001,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   const identities = [visitor, accountBlockKey(account?.id)];
   if (await isBlocked(env, identities, undefined, [ip])) throw new HttpError(403, BLOCKED);
-  if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
+  if (!(await allow(env, `thread:${ip}`, NEW_THREADS_PER_IP_HOUR, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
   if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
   await assertModelQueue(env, assignment.id);
@@ -1138,8 +1140,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   const thread = await loadOwned(env, id, token, request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
-  if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
-    throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
+  if (!(await allow(env, `msg:${thread.token_hash}`, MESSAGES_PER_THREAD_HOUR, HOUR))) {
+    throw new HttpError(429, "这一小时已经说得够多了。让他的手指歇一会儿。");
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   if (thread.operator_id !== HOME_MODEL && thread.queued !== 1) {

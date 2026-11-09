@@ -43,7 +43,7 @@
 
 无痕窗口不能作为可靠的永久设备身份。Chrome 在所有无痕窗口关闭后会清除该会话的 cookie 和站点数据；普通网页没有可静默读取、跨浏览器且不可重置的物理设备编号。浏览器指纹仅能作风险信号，浏览器也会限制可用于指纹识别的信息，不能据此执行严格“每台设备终身一次”的额度。
 
-Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterprise Bot Management 加相应附加服务），现有 Workers Paid 不代表已具备该功能。官方明确说明不同设备可能得到相同 ID，建议用于识别高频滥用而非唯一识别单台设备。因此不为一次匿名额度引入该服务，也不新增指纹采集或修改匿名门槛。当前新建对话还受服务端每 IP 每小时 8 次的创建限流；该限制不能等同于设备或个人额度，换网络仍可能绕过。
+Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterprise Bot Management 加相应附加服务），现有 Workers Paid 不代表已具备该功能。官方明确说明不同设备可能得到相同 ID，建议用于识别高频滥用而非唯一识别单台设备。因此不为一次匿名额度引入该服务，也不新增指纹采集或修改匿名门槛。当前新建对话还受服务端每 IP 每小时 16 次的创建限流；同一对话的访客消息另有每小时 60 条的限流。这两项限制不能等同于设备或个人额度，换网络仍可能绕过。
 
 能力边界核对于 2026-11-03：[Chrome 无痕会话](https://support.google.com/chrome/answer/95464?hl=en)、[MDN 浏览器指纹](https://developer.mozilla.org/en-US/docs/Glossary/Fingerprinting)、[Cloudflare Ephemeral IDs 限制](https://developers.cloudflare.com/turnstile/tutorials/fraud-detection-with-ephemeral-ids/)、[Turnstile 套餐](https://developers.cloudflare.com/turnstile/plans/)。第二段要求邮箱验证账号，不称为实名验证；若将来要求更严格的额度，需要另行确定账号门槛及滥用治理方案。
 
