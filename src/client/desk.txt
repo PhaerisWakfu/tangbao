@@ -1702,18 +1702,21 @@ const sketchViewport = $("#sketch-viewport");
 const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
+const FILL_TOLERANCE = 48;
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
-let strokes = [];
-let undoStack = [];
-let redoStack = [];
+let actions = [];
+let cursor = 0;
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
 let erasing = false;
+let filling = false;
 let panning = false;
 let panStart = null;
 let zoom = 1;
 let padSize = { w: 1, h: 1, dpr: 1 };
+const baseCanvas = document.createElement("canvas");
+const basePen = baseCanvas.getContext("2d");
 
 function preparePad() {
   const width = Math.min(720, window.innerWidth - 64);
@@ -1722,11 +1725,17 @@ function preparePad() {
   padSize = { w: width, h: height, dpr };
   pad.width = Math.round(width * dpr);
   pad.height = Math.round(height * dpr);
+  baseCanvas.width = pad.width;
+  baseCanvas.height = pad.height;
   applyZoomSize();
   pen.setTransform(dpr, 0, 0, dpr, 0, 0);
   pen.lineCap = "round";
   pen.lineJoin = "round";
-  redrawPad();
+  basePen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  basePen.lineCap = "round";
+  basePen.lineJoin = "round";
+  renderBase();
+  paint();
 }
 
 function applyZoomSize() {
@@ -1765,38 +1774,141 @@ function zoomStep(direction) {
   applyZoom(next);
 }
 
-function redrawPad() {
-  pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
-  pen.fillStyle = PAPER;
-  pen.fillRect(0, 0, padSize.w, padSize.h);
-  pen.lineCap = "round";
-  pen.lineJoin = "round";
-  for (const stroke of strokes) paintStroke(stroke);
-  if (currentStroke) paintStroke(currentStroke);
+function paintPaper(ctx) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
 }
 
-function paintStroke(stroke) {
+function renderBase() {
+  paintPaper(basePen);
+  for (let i = 0; i < cursor; i += 1) {
+    const action = actions[i];
+    if (action.type === "stroke") paintStroke(basePen, action.stroke);
+    else if (action.type === "fill") applyFill(basePen, action);
+    else if (action.type === "clear") paintPaper(basePen);
+  }
+}
+
+function paint() {
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.clearRect(0, 0, pad.width, pad.height);
+  pen.drawImage(baseCanvas, 0, 0);
+  pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  pen.lineCap = "round";
+  pen.lineJoin = "round";
+  if (currentStroke) paintStroke(pen, currentStroke);
+}
+
+function commit(action) {
+  actions.length = cursor;
+  actions.push(action);
+  cursor = actions.length;
+}
+
+function paintStroke(ctx, stroke) {
   if (!stroke.points.length) return;
-  pen.strokeStyle = stroke.color;
-  pen.fillStyle = stroke.color;
-  pen.lineWidth = stroke.size;
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
+  ctx.lineWidth = stroke.size;
   const first = stroke.points[0];
   if (stroke.points.length === 1) {
-    pen.beginPath();
-    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
-    pen.fill();
+    ctx.beginPath();
+    ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    ctx.fill();
     return;
   }
-  pen.beginPath();
-  pen.moveTo(first.x, first.y);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
   for (let i = 1; i < stroke.points.length - 1; i += 1) {
     const point = stroke.points[i];
     const next = stroke.points[i + 1];
-    pen.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+    ctx.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
   }
   const last = stroke.points[stroke.points.length - 1];
-  pen.lineTo(last.x, last.y);
-  pen.stroke();
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+}
+
+function rgbOf(hex) {
+  const value = String(hex).replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return [31, 29, 26];
+  return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
+}
+
+function floodFill(ctx, seedX, seedY, color, tolerance) {
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return false;
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+  const seed = (seedY * width + seedX) * 4;
+  const sr = data[seed];
+  const sg = data[seed + 1];
+  const sb = data[seed + 2];
+  const [fr, fg, fb] = rgbOf(color);
+  if (sr === fr && sg === fg && sb === fb) return false;
+  const matches = (index) => Math.max(Math.abs(data[index] - sr), Math.abs(data[index + 1] - sg), Math.abs(data[index + 2] - sb)) <= tolerance;
+  const seen = new Uint8Array(width * height);
+  const stack = [[seedX, seedY]];
+  let changed = 0;
+  while (stack.length) {
+    const [startX, y] = stack.pop();
+    let x = startX;
+    while (x >= 0 && !seen[y * width + x] && matches((y * width + x) * 4)) x -= 1;
+    x += 1;
+    let up = false;
+    let down = false;
+    while (x < width && !seen[y * width + x] && matches((y * width + x) * 4)) {
+      const pixel = y * width + x;
+      seen[pixel] = 1;
+      const index = pixel * 4;
+      data[index] = fr;
+      data[index + 1] = fg;
+      data[index + 2] = fb;
+      data[index + 3] = 255;
+      changed += 1;
+      if (y > 0) {
+        const above = (y - 1) * width + x;
+        if (!seen[above] && matches(above * 4)) {
+          if (!up) { stack.push([x, y - 1]); up = true; }
+        } else {
+          up = false;
+        }
+      }
+      if (y < height - 1) {
+        const below = (y + 1) * width + x;
+        if (!seen[below] && matches(below * 4)) {
+          if (!down) { stack.push([x, y + 1]); down = true; }
+        } else {
+          down = false;
+        }
+      }
+      x += 1;
+    }
+  }
+  if (!changed) return false;
+  ctx.putImageData(image, 0, 0);
+  return true;
+}
+
+function applyFill(ctx, action) {
+  floodFill(ctx, Math.round(action.x * padSize.dpr), Math.round(action.y * padSize.dpr), action.color, action.tolerance ?? FILL_TOLERANCE);
+}
+
+function fillAt(x, y) {
+  if (currentStroke) return;
+  const color = penColor;
+  if (!floodFill(basePen, Math.round(x * padSize.dpr), Math.round(y * padSize.dpr), color, FILL_TOLERANCE)) return;
+  commit({ type: "fill", x, y, color, tolerance: FILL_TOLERANCE });
+  paint();
+}
+
+function hasContent() {
+  return cursor > 0 && actions[cursor - 1].type !== "clear";
 }
 
 function padPoint(event) {
@@ -1807,39 +1919,67 @@ function padPoint(event) {
   };
 }
 
+function syncSizeControls() {
+  const enabled = !filling && !panning;
+  for (const button of document.querySelectorAll("[data-size]")) button.disabled = !enabled;
+}
+
 function setPenMode() {
   erasing = false;
+  filling = false;
   panning = false;
-  sketchViewport.classList.remove("panning", "dragging");
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
   $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function setEraserMode() {
   erasing = true;
+  filling = false;
   panning = false;
-  sketchViewport.classList.remove("panning", "dragging");
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
   $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
+}
+
+function setFillMode() {
+  erasing = false;
+  filling = true;
+  panning = false;
+  currentStroke = null;
+  sketchViewport.classList.remove("panning", "dragging");
+  sketchViewport.classList.add("filling");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "true");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
 }
 
 function setPanMode() {
   erasing = false;
+  filling = false;
   panning = true;
   currentStroke = null;
+  sketchViewport.classList.remove("filling");
   sketchViewport.classList.add("panning");
   $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "false");
   $("#sketch-pan").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function openSketch() {
   closePlus();
-  strokes = [];
-  undoStack = [];
-  redoStack = [];
+  actions = [];
+  cursor = 0;
   currentStroke = null;
   zoom = 1;
   setPenMode();
@@ -1858,6 +1998,11 @@ function closeSketch() {
 pad.addEventListener("pointerdown", (event) => {
   if (sketch.hidden) return;
   $("#sketch-err").textContent = "";
+  if (filling) {
+    const point = padPoint(event);
+    fillAt(point.x, point.y);
+    return;
+  }
   pad.setPointerCapture(event.pointerId);
   if (panning) {
     panStart = {
@@ -1874,7 +2019,7 @@ pad.addEventListener("pointerdown", (event) => {
     size: erasing ? Math.max(penSize * 4, 16) : penSize,
     points: [padPoint(event)],
   };
-  redrawPad();
+  paint();
 });
 pad.addEventListener("pointermove", (event) => {
   if (!pad.hasPointerCapture(event.pointerId)) return;
@@ -1885,7 +2030,7 @@ pad.addEventListener("pointermove", (event) => {
   }
   if (!currentStroke) return;
   currentStroke.points.push(padPoint(event));
-  redrawPad();
+  paint();
 });
 function endStroke(event) {
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
@@ -1894,13 +2039,13 @@ function endStroke(event) {
     sketchViewport.classList.remove("dragging");
     return;
   }
-  if (!currentStroke) return;
-  if (currentStroke.points.length) {
-    undoStack.push(strokes.slice());
-    strokes.push(currentStroke);
-    redoStack = [];
-  }
+  const stroke = currentStroke;
   currentStroke = null;
+  if (stroke?.points.length) {
+    commit({ type: "stroke", stroke });
+    renderBase();
+  }
+  paint();
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -1910,25 +2055,28 @@ document.querySelector(".sketch-tools").addEventListener("click", (event) => {
   const swatch = event.target.closest("[data-color]");
   if (size) {
     penSize = Number(size.dataset.size);
-    setPenMode();
+    if (!filling) setPenMode();
     for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
     size.setAttribute("aria-pressed", "true");
   }
   if (swatch) {
     penColor = swatch.dataset.color;
     $("#sketch-color").value = penColor;
-    setPenMode();
+    if (filling) setFillMode();
+    else setPenMode();
     for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
     swatch.setAttribute("aria-pressed", "true");
   }
 });
 $("#sketch-color").addEventListener("input", (event) => {
   penColor = event.target.value;
-  setPenMode();
+  if (filling) setFillMode();
+  else setPenMode();
   for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
 });
 $("#sketch-pen").addEventListener("click", setPenMode);
 $("#sketch-erase").addEventListener("click", setEraserMode);
+$("#sketch-fill").addEventListener("click", setFillMode);
 $("#sketch-pan").addEventListener("click", setPanMode);
 $("#sketch-zoom-out").addEventListener("click", () => zoomStep(-1));
 $("#sketch-zoom-in").addEventListener("click", () => zoomStep(1));
@@ -1943,32 +2091,31 @@ sketchViewport.addEventListener("wheel", (event) => {
   applyZoom(next, event.clientX - rect.left, event.clientY - rect.top);
 }, { passive: false });
 function undoSketch() {
-  if (!undoStack.length) return;
-  redoStack.push(strokes.slice());
-  strokes = undoStack.pop();
-  redrawPad();
+  if (!cursor) return;
+  cursor -= 1;
+  renderBase();
+  paint();
 }
 
 function redoSketch() {
-  if (!redoStack.length) return;
-  undoStack.push(strokes.slice());
-  strokes = redoStack.pop();
-  redrawPad();
+  if (cursor >= actions.length) return;
+  cursor += 1;
+  renderBase();
+  paint();
 }
 
 $("#sketch-undo").addEventListener("click", undoSketch);
 $("#sketch-redo").addEventListener("click", redoSketch);
 $("#sketch-clear").addEventListener("click", () => {
-  if (!strokes.length) return;
-  undoStack.push(strokes.slice());
-  strokes = [];
-  redoStack = [];
-  redrawPad();
+  if (!hasContent()) return;
+  commit({ type: "clear" });
+  renderBase();
+  paint();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
 $("#sketch-cancel").addEventListener("click", closeSketch);
 $("#sketch-ok").addEventListener("click", () => {
-  if (!strokes.length) {
+  if (!hasContent()) {
     $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
     return;
   }
@@ -2007,6 +2154,8 @@ document.addEventListener("keydown", (event) => {
     setPenMode();
   } else if (key === "e") {
     setEraserMode();
+  } else if (key === "f") {
+    setFillMode();
   } else if (event.key === "[") {
     penSize = Math.max(2, penSize - 1);
   } else if (event.key === "]") {

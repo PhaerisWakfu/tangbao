@@ -1063,6 +1063,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   background: var(--bg);
   font-size: 13px;
 }
+.sketch-tools button[data-size]:disabled { opacity: 0.4; cursor: default; }
 .sketch-tools kbd {
   padding: 0 3px;
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
@@ -1123,6 +1124,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 }
 .sketch-viewport.panning #sketch-pad { cursor: grab; }
 .sketch-viewport.panning.dragging #sketch-pad { cursor: grabbing; }
+.sketch-viewport.filling #sketch-pad { cursor: crosshair; }
 .sketch-zoom button:disabled { opacity: 0.4; cursor: default; }
 .sketch-zoom #sketch-zoom-reset { min-width: 52px; justify-content: center; }
 .sketch-err { min-height: 1.2em; margin: 8px 0 0; font-size: 13px; color: #a04b2a; }
