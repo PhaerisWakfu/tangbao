@@ -437,6 +437,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .seat-status { display: block; margin-top: 4px; font-size: 12px; color: var(--faint); }
 .seat-status[data-state="online"] { color: var(--up); }
 .seat-status[data-state="busy"] { color: var(--accent); }
+.seat-status[data-state="idle"] { color: var(--muted); }
 .seat .name { flex: 1; min-width: 0; }
 .seat .name b {
   display: block;
@@ -723,9 +724,15 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .presence[data-state="busy"] .presence-dot { background: var(--accent); }
 .presence[data-state="away"] .presence-dot,
 .presence[data-state="off"] .presence-dot { background: var(--faint); }
+.presence[data-state="idle"] .presence-dot {
+  background: transparent;
+  border: 1.5px solid var(--up);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
+}
 .presence b { font-size: 13px; font-weight: 600; }
 .presence[data-state="busy"] b { color: var(--accent); }
 .presence[data-state="away"] b { color: var(--muted); }
+.presence[data-state="idle"] b { color: var(--muted); }
 .work-state {
   flex: none;
   margin-left: auto;
