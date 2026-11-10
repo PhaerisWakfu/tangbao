@@ -8,6 +8,10 @@
 
 这不是医疗、法律或危机援助服务。
 
+## 概念来源
+
+“一个人坐在 AI 聊天壳里回话”这个设定参考了更早的同类项目 [ChatTJB](https://chattjb.org/)。据我们了解，ChatTJB 后来因参与的人太多、运营不过来而停止服务。糖包没有使用它的代码、标志或原文；界面、文案和具体的人都是按糖包自己的方式重新做的。
+
 ## 目录
 
 ```text
@@ -19,7 +23,7 @@ src/                  站点逻辑和页面
   pages/              对话页、关于页、隐私页、后台页
   client/             页面脚本
 public/               样式、字体、图标和公开图片
-migrations/           D1 表结构（0001–0028）
+migrations/           D1 表结构（0001–0029）
 design/               设计稿和截图，不参与 Worker 运行
 scripts/              本地预览、测试、截图和字体生成
 wrangler.jsonc        Cloudflare 配置
