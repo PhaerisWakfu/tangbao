@@ -90,7 +90,7 @@
         </article>
         <div class="front-actions">
           <a class="enter" href="/chat">进入聊天</a>
-          <button class="become" type="button" data-join>成为AI</button>
+          <button class="become" type="button" data-join data-join-label="成为AI">成为AI</button>
         </div>
         <p class="status" id="status"><i></i><span id="status-label">在线</span></p>
       </div>
@@ -128,7 +128,7 @@
       <div class="tray-in">
         <h2><del>招聘 AI 训练师</del><ins>成为AI</ins></h2>
         <p><del>加入我们，参与下一代大模型的训练。</del><ins>申请通过后，你会有自己的型号和后台，来聊天的人可以选你。对外你也叫糖包。</ins></p>
-        <button class="become" type="button" data-join>申请成为AI</button>
+        <button class="become" type="button" data-join data-join-label="申请成为AI">申请成为AI</button>
       </div>
     </section>
     <section class="cage" id="cage" hidden aria-label="现在能聊的">
@@ -213,7 +213,7 @@
       <p class="connect-lead">扫码进糖包交流群。</p>
       <div class="connect-grid">
         <figure class="connect-figure">
-          <img src="/assets/wechat-group-qr.jpg" alt="糖包交流群二维码">
+          <img src="/assets/wechat-group-qr.png" alt="糖包交流群二维码">
           <figcaption>糖包交流群</figcaption>
         </figure>
       </div>
@@ -277,7 +277,7 @@
       $("#apply-email").value = account.email;
       TangbaoModal.open($("#apply"));
       $("#apply-err").textContent = "";
-      if (account.operatorId) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
+      if (account.operatorId || account.home || account.roles?.includes("admin")) { paintApplication({ status: "approved" }); $("#apply-close").focus(); return; }
       showOath();
       $("#apply-next").focus();
       try {
@@ -288,17 +288,28 @@
       }
     }
 
+    function syncJoinButtons() {
+      const account = TangbaoAccount.account;
+      const model = Boolean(account?.operatorId || account?.home || account?.roles?.includes("admin"));
+      document.querySelectorAll("[data-join]").forEach((button) => {
+        button.textContent = model ? "进入笼屉" : button.dataset.joinLabel || "成为AI";
+        button.dataset.desk = model ? "1" : "0";
+      });
+    }
+
     window.addEventListener("tb:account-change", () => {
       applyGeneration++;
       TangbaoModal.close($("#apply"));
       $("#apply-email").value = TangbaoAccount.account?.email || "";
       $("#apply-state-text").textContent = "";
+      syncJoinButtons();
     });
 
     window.addEventListener("tb:logout", () => {
       applyGeneration++; TangbaoModal.close($("#apply")); TangbaoModal.close($("#connect"));
       $("#apply-state-text").textContent = ""; $("#apply-reason").textContent = "";
       $("#apply-suffix").value = ""; $("#apply-email").value = ""; $("#apply-blurb").value = "";
+      syncJoinButtons();
     });
 
     function openConnect() {
@@ -313,7 +324,13 @@
     }
 
     document.querySelectorAll("[data-join]").forEach((button) => {
-      button.addEventListener("click", () => { void openApply(); });
+      button.addEventListener("click", () => {
+        if (button.dataset.desk === "1") {
+          location.href = "/desk";
+          return;
+        }
+        void openApply();
+      });
     });
     document.querySelectorAll("[data-connect]").forEach((link) => {
       link.addEventListener("click", (event) => {
@@ -398,14 +415,14 @@
     function paintModels(models) {
       const lineup = $("#lineup");
       lineup.replaceChildren();
-      const online = models.filter((model) => model.status === "online");
+      const online = models.filter((model) => model.status === "online" || model.status === "idle");
       const lead = online.length
         ? (onlineOpen ? online : online.slice(0, 10))
         : models.filter((model) => model.home).slice(0, 1);
       if (!lead.length && models.length) lead.push(models[0]);
 
       const addLine = (model) => {
-        const isOnline = model.status === "online";
+        const isOnline = model.status === "online" || model.status === "idle";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line";
@@ -424,7 +441,7 @@
         who.append(blurb);
         const state = document.createElement("small");
         state.className = "state";
-        state.textContent = model.status === "online" ? "在线" : model.status === "busy" ? "忙碌" : "离开";
+        state.textContent = model.status === "online" ? "在线" : model.status === "idle" ? "暂离" : model.status === "busy" ? "忙碌" : "离开";
         button.append(dot, who, state);
         button.addEventListener("click", () => {
           if (!isOnline) return;
@@ -441,8 +458,8 @@
         more.className = "line-more";
         more.setAttribute("aria-expanded", String(onlineOpen));
         more.textContent = onlineOpen
-          ? "收起在线型号"
-          : `还有 ${online.length - 10} 个在线型号，查看全部`;
+          ? "收起可接待型号"
+          : `还有 ${online.length - 10} 个可接待型号，查看全部`;
         more.addEventListener("click", () => {
           onlineOpen = !onlineOpen;
           paintModels(models);
@@ -452,13 +469,27 @@
       $("#cage").hidden = models.length === 0;
     }
 
+    syncJoinButtons();
+    TangbaoAccount.ready.then(syncJoinButtons);
     fetch("/api/status")
       .then((response) => response.json())
       .then((status) => setPresence(status))
       .catch(() => {});
     fetch("/api/models")
       .then((response) => response.json())
-      .then((data) => paintModels(data.models || []))
+      .then((data) => {
+        const models = data.models || [];
+        paintModels(models);
+        const ids = models.map((model) => model.id).slice(0, 60);
+        if (!ids.length) return;
+        fetch(`/api/models/status?ids=${encodeURIComponent(ids.join(","))}`)
+          .then((response) => response.json())
+          .then((status) => {
+            const statusById = new Map((status.models || []).map((model) => [model.id, model]));
+            paintModels(models.map((model) => ({ ...model, ...(statusById.get(model.id) || {}) })));
+          })
+          .catch(() => {});
+      })
       .catch(() => {});
   </script>
 </body>

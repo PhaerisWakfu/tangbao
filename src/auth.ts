@@ -161,8 +161,12 @@ export async function consumeAuthRate(env: AuthEnv, id: string, limit: number, w
   if (result.meta.changes !== 1) throw new AuthError(429, "AUTH_RATE_LIMITED", "操作较频繁，请稍后再试。");
 }
 
+function clientIp(request: Request): string {
+  return request.headers.get("CF-Connecting-IP") || "local";
+}
+
 async function requestRate(request: Request, env: AuthEnv, action: string, limit: number): Promise<void> {
-  const ip = await sha256(request.headers.get("CF-Connecting-IP") || "local");
+  const ip = await sha256(clientIp(request));
   await consumeAuthRate(env, `${action}:ip:${ip}`, limit, 3_600_000);
 }
 async function kdfRate(env: AuthEnv, email: string, amount = 1): Promise<void> {

@@ -32,6 +32,7 @@ function desk() {
   const context = { Date, FormData, Set, URL: { revokeObjectURL() {} },
     selected: "a", threadViewVersion: 0, readonly: false, shown: "", waiting: 0, pending: 0, timer: 0, ticking: null, pollingAccountId: null,
     POLL_MS: 60000, deskAccountId: "account", loggedOut: false, replying: false, replyGuard: { key: "", at: 0 }, pendingImages: [],
+    seat: { operatorId: "operator" }, setDeskThreadUrl() {}, closeDeskThreadNotification: async () => {},
     thread: node(), replyErr: node(), answer: node(), reply: { ...node(), querySelector: () => button }, desk: node(), document: { hidden: false },
     TangbaoAccount: { account: { id: "account", verified: true, operatorId: "operator" }, refresh: async () => {} },
     ApiError: class extends Error {}, renderThread: data => rendered.push(data), loadQueue: async () => {}, loadApplications: async () => {}, loadAudit: async () => {},
@@ -47,11 +48,25 @@ function app() {
   const errors = [], timers = new Map();
   const context = { Date, timer: 0, ticking: null, document: { hidden: false }, loggedOut: false, current: null, openAwaiting: false, POLL_MS: 60000,
     modelSearchMode: true, modelSearchHasMore: true, modelSearchSeq: 1, modelSearchPage: 1, modelSearchQuery: "test", modelMoreRequest: null,
-    models: [{ id: "first" }], autoModel: "", paintModels() {}, showSys: text => errors.push(text),
+    models: [{ id: "first" }], autoModel: "", paintModels() {}, freshModelStatuses: async list => list, refreshUnread: async () => {}, showSys: text => errors.push(text),
     setTimeout: fn => { const id = Math.random(); timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id), validId: () => true,
   };
   return { context, errors, timers };
 }
+
+test("chat empty rendering works before sketch canvas initialization", () => {
+  const ast = ts.createSourceFile("app.js", sources.app, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const declarations = ast.statements.filter(n => ts.isFunctionDeclaration(n) && n.name?.text === "paint");
+  let clears = 0;
+  const context = { messagePages: { clear() { clears++; } }, openAwaiting: false, blocked: false, painted: "",
+    messages: null, body: { dataset: {} }, current: null, titleEl: {}, log: { replaceChildren() {} },
+    tickPending() {}, stage: { scrollTop: 0, scrollHeight: 120 } };
+  new Script(declarations.map(n => n.getText(ast)).join("\n")).runInNewContext(context);
+  context.paint([]);
+  assert.equal(clears, 1);
+  assert.equal(context.body.dataset.state, "empty");
+  assert.equal(context.messages.length, 0);
+});
 
 test("desk polling does not overlap when refresh is clicked repeatedly", async () => {
   const f = desk(), pending = deferred(); let calls = 0;
@@ -68,13 +83,13 @@ test("desk late poll response does not render the previously selected thread", a
 });
 test("desk A-B-A switching rejects the first A response", async () => {
   const f = desk(), first = deferred(); let aCalls = 0;
-  f.context.api = route => route.split("?")[0].endsWith("/a") && ++aCalls === 1 ? first.promise : Promise.resolve({ title: route.split("?")[0].endsWith("/a") ? "new A" : "B" });
+  f.context.api = route => route.split("?")[0].endsWith("/a") && ++aCalls === 1 ? first.promise : Promise.resolve({ thread: { operatorId: "other" }, title: route.split("?")[0].endsWith("/a") ? "new A" : "B" });
   functions("desk", ["openSlip", "showPane"], f.context);
   const old = f.context.openSlip("a"); await f.context.openSlip("b"); await f.context.openSlip("a");
-  first.resolve({ title: "old A" }); await old; assert.equal(f.rendered.at(-1).title, "new A");
+  first.resolve({ thread: { operatorId: "other" }, title: "old A" }); await old; assert.equal(f.rendered.at(-1).title, "new A");
 });
 test("desk stale request errors do not replace the new thread error area", async () => {
-  const f = desk(), first = deferred(); f.context.api = route => route.split("?")[0].endsWith("/a") ? first.promise : Promise.resolve({});
+  const f = desk(), first = deferred(); f.context.api = route => route.split("?")[0].endsWith("/a") ? first.promise : Promise.resolve({ thread: { operatorId: "other" } });
   functions("desk", ["openSlip", "showPane"], f.context);
   const old = f.context.openSlip("a"); await f.context.openSlip("b"); first.reject(new Error("old failure")); await old;
   assert.equal(f.context.replyErr.textContent, "");
@@ -144,7 +159,7 @@ test("switching desk thread hides the old reply form until the new read complete
   assert.equal(f.context.reply.hidden, true);
   assert.equal(f.context.$("#block").hidden, true);
   assert.equal(f.context.$("#shelve").hidden, true);
-  pending.resolve({}); await opening;
+  pending.resolve({ thread: { operatorId: "other" } }); await opening;
 });
 for (const narrow of [true, false]) test(`older desk history preserves the ${narrow ? "mobile document" : "desktop thread"} scroll position`, async () => {
   const f = desk();

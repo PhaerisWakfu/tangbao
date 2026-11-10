@@ -10,6 +10,14 @@
 - 新账号页可增加专用样式/脚本。重复的 API、存储、弹层行为先小范围抽取，不复制第四份实现，也不借机重写整站。
 - `design/` 仅用于参考。检查最终由 Worker 返回的页面，不能用设计稿截图替代验收。
 
+## 静态资源与缓存
+
+- 页面 HTML 由 Worker 直接返回并设 `no-store`，每次请求都取当前部署；不要给 HTML 加长缓存。
+- 资源使用裸地址：`/assets/app.js`、`account.js`、`desk.js`、`md.js`，以及 `/assets/*.css`。脚本由 Worker 以 `no-cache` 返回，静态文件靠 ETag 协商；不要在 URL 上加 `?v=`。
+- Cloudflare Workers 静态资源的缓存键只取路径，查询串不参与（2026-11-06 实测：任意 `?v=` 都命中同一对象、同一 ETag），所以 `?v=` 没有任何缓存收益，只会制造"已经刷过"的假象。
+- 若将来改回会缓存整页、或忽略查询串的 CDN（如阿里云 ESA），必须改成路径级或内容哈希文件名；同时确认压缩编码协商（源站加 `Vary: Accept-Encoding`，或关掉 CDN 智能压缩）。否则不支持该编码的浏览器（Safari/WebKit 不支持 zstd）会整份解析失败，表现为整页无样式，且换版本号也刷不掉。
+- 发版后检查 `/`、`/chat`、`/desk` 的 HTML 引用与当前部署一致，并确认 `/assets/app.css`、`/assets/app.js` 均返回 200。
+
 ## 视觉基线
 
 温暖纸色、墨色文字、棕色强调、细分隔线、克制的圆角和阴影；保留“糖包/笼屉”的人工手作语气。管理及账号表单采用清楚的普通中文，装饰文案不能遮蔽错误、权限和下一步。
@@ -56,7 +64,7 @@
 ## 键盘和可访问性
 
 - 保留 `:focus-visible`。输入框移除默认 outline 时必须有同等可辨识的替代焦点样式。
-- 聊天 Enter 发送、Shift+Enter 换行；后台 Ctrl/Cmd+Enter 提交；始终检查 `event.isComposing`，不打断中文输入法。
+- 聊天桌面端 Enter 发送、Shift+Enter 换行；触屏设备软键盘 Enter 只换行，发送用发送按钮；后台 Ctrl/Cmd+Enter 提交；始终检查 `event.isComposing`，不打断中文输入法。
 - 弹层设置 dialog 语义、标题和 `aria-modal`；打开时移动焦点，Tab 限定在弹层，背景 inert，关闭后恢复触发点。Escape 只关闭最上层。
 - 状态更新使用适度的 `role="status"` / `aria-live="polite"`，错误用 `role="alert"`；不要整页反复播报历史消息。
 - 展开控件同步 `aria-expanded`、禁用同步原生 disabled 或语义。兼顾 `prefers-reduced-motion`。

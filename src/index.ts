@@ -46,7 +46,7 @@ type AppEnv = Env & AuthEnv & {
   IMAGES: KVNamespace;
 };
 
-type PresenceState = "online" | "busy" | "away" | "off";
+type PresenceState = "online" | "idle" | "busy" | "away" | "off";
 type StatusPayload = {
   state: "available" | "busy";
   label: string;
@@ -59,27 +59,35 @@ type PresenceRow = {
   id: string;
   active: number;
   blurb: string | null;
+  opening_questions: string | null;
   last_seen_at: number;
   last_reply_at: number;
   last_assigned_at: number;
   pending: number;
   oldest_pending_at: number | null;
+  accepting: number;
+  away_at: number;
 };
 type Presence = {
   id: string;
   active: number;
   blurb: string;
+  openingQuestions: string[];
   lastSeenAt: number;
   lastReplyAt: number;
   lastAssignedAt: number;
   pending: number;
   oldestPendingAt: number;
+  accepting: number;
+  awayAt: number;
   status: PresenceState;
   home: boolean;
 };
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const NEW_THREADS_PER_IP_HOUR = 16;
+const MESSAGES_PER_THREAD_HOUR = 60;
 
 function localHost(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
@@ -100,20 +108,25 @@ const HOME_MODEL = "tangbao-vme50-flash";
 const POOL_MODEL = "tangbao-pool";
 const HOME_BLURB = "糖包本人。什么都聊一点。";
 const LIST_SIZE = 10;
-const ONLINE_TTL = 120_000;
-const HEARTBEAT_WRITE = 30_000;
+const ONLINE_TTL = 90_000;
+const HEARTBEAT_WRITE = 20_000;
+const HIDDEN_GRACE = 5 * 60_000;
+const IDLE_AFTER = 2 * 60_000;
 const PENDING_CAP = 2;
 const REPLY_TIMEOUT = 10 * 60_000;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
+const HOME_ACCEPTING_KEY = "home_accepting";
+const HOME_AWAY_KEY = "home_away_at";
 const AUTO_APPROVE_KEY = "auto_approve";
 
 const encoder = new TextEncoder();
 
 const PUBLIC_CACHE_TTL: Record<string, number> = {
   "/api/status": 300,
-  "/api/models": 300,
+  "/api/models": 30,
+  "/api/models/status": 15,
   "/api/presence": 600,
 };
 
@@ -366,7 +379,7 @@ export default {
       const url = new URL(request.url);
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
-      const ttl = request.method === "GET" ? (pagedModels ? 30 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
+      const ttl = request.method === "GET" ? (pagedModels ? 300 : PUBLIC_CACHE_TTL[url.pathname]) : 0;
       if (ttl) {
         const cacheKey = new Request(url.toString(), { method: "GET" });
         let hit: Response | undefined;
@@ -449,6 +462,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   }
 
   if (path === "/api/status" && method === "GET") return json(await siteStatus(env));
+  if (path === "/api/models/status" && method === "GET") return listModelStatuses(env, url);
   if (path === "/api/models" && method === "GET") return listModels(env, url);
   if (path === "/api/presence" && method === "GET") return json(await presenceHistory(env));
   if (path === "/api/threads" && method === "POST") return createThread(request, env, ctx);
@@ -461,6 +475,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/queue" && method === "GET") return queue(request, env);
   if (path === "/api/admin/profile" && method === "GET") return readProfile(request, env);
   if (path === "/api/admin/profile" && method === "POST") return saveProfile(request, env);
+  if (path === "/api/admin/work-state" && method === "POST") return setWorkState(request, env);
+  if (path === "/api/admin/presence" && method === "POST") return setPresence(request, env);
   if (path === "/api/admin/audit" && method === "GET") return audit(request, env);
   if (path === "/api/admin/pool" && method === "GET") return pool(request, env);
   if (path === "/api/admin/applications" && method === "GET") return listApplications(request, env);
@@ -468,6 +484,11 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (path === "/api/admin/push" && method === "GET") return pushConfig(request, env);
   if (path === "/api/admin/push" && method === "POST") return pushSubscribe(request, env);
   if (path === "/api/admin/push" && method === "DELETE") return pushUnsubscribe(request, env);
+  if (path === "/api/admin/push/status" && method === "POST") return pushStatus(request, env);
+  if (path === "/api/account/push" && method === "GET") return accountPushConfig(request, env);
+  if (path === "/api/account/push" && method === "POST") return accountPushSubscribe(request, env);
+  if (path === "/api/account/push" && method === "DELETE") return accountPushUnsubscribe(request, env);
+  if (path === "/api/account/push/status" && method === "POST") return accountPushStatus(request, env);
 
   const decision = path.match(/^\/api\/admin\/applications\/([A-Za-z0-9_-]{16,80})\/(approve|reject)$/);
   if (decision && method === "POST") {
@@ -489,11 +510,13 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (adminPin && method === "POST") return pinThread(request, env, adminPin[1]);
   const adminRename = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/rename$/);
   if (adminRename && method === "POST") return renameAdminThread(request, env, adminRename[1]);
+  const adminReadMarker = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/read$/);
+  if (adminReadMarker && method === "POST") return markThreadRead(request, env, adminReadMarker[1]);
 
   const adminThread = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})$/);
   if (adminThread) {
     if (method === "GET") return adminRead(request, env, adminThread[1]);
-    if (method === "POST") return adminReply(request, env, adminThread[1]);
+    if (method === "POST") return adminReply(request, env, adminThread[1], ctx);
   }
 
   const shelve = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/shelve$/);
@@ -516,6 +539,11 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   if (path.startsWith("/api/")) return json({ error: "没有这一格。" }, 404);
 
+  // 旧入口保留跳转：代码不再提供第二个聊天页，但已发出的 /start 链接不能失效。
+  if (path === "/start" && (method === "GET" || method === "HEAD")) {
+    return Response.redirect(`${new URL(request.url).origin}/chat${new URL(request.url).search}`, 302);
+  }
+
   const page =
     path === "/" || path === "/index.html"
       ? homeHtml
@@ -532,7 +560,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
                 : null;
   if (page && (method === "GET" || method === "HEAD")) {
     const response = new Response(method === "HEAD" ? null : page, {
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
     return method === "GET" && ["/chat", "/chat.html"].includes(path) ? withGuestCookie(request, env, response) : response;
   }
@@ -553,11 +581,21 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
   }
 
+  // 资源用裸地址：页面 HTML 是 no-store，脚本每次回源校验，不靠 URL 上的版本号刷缓存。
   const script =
-    path === "/assets/messages.js" ? messagesJs : path === "/assets/modal.js" ? modalJs : path === "/assets/account.js" ? accountJs : path === "/assets/app.js" ? appJs : path === "/assets/desk.js" ? deskJs : path === "/assets/md.js" ? mdJs : null;
+    path === "/assets/messages.js" ? messagesJs
+      : path === "/assets/modal.js" ? modalJs
+        : path === "/assets/account.js" ? accountJs
+          : path === "/assets/app.js" ? appJs
+            : path === "/assets/desk.js" ? deskJs
+              : path === "/assets/md.js" ? mdJs
+                : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
-      headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" },
+      headers: {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "no-cache",
+      },
     });
   }
   return env.ASSETS.fetch(request);
@@ -599,11 +637,16 @@ function statusOf(
   pending: number,
   oldestPendingAt: number,
   now: number,
+  accepting = 1,
+  awayAt = 0,
 ): PresenceState {
   if (!active) return "off";
-  if (!lastSeen || lastSeen < now - ONLINE_TTL) return "away";
+  if (awayAt > 0 && awayAt <= now) return "away";
+  if (awayAt <= 0 && (!lastSeen || lastSeen < now - ONLINE_TTL)) return "away";
+  if (!accepting) return "busy";
   if (pending >= PENDING_CAP) return "busy";
   if (pending > 0 && oldestPendingAt && oldestPendingAt < now - REPLY_TIMEOUT) return "busy";
+  if (awayAt > now && awayAt - now <= HIDDEN_GRACE - IDLE_AFTER) return "idle";
   return "online";
 }
 
@@ -611,9 +654,11 @@ function statusPayload(state: PresenceState): StatusPayload {
   const copy =
     state === "online"
       ? { state: "available" as const, label: "在线", note: "他在" }
-      : state === "busy"
-        ? { state: "busy" as const, label: "忙碌", note: "稍等" }
-        : state === "off"
+      : state === "idle"
+        ? { state: "busy" as const, label: "暂离", note: "可能慢" }
+        : state === "busy"
+          ? { state: "busy" as const, label: "忙碌", note: "稍等" }
+          : state === "off"
           ? { state: "busy" as const, label: "停用", note: "不接新话" }
           : { state: "busy" as const, label: "离开", note: "不在" };
   return {
@@ -626,8 +671,8 @@ function statusPayload(state: PresenceState): StatusPayload {
 
 async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
   const [settings, pending] = await Promise.all([
-    env.DB.prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?)")
-      .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY)
+    env.DB.prepare("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?)")
+      .bind(HOME_SEEN_KEY, HOME_REPLY_KEY, HOME_ASSIGNED_KEY, HOME_ACCEPTING_KEY, HOME_AWAY_KEY)
       .all<{ key: string; value: string }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n, MIN(updated_at) AS oldest FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${unblockedThread("threads")}`,
@@ -639,18 +684,23 @@ async function homePresence(env: AppEnv, now = Date.now()): Promise<Presence> {
   const lastSeenAt = values.get(HOME_SEEN_KEY) || 0;
   const lastReplyAt = values.get(HOME_REPLY_KEY) || 0;
   const lastAssignedAt = values.get(HOME_ASSIGNED_KEY) || 0;
+  const accepting = values.get(HOME_ACCEPTING_KEY) === 0 ? 0 : 1;
+  const awayAt = values.get(HOME_AWAY_KEY) || 0;
   const pendingCount = Number(pending?.n) || 0;
   const oldestPendingAt = Number(pending?.oldest) || 0;
   return {
     id: HOME_MODEL,
     active: 1,
     blurb: HOME_BLURB,
+    openingQuestions: [],
     lastSeenAt,
     lastReplyAt,
     lastAssignedAt,
     pending: pendingCount,
     oldestPendingAt,
-    status: statusOf(1, lastSeenAt, pendingCount, oldestPendingAt, now),
+    accepting,
+    awayAt,
+    status: statusOf(1, lastSeenAt, pendingCount, oldestPendingAt, now, accepting, awayAt),
     home: true,
   };
 }
@@ -659,7 +709,7 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
   const [home, rows] = await Promise.all([
     homePresence(env, now),
     env.DB.prepare(
-      `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -682,12 +732,15 @@ async function loadPresence(env: AppEnv, now = Date.now(), activeOnly = false): 
       id: row.id,
       active: row.active,
       blurb: row.blurb || "",
+      openingQuestions: parseOpeningQuestions(row.opening_questions),
       lastSeenAt: Number(row.last_seen_at) || 0,
       lastReplyAt: Number(row.last_reply_at) || 0,
       lastAssignedAt: Number(row.last_assigned_at) || 0,
       pending,
       oldestPendingAt,
-      status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now),
+      accepting: Number(row.accepting) ? 1 : 0,
+      awayAt: Number(row.away_at) || 0,
+      status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting, row.away_at),
       home: false,
     };
   });
@@ -701,12 +754,15 @@ function presenceFromRow(row: PresenceRow, now: number): Presence {
     id: row.id,
     active: row.active,
     blurb: row.blurb || "",
+    openingQuestions: parseOpeningQuestions(row.opening_questions),
     lastSeenAt: Number(row.last_seen_at) || 0,
     lastReplyAt: Number(row.last_reply_at) || 0,
     lastAssignedAt: Number(row.last_assigned_at) || 0,
     pending,
     oldestPendingAt,
-    status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now),
+    accepting: Number(row.accepting) ? 1 : 0,
+    awayAt: Number(row.away_at) || 0,
+    status: statusOf(row.active, Number(row.last_seen_at) || 0, pending, oldestPendingAt, now, row.accepting, row.away_at),
     home: false,
   };
 }
@@ -715,7 +771,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
   if (operatorId === HOME_MODEL) return homePresence(env, now);
   const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   const row = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
        (SELECT COUNT(*) FROM threads t
         WHERE t.operator_id = o.id AND t.awaiting = 1 AND t.queued = 0
           AND NOT EXISTS (
@@ -738,11 +794,14 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
       id: operatorId,
       active: 0,
       blurb: "",
+      openingQuestions: [],
       lastSeenAt: 0,
       lastReplyAt: 0,
       lastAssignedAt: 0,
       pending: 0,
       oldestPendingAt: 0,
+      accepting: 0,
+      awayAt: 0,
       status: "away",
       home: false,
     };
@@ -752,39 +811,30 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
 
 async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean> {
   const presence = await operatorPresence(env, operatorId);
-  return presence.status === "online" || presence.status === "busy";
+  return presence.status === "online" || presence.status === "idle" || presence.status === "busy";
 }
 
 async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
   try {
     if (seat.super && seat.operatorId === HOME_MODEL) {
-      await env.DB.prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value
-         WHERE CAST(settings.value AS INTEGER) < ?`,
-      )
-        .bind(HOME_SEEN_KEY, String(now), now - HEARTBEAT_WRITE)
-        .run();
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(HOME_SEEN_KEY, String(now)),
+        env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+          .bind(HOME_AWAY_KEY, "0"),
+      ]);
       return;
     }
-    if (seat.super && !seat.operatorId) return;
+    if (!seat.operatorId) return;
     if (seat.super) {
-      await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE id = ? AND owner_account_id = ? AND last_seen_at < ?")
-        .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE)
-        .run();
+      await env.DB.prepare("UPDATE operators SET last_seen_at=? WHERE id=? AND owner_account_id=? AND away_at=0 AND last_seen_at < ?")
+        .bind(now, seat.operatorId, seat.accountId, now - HEARTBEAT_WRITE).run();
       return;
     }
-    await env.DB.prepare("UPDATE operators SET last_seen_at = ? WHERE operator_uid = ? AND owner_account_id = ? AND last_seen_at < ?")
-      .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE)
-      .run();
+    await env.DB.prepare("UPDATE operators SET last_seen_at=? WHERE operator_uid=? AND owner_account_id=? AND away_at=0 AND last_seen_at < ?")
+      .bind(now, seat.operatorUid, seat.accountId, now - HEARTBEAT_WRITE).run();
   } catch (err) {
-    console.log(
-      JSON.stringify({
-        event: "heartbeat_error",
-        operatorId: seat.operatorId,
-        message: err instanceof Error ? err.message : "unknown",
-      }),
-    );
+    console.log(JSON.stringify({ event: "heartbeat_error", message: err instanceof Error ? err.message : "unknown" }));
   }
 }
 
@@ -818,6 +868,7 @@ async function touchAssigned(env: AppEnv, operatorId: string, now: number, seat?
 async function notifyOperator(
   env: AppEnv,
   operatorId: string,
+  threadId: string,
   title: string,
   preview: string,
   heading = "有人在等你",
@@ -826,14 +877,19 @@ async function notifyOperator(
   const privateKey = env.VAPID_PRIVATE_KEY;
   const subject = env.VAPID_SUBJECT;
   if (!publicKey || !privateKey || !subject) return;
-  if (!(await operatorPresent(env, operatorId))) return;
   const rows = await env.DB.prepare(
     "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE operator_id = ?",
   )
     .bind(operatorId)
     .all<{ endpoint: string; p256dh: string; auth: string }>();
   const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
-  const payload = JSON.stringify({ title: heading, body, url: "/desk" });
+  const payload = JSON.stringify({
+    title: heading,
+    body,
+    url: `/desk?thread=${encodeURIComponent(threadId)}`,
+    tag: `desk:${threadId}`,
+    threadId,
+  });
   await Promise.all(
     rows.results.map(async (target) => {
       try {
@@ -847,6 +903,46 @@ async function notifyOperator(
         console.log(
           JSON.stringify({ event: "push_notify", message: err instanceof Error ? err.message : "unknown" }),
         );
+      }
+    }),
+  );
+}
+
+async function notifyAccount(
+  env: AppEnv,
+  accountId: string,
+  threadId: string,
+  title: string,
+  preview: string,
+): Promise<void> {
+  const publicKey = env.VAPID_PUBLIC_KEY;
+  const privateKey = env.VAPID_PRIVATE_KEY;
+  const subject = env.VAPID_SUBJECT;
+  if (!publicKey || !privateKey || !subject) return;
+  const rows = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE account_id = ?",
+  )
+    .bind(accountId)
+    .all<{ endpoint: string; p256dh: string; auth: string }>();
+  const body = [title, preview && preview !== title ? preview : ""].filter(Boolean).join("\n");
+  const payload = JSON.stringify({
+    title: "糖包回复了",
+    body,
+    url: `/chat?thread=${encodeURIComponent(threadId)}`,
+    tag: `user:${threadId}`,
+    threadId,
+  });
+  await Promise.all(
+    rows.results.map(async (target) => {
+      try {
+        const status = await sendWebPush({ publicKey, privateKey, subject }, target, payload);
+        if (status === 404 || status === 410) {
+          await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(target.endpoint).run();
+        } else if (status < 200 || status >= 300) {
+          console.log(JSON.stringify({ event: "push_notify_account", status }));
+        }
+      } catch (err) {
+        console.log(JSON.stringify({ event: "push_notify_account", message: err instanceof Error ? err.message : "unknown" }));
       }
     }),
   );
@@ -889,7 +985,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   const identities = [visitor, accountBlockKey(account?.id)];
   if (await isBlocked(env, identities, undefined, [ip])) throw new HttpError(403, BLOCKED);
-  if (!(await allow(env, `thread:${ip}`, 8, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
+  if (!(await allow(env, `thread:${ip}`, NEW_THREADS_PER_IP_HOUR, HOUR))) throw new HttpError(429, "新对话先歇一会儿。他一次看不了这么多开头。");
   const assignment = await assignOperator(env, incoming.operator, identities, [ip]);
   if (assignment.id !== POOL_MODEL && await isBlocked(env, identities, assignment.id, [ip])) throw new HttpError(403, "这个模型暂时不接你的话。");
   await assertModelQueue(env, assignment.id);
@@ -952,6 +1048,7 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   }
   await touchAssigned(env, operator, now);
   noteVisitor(ctx, env, request, title, preview, operator, true);
+  if (operator !== POOL_MODEL) ctx.waitUntil(notifyOperator(env, operator, id, title, preview));
   return json(payload);
 }
 
@@ -1036,8 +1133,8 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   const thread = await loadOwned(env, id, token, request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   if (seen.blocked) throw new HttpError(403, BLOCKED);
-  if (!(await allow(env, `msg:${thread.token_hash}`, 30, HOUR))) {
-    throw new HttpError(429, "今天的字已经够多了。让他的手指歇一会儿。");
+  if (!(await allow(env, `msg:${thread.token_hash}`, MESSAGES_PER_THREAD_HOUR, HOUR))) {
+    throw new HttpError(429, "这一小时已经说得够多了。让他的手指歇一会儿。");
   }
   const incoming = await readIncoming(request, "先写一句，或放一张图。");
   if (thread.operator_id !== HOME_MODEL && thread.queued !== 1) {
@@ -1050,15 +1147,19 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   // remains possible even when the selected model's new-thread queue is full.
   await writeMessage(env, id, "visitor", incoming, 1);
   const shown = caption(incoming.body, incoming.images.length);
+  const preview = incoming.draw ? `要一张图 · ${shown}` : shown;
   noteVisitor(
     ctx,
     env,
     request,
     thread.title,
-    incoming.draw ? `要一张图 · ${shown}` : shown,
+    preview,
     thread.operator_id,
     thread.awaiting !== 1,
   );
+  if (thread.operator_id !== POOL_MODEL) {
+    ctx.waitUntil(notifyOperator(env, thread.operator_id, id, thread.title, preview));
+  }
   return json({ ok: true, status: await publicStatus(env) });
 }
 
@@ -1091,17 +1192,61 @@ function logout(request: Request): Response {
 
 async function readProfile(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
-  if (seat.super && !seat.operatorId) return json({ super: true, operatorId: null, id: null, needsModel: true });
-  if (seat.super && seat.operatorId === HOME_MODEL) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL });
-  const row = await env.DB.prepare("SELECT id, blurb FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
+  if (seat.super && !seat.operatorId) return json({ super: true, operatorId: null, id: null, needsModel: true, openingQuestions: [] });
+  if (seat.super && seat.operatorId === HOME_MODEL) return json({ super: true, operatorId: HOME_MODEL, id: HOME_MODEL, openingQuestions: [] });
+  const row = await env.DB.prepare("SELECT id, blurb, opening_questions FROM operators WHERE operator_uid = ? AND owner_account_id = ?")
     .bind(seat.operatorUid, seat.accountId)
-    .first<{ id: string; blurb: string | null }>();
+    .first<{ id: string; blurb: string | null; opening_questions: string | null }>();
   if (!row) throw new HttpError(404, "这个型号不在了。");
   return json({
     id: row.id,
     suffix: row.id.startsWith("tangbao-") ? row.id.slice("tangbao-".length) : row.id,
     blurb: row.blurb || "",
+    openingQuestions: parseOpeningQuestions(row.opening_questions),
   });
+}
+
+async function setPresence(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再更新在线状态。");
+  const payload = await readJson(request);
+  const away = payload.away === true;
+  const graceMs = away ? Math.min(HIDDEN_GRACE, Math.max(0, Number(payload.graceMs) || 0)) : 0;
+  const now = Date.now();
+  const awayAt = away ? now + graceMs : 0;
+  if (seat.super && seat.operatorId === HOME_MODEL) {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(HOME_AWAY_KEY, String(awayAt)),
+      ...(away ? [] : [env.DB.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .bind(HOME_SEEN_KEY, String(now))]),
+    ]);
+  } else if (seat.super) {
+    await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE id=? AND owner_account_id=? AND active=1")
+      .bind(away ? 1 : 0, now, awayAt, seat.operatorId, seat.accountId).run();
+  } else {
+    await env.DB.prepare("UPDATE operators SET last_seen_at=CASE WHEN ? THEN last_seen_at ELSE ? END, away_at=? WHERE operator_uid=? AND owner_account_id=? AND active=1")
+      .bind(away ? 1 : 0, now, awayAt, seat.operatorUid, seat.accountId).run();
+  }
+  return json({ ok: true, away, awayAt });
+}
+
+async function setWorkState(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再设置接单状态。");
+  const payload = await readJson(request);
+  const accepting = payload.accepting !== false;
+  if (seat.super && seat.operatorId === HOME_MODEL) {
+    await env.DB.prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(HOME_ACCEPTING_KEY, accepting ? "1" : "0").run();
+  } else if (seat.super) {
+    await env.DB.prepare("UPDATE operators SET accepting=? WHERE id=? AND owner_account_id=? AND active=1")
+      .bind(accepting ? 1 : 0, seat.operatorId, seat.accountId).run();
+  } else {
+    await env.DB.prepare("UPDATE operators SET accepting=? WHERE operator_uid=? AND owner_account_id=? AND active=1")
+      .bind(accepting ? 1 : 0, seat.operatorUid, seat.accountId).run();
+  }
+  return json({ ok: true, accepting });
 }
 
 async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
@@ -1113,13 +1258,14 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
   if (!suffix) throw new HttpError(400, "型号后面要写成小写字母、数字和短横线。");
   if (suffix === "vme50-flash" || suffix === "pool") throw new HttpError(400, "这个型号留给自己用。");
   const blurb = blurbOf(payload.blurb);
+  const openingQuestions = openingQuestionsOf(payload.openingQuestions);
   const oldId = seat.operatorId;
   const newId = `tangbao-${suffix}`;
   if (newId === oldId) {
-    const result = await env.DB.prepare("UPDATE operators SET blurb = ? WHERE id = ? AND operator_uid = ? AND owner_account_id = ? AND active = 1 AND EXISTS(SELECT 1 FROM accounts WHERE id = ? AND status = 'active' AND verified_at > 0)")
-      .bind(blurb, oldId, seat.operatorUid, seat.accountId, seat.accountId).run();
+    const result = await env.DB.prepare("UPDATE operators SET blurb = ?, opening_questions = ? WHERE id = ? AND operator_uid = ? AND owner_account_id = ? AND active = 1 AND EXISTS(SELECT 1 FROM accounts WHERE id = ? AND status = 'active' AND verified_at > 0)")
+      .bind(blurb, JSON.stringify(openingQuestions), oldId, seat.operatorUid, seat.accountId, seat.accountId).run();
     if (!result.meta.changes) throw new AuthError(409, "MODEL_CHANGED", "模型资料刚刚发生变化，请刷新后重试。");
-    return json({ ok: true, id: oldId, suffix, blurb });
+    return json({ ok: true, id: oldId, suffix, blurb, openingQuestions });
   }
   const conflict = await env.DB.prepare(
     `SELECT 1 AS hit FROM operators WHERE id = ?
@@ -1141,22 +1287,24 @@ async function saveProfile(request: Request, env: AppEnv): Promise<Response> {
       env.DB.prepare(`UPDATE push_subscriptions SET operator_id = ? WHERE operator_id = ? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
       env.DB.prepare(`INSERT OR IGNORE INTO blocks(id,operator_id,created_at) SELECT id,?,created_at FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(newId, oldId, ...guard.values),
       env.DB.prepare(`DELETE FROM blocks WHERE operator_id=? AND ${guard.sql}`).bind(oldId, ...guard.values),
-      env.DB.prepare(`UPDATE operators SET id = ?, blurb = ? WHERE id = ? AND ${guard.sql}`)
-        .bind(newId, blurb, oldId, ...guard.values),
+      env.DB.prepare(`UPDATE operators SET id = ?, blurb = ?, opening_questions = ? WHERE id = ? AND ${guard.sql}`)
+        .bind(newId, blurb, JSON.stringify(openingQuestions), oldId, ...guard.values),
     ]);
   } catch { throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。"); }
   if (!results[results.length - 1].meta.changes) throw new AuthError(409, "MODEL_CHANGED", "型号或归属刚刚发生变化，请刷新后重试。");
-  return json({ ok: true, id: newId, suffix, blurb });
+  return json({ ok: true, id: newId, suffix, blurb, openingQuestions });
 }
 
 function modelJson(row: Presence) {
   return {
     id: row.id,
     home: row.home,
-    blurb: row.blurb,
+    blurb: row.blurb || "还没写简介",
+    openingQuestions: row.openingQuestions,
     online: row.status === "online",
     status: publicPresence(row.status),
     awake: row.status === "online",
+    accepting: row.accepting === 1,
     pending: row.pending,
     lastSeenAt: row.lastSeenAt,
     lastReplyAt: row.lastReplyAt,
@@ -1174,7 +1322,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
   if (!browse) {
     const home = await homePresence(env, now);
     const rows = await env.DB.prepare(
-      `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+      `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
         COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
        FROM operators o
        LEFT JOIN (
@@ -1184,10 +1332,10 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
-         AND o.last_seen_at >= ?
+         AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
        ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
     )
-      .bind(now - ONLINE_TTL)
+      .bind(now, now - ONLINE_TTL)
       .all<PresenceRow>();
     const operators = rows.results.map((row) => presenceFromRow(row, now));
     const totalRow = await env.DB.prepare(
@@ -1215,7 +1363,7 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
     bindings.push(like, like);
   }
   const rows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -1247,6 +1395,41 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
   });
 }
 
+async function listModelStatuses(env: AppEnv, url: URL): Promise<Response> {
+  const raw = (url.searchParams.get("ids") || "").split(",");
+  const ids = [...new Set(raw.map((id) => id.trim()).filter((id) => /^tangbao-[a-z0-9-]{1,60}$/.test(id)))].slice(0, 60);
+  if (!ids.length) return json({ models: [] });
+  const now = Date.now();
+  const operatorIds = ids.filter((id) => id !== HOME_MODEL);
+  const [home, rows] = await Promise.all([
+    ids.includes(HOME_MODEL) ? homePresence(env, now) : Promise.resolve(null),
+    operatorIds.length
+      ? env.DB.prepare(
+        `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+          (SELECT COUNT(*) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS pending,
+          (SELECT MIN(t.updated_at) FROM threads t WHERE t.operator_id=o.id AND t.awaiting=1 AND t.queued=0 AND ${unblockedThread("t")}) AS oldest_pending_at
+         FROM operators o WHERE o.id IN (${operatorIds.map(() => "?").join(",")})`,
+      ).bind(...operatorIds).all<PresenceRow>()
+      : Promise.resolve({ results: [] as PresenceRow[] }),
+  ]);
+  const byId = new Map<string, ReturnType<typeof modelStatusJson>>();
+  for (const row of rows.results) byId.set(row.id, modelStatusJson(presenceFromRow(row, now)));
+  if (home) byId.set(HOME_MODEL, modelStatusJson(home));
+  return json({ models: ids.map((id) => byId.get(id)).filter(Boolean) });
+}
+
+function modelStatusJson(row: Presence) {
+  return {
+    id: row.id,
+    online: row.status === "online",
+    status: publicPresence(row.status),
+    accepting: row.accepting === 1,
+    pending: row.pending,
+    lastSeenAt: row.lastSeenAt,
+    openingQuestions: row.openingQuestions,
+  };
+}
+
 function modelSuffix(value: unknown): string {
   const suffix = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(suffix) || suffix.length > 40) return "";
@@ -1266,6 +1449,34 @@ function blurbOf(value: unknown): string {
   if (!text) return "";
   if ([...text].length > 12) throw new HttpError(400, "模型说明太长了。十二个字以内。");
   return text;
+}
+
+function parseOpeningQuestions(value: string | null): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+function openingQuestionsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const questions: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const text = maskAbuse(sanitize(item)).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    if ([...text].length > 20) throw new HttpError(400, "每条开场问题最多二十个字。");
+    questions.push(text);
+    if (questions.length > 4) throw new HttpError(400, "最多设置四个开场问题。");
+  }
+  return questions;
 }
 
 function reasonOf(value: unknown): string {
@@ -1295,14 +1506,15 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
        GROUP BY operator_id
      ) p ON p.operator_id = o.id
      WHERE o.active = 1 AND ${OWNER_READY}
-       AND o.last_seen_at >= ?
+       AND o.accepting = 1
+       AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
        AND COALESCE(p.n, 0) < ?
        AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
        ${blockFilter}
      ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
      LIMIT 1`,
   )
-    .bind(now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
+    .bind(now, now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
     .first<{ id: string }>();
   return row?.id || HOME_MODEL;
 }
@@ -1437,7 +1649,7 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
   const pages = Math.max(1, Math.ceil(total / LIST_SIZE));
   const page = Math.min(asked, pages);
   const rows = await env.DB.prepare(
-    `SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt
+    `SELECT id, suffix, email, blurb, status, reason, created_at AS createdAt, account_id AS accountId
      FROM applications
      ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC
      LIMIT ? OFFSET ?`,
@@ -1451,6 +1663,7 @@ async function listApplications(request: Request, env: AppEnv): Promise<Response
       status: string;
       reason: string | null;
       createdAt: number;
+      accountId: string | null;
     }>();
   return json({
     applications: rows.results,
@@ -1571,7 +1784,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operatorPages = Math.max(1, Math.ceil(operatorTotal / AUDIT_MODEL_PAGE_SIZE));
   const operatorPage = Math.min(operatorPageRequested, operatorPages);
   const operatorRows = await env.DB.prepare(
-    `SELECT o.id, o.active, o.blurb, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
+    `SELECT o.id, o.active, o.accepting, o.away_at, o.blurb, o.opening_questions, CASE WHEN ${OWNER_READY} THEN o.last_seen_at ELSE 0 END AS last_seen_at, o.last_reply_at, o.last_assigned_at,
       COALESCE(p.n, 0) AS pending, p.oldest AS oldest_pending_at
      FROM operators o
      LEFT JOIN (
@@ -1589,9 +1802,10 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
   const operators = operatorRows.results.map((row) => presenceFromRow(row, Date.now()));
   const statusRank: Record<PresenceState, number> = {
     online: 0,
-    busy: 1,
-    away: 2,
-    off: 3,
+    idle: 1,
+    busy: 2,
+    away: 3,
+    off: 4,
   };
   const ordered = [...operators].sort(
     (a, b) => statusRank[a.status] - statusRank[b.status],
@@ -1650,7 +1864,7 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
 async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat): Promise<number> {
   if (operatorId === HOME_MODEL) return 0;
   const target = await operatorPresence(env, operatorId, Date.now(), seat);
-  if (!target.active || target.status !== "online" || target.pending >= PENDING_CAP) return 0;
+  if (!target.active || (target.status !== "online" && target.status !== "idle") || target.pending >= PENDING_CAP) return 0;
 
   let slots = PENDING_CAP - target.pending;
   const candidates = await env.DB.prepare(
@@ -1737,11 +1951,12 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
   const [waiting, closed, presence, pendingRow] = await Promise.all([
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt,
-        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned,
+        CASE WHEN EXISTS(SELECT 1 FROM thread_reads r WHERE r.thread_id=threads.id AND r.owner_kind='operator' AND r.owner_id=? AND r.last_read_at>=threads.updated_at) THEN 0 ELSE 1 END AS unread
        FROM threads WHERE awaiting = 1 AND queued = 0 AND operator_id = ? AND ${ownership.sql} AND ${unblockedThread("threads")} ORDER BY pinned DESC,updated_at ASC LIMIT 100`,
     )
-      .bind(own, own, ...ownership.values)
-      .all<{ id: string; title: string; preview: string; updatedAt: number; pinned: number }>(),
+      .bind(own, own, own, ...ownership.values)
+      .all<{ id: string; title: string; preview: string; updatedAt: number; pinned: number; unread: number }>(),
     env.DB.prepare(
       `SELECT id, title, preview, updated_at AS updatedAt, last_role AS lastRole,
         EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='operator' AND p.owner_id=?) AS pinned
@@ -1770,6 +1985,7 @@ async function queue(request: Request, env: AppEnv): Promise<Response> {
     operatorId: seat.operatorId || null,
     needsModel: !seat.operatorId,
     status,
+    accepting: presence.accepting === 1,
     waiting: waiting.results.filter((row) => !blockedIds.has(row.id)),
     pending: pendingRow?.n ?? 0,
     recent: rows.filter((row) => row.lastRole !== "visitor" && !blockedIds.has(row.id)).slice(0, 20),
@@ -1874,6 +2090,63 @@ function pushEndpoint(value: unknown): string {
 async function pushConfig(request: Request, env: AppEnv): Promise<Response> {
   await requireSeat(request, env);
   return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
+}
+
+async function pushStatus(request: Request, env: AppEnv): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const row = endpoint && seat.operatorId
+    ? await env.DB.prepare("SELECT 1 AS active FROM push_subscriptions WHERE endpoint = ? AND operator_id = ?")
+      .bind(endpoint, seat.operatorId)
+      .first<{ active: number }>()
+    : null;
+  return json({ subscribed: Boolean(row) });
+}
+
+async function accountPushConfig(request: Request, env: AppEnv): Promise<Response> {
+  await requireAccount(request, env);
+  return json({ publicKey: env.VAPID_PUBLIC_KEY || "" });
+}
+
+async function accountPushStatus(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const row = endpoint
+    ? await env.DB.prepare("SELECT 1 AS active FROM push_subscriptions WHERE endpoint = ? AND account_id = ?")
+      .bind(endpoint, account.id)
+      .first<{ active: number }>()
+    : null;
+  return json({ subscribed: Boolean(row) });
+}
+
+async function accountPushSubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  const keys = payload.keys;
+  const p256dh = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { p256dh?: unknown }).p256dh : "");
+  const auth = pushKeyMaterial(keys && typeof keys === "object" ? (keys as { auth?: unknown }).auth : "");
+  if (!endpoint || !p256dh || !auth) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare(
+    `INSERT INTO push_subscriptions (endpoint, account_id, p256dh, auth, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET account_id = excluded.account_id, p256dh = excluded.p256dh, auth = excluded.auth, created_at = excluded.created_at`,
+  )
+    .bind(endpoint, account.id, p256dh, auth, Date.now())
+    .run();
+  return json({ ok: true });
+}
+
+async function accountPushUnsubscribe(request: Request, env: AppEnv): Promise<Response> {
+  const account = await requireAccount(request, env);
+  const payload = await readJson(request);
+  const endpoint = pushEndpoint(payload.endpoint);
+  if (!endpoint) throw new HttpError(400, "这台浏览器的订阅对不上。");
+  await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND account_id = ?")
+    .bind(endpoint, account.id).run();
+  return json({ ok: true });
 }
 
 async function pushSubscribe(request: Request, env: AppEnv): Promise<Response> {
@@ -2028,6 +2301,19 @@ async function pinThread(request: Request, env: AppEnv, id: string): Promise<Res
   return json({ ok: true, pinned });
 }
 
+async function markThreadRead(request: Request, env: AppEnv, id: string): Promise<Response> {
+  const seat = await requireSeat(request, env);
+  if (!seat.operatorId) throw new HttpError(409, "请先绑定模型，再标记已读。");
+  const ownership = seatOwnership(seat, "threads.operator_id");
+  const thread = await env.DB.prepare(`SELECT updated_at AS updatedAt FROM threads WHERE id = ? AND ${ownership.sql}`)
+    .bind(id, ...ownership.values).first<{ updatedAt: number }>();
+  if (!thread) throw new HttpError(404, "这屉不在笼里。");
+  await env.DB.prepare(`INSERT INTO thread_reads(thread_id,owner_kind,owner_id,last_read_at) VALUES(?,'operator',?,?)
+    ON CONFLICT(thread_id,owner_kind,owner_id) DO UPDATE SET last_read_at=excluded.last_read_at`)
+    .bind(id, seat.operatorId, thread.updatedAt).run();
+  return json({ ok: true });
+}
+
 async function renameAdminThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const seat = await requireSeat(request, env);
   const ownership = seatOwnership(seat, "threads.operator_id");
@@ -2042,16 +2328,19 @@ async function renameAdminThread(request: Request, env: AppEnv, id: string): Pro
   return json({ ok: true, title });
 }
 
-async function adminReply(request: Request, env: AppEnv, id: string): Promise<Response> {
+async function adminReply(request: Request, env: AppEnv, id: string, ctx: ExecutionContext): Promise<Response> {
   const seat = await requireSeat(request, env);
   const ownership = seatOwnership(seat, "threads.operator_id");
-  const exists = await env.DB.prepare(`SELECT operator_id FROM threads WHERE id = ? AND ${ownership.sql}`)
+  const exists = await env.DB.prepare(`SELECT operator_id, title, account_id FROM threads WHERE id = ? AND ${ownership.sql}`)
     .bind(id, ...ownership.values)
-    .first<{ operator_id: string }>();
+    .first<{ operator_id: string; title: string; account_id: string | null }>();
   if (!exists) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
   await writeMessage(env, id, "tangbao", incoming, 0);
   await touchReply(env, seat, Date.now());
+  if (exists.account_id) {
+    ctx.waitUntil(notifyAccount(env, exists.account_id, id, exists.title, caption(incoming.body, incoming.images.length)));
+  }
   return json({ ok: true });
 }
 
@@ -2561,7 +2850,7 @@ function bearer(request: Request): string {
 
 async function readJson(
   request: Request,
-): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown }> {
+): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; openingQuestions?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown; graceMs?: unknown }> {
   const text = new TextDecoder().decode(await readRequestBytes(request, REQUEST_LIMIT,
     () => new HttpError(413, "这句太长了。糖包一次看不了这么多。")));
   if (!text) return {};
@@ -2578,6 +2867,7 @@ async function readJson(
       email?: unknown;
       reason?: unknown;
       blurb?: unknown;
+      openingQuestions?: unknown;
       endpoint?: unknown;
       keys?: unknown;
     };

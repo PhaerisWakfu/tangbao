@@ -135,12 +135,7 @@
             <div class="model-list" id="model-list"></div>
           </div>
         </form>
-        <div class="chips" id="chips">
-          <button type="button">How are you</button>
-          <button type="button">哈基米</button>
-          <button type="button">咕咕</button>
-          <button type="button">锟斤拷</button>
-        </div>
+        <div class="chips" id="chips" hidden></div>
       </div>
       <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「<b>能工智人</b>」，回复的是一个<b>叫糖包的人</b>。不是医疗、法律或危机援助。注意文明用语，禁止发送骂人、敏感与色情内容。</span><button class="report-link" type="button" id="report-open" hidden>举报模型</button></p>
     </main>
@@ -212,6 +207,8 @@
         <div class="sketch-tool-group">
           <button type="button" id="sketch-pen" aria-pressed="true">画笔 <kbd>B</kbd></button>
           <button type="button" id="sketch-erase">橡皮 <kbd>E</kbd></button>
+          <button type="button" id="sketch-fill" aria-pressed="false">填色 <kbd>F</kbd></button>
+          <button type="button" id="sketch-pan" aria-pressed="false">移动</button>
         </div>
         <div class="sketch-tool-group">
           <button type="button" data-size="3">细</button>
@@ -227,13 +224,20 @@
           <button type="button" class="swatch" data-color="#b58a2a" style="--c:#b58a2a" aria-label="姜黄"></button>
           <label class="sketch-color"><input type="color" id="sketch-color" value="#1f1d1a" aria-label="自定义颜色"><span>自选</span></label>
         </div>
+        <div class="sketch-tool-group sketch-zoom" role="group" aria-label="画布缩放">
+          <button type="button" id="sketch-zoom-out" aria-label="缩小画布">−</button>
+          <button type="button" id="sketch-zoom-reset" aria-label="恢复 100% 缩放">100%</button>
+          <button type="button" id="sketch-zoom-in" aria-label="放大画布">+</button>
+        </div>
         <div class="sketch-tool-group sketch-actions">
           <button type="button" id="sketch-undo">撤销 <kbd>Ctrl Z</kbd></button>
           <button type="button" id="sketch-redo">重做 <kbd>Ctrl ⇧ Z</kbd></button>
           <button type="button" id="sketch-clear">清空</button>
         </div>
       </div>
-      <canvas id="sketch-pad"></canvas>
+      <div class="sketch-viewport" id="sketch-viewport">
+        <canvas id="sketch-pad"></canvas>
+      </div>
       <p class="sketch-err" id="sketch-err"></p>
       <footer>
         <button class="text-btn" type="button" id="sketch-cancel">取消</button>

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import ts from "typescript";
 const source = await readFile(new URL("../src/client/app.txt", import.meta.url), "utf8");
 const ast = ts.createSourceFile("app.js", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-const names = ["validId", "visitorId", "loadStore", "saveStore", "remember", "sendText"];
+const names = ["validId", "visitorId", "loadStore", "saveStore", "remember", "sendText", "setThreadUrl"];
 const code = ast.statements.filter(n => ts.isFunctionDeclaration(n) && names.includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
 for (const failure of ["SecurityError", "QuotaExceededError"]) test(`${failure} does not turn successful sending into a failed/repeated POST`, async () => {
   const notices = [], posts = [];
@@ -15,6 +15,7 @@ for (const failure of ["SecurityError", "QuotaExceededError"]) test(`${failure} 
     localStorage: { getItem() { throw new DOMException("disabled", failure); }, setItem() { throw new DOMException("full", failure); } },
     input: { value: "synthetic", focus() {} }, titleEl: {}, $: () => ({ value: "" }), renderHistory() {}, activeModel: () => "", grow() {}, showAttach() {}, paint() {},
     showSys: text => notices.push(text), refresh: async () => {}, URL: { revokeObjectURL() {} },
+    location: { pathname: "/chat", search: "" }, window: { history: { replaceState() { throw new DOMException("disabled", failure); } } },
     api: async (route, options) => { posts.push([route, options]); return { id: "aaaaaaaaaaaaaaaaaaaaaaaa", token: "synthetic-token" }; },
   };
   new Script(code).runInNewContext(context);

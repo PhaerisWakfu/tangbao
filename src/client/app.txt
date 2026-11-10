@@ -25,7 +25,7 @@ const modelBtn = $("#model");
 const modelScrim = $("#model-scrim");
 const modelClose = $("#model-close");
 const modelSearch = $("#model-search");
-const history = $("#history");
+const historyList = $("#history");
 const titleEl = $("#title");
 const messagePages = new TangbaoMessagePages(api);
 const claimPrompt = $("#claim-prompt");
@@ -50,6 +50,7 @@ let claiming = false;
 let loggedOut = TangbaoAccount.logoutPending;
 let status = { state: "available", label: "在线", note: "他在", awake: true, online: true, status: "online" };
 let messages = [];
+let accountUnread = 0;
 let openAwaiting = true;
 let painted = "";
 let timer = 0;
@@ -181,7 +182,7 @@ function showSys(text) {
 }
 
 function applyStatus(next) {
-  const present = next.status === "online" || next.status === "busy" || Boolean(next.awake);
+  const present = next.status === "online" || next.status === "idle" || next.status === "busy" || Boolean(next.awake);
   status = { ...next, awake: present, online: next.status === "online" };
   body.dataset.presence = present ? "awake" : "asleep";
   try {
@@ -198,6 +199,9 @@ function statusFromState(state) {
   if (state === "online") {
     return { state: "available", label: "在线", note: "他在", awake: true, online: true, status: state };
   }
+  if (state === "idle") {
+    return { state: "busy", label: "暂离", note: "可能慢", awake: false, online: false, status: state };
+  }
   if (state === "busy") {
     return { state: "busy", label: "忙碌", note: "稍等", awake: false, online: false, status: state };
   }
@@ -211,11 +215,26 @@ function statusFromModel(model) {
   return statusFromState(model.status || (model.online ? "online" : "away"));
 }
 
+function syncApplyEntry() {
+  const link = document.querySelector(".apply-top");
+  if (!link) return;
+  const account = TangbaoAccount.account;
+  const model = Boolean(account?.operatorId || account?.home || account?.roles?.includes("admin"));
+  link.textContent = model ? "进入笼屉" : "成为AI";
+  link.href = model ? "/desk" : "/?apply=1";
+}
+
+function autoStatus() {
+  if (models.some((model) => model.status === "online" || model.online === true)) return statusFromState("online");
+  if (models.some((model) => model.status === "idle")) return statusFromState("idle");
+  if (models.some((model) => model.status === "busy")) return statusFromState("busy");
+  return statusFromModel(models.find((item) => item.id === autoModel) || models.find((item) => item.home) || null);
+}
+
 function applyModelStatus() {
   const id = activeModel();
   if (!id) {
-    const auto = models.find((item) => item.id === autoModel) || models.find((item) => item.home);
-    applyStatus(statusFromModel(auto || null));
+    applyStatus(autoStatus());
     return;
   }
   applyStatus(statusFromModel(models.find((item) => item.id === id)));
@@ -336,6 +355,49 @@ function paint(list) {
   stage.scrollTop = stage.scrollHeight;
 }
 
+function updateUserTitle() {
+  document.title = accountUnread > 0 ? "(新消息) 糖包" : "糖包";
+}
+
+async function markAccountRead(thread) {
+  if (!thread?.owned) return;
+  try {
+    await api(`/api/account/threads/${thread.id}/read`, { method: "POST" });
+  } catch {
+    return;
+  }
+  if (thread.unread) {
+    thread.unread = false;
+    accountUnread = Math.max(0, accountUnread - 1);
+    updateUserTitle();
+    renderHistory();
+  }
+}
+
+async function refreshUnread() {
+  const account = TangbaoAccount.account;
+  if (!account?.verified) {
+    accountUnread = 0;
+    updateUserTitle();
+    return;
+  }
+  try {
+    const data = await api("/api/account/unread");
+    const ids = new Set((data.threads || []).map((item) => item.id));
+    accountUnread = Number(data.count) || 0;
+    for (const thread of ownedThreads) thread.unread = ids.has(thread.id);
+    if (current?.owned && ids.has(current.id) && document.visibilityState === "visible") {
+      current.unread = false;
+      accountUnread = Math.max(0, accountUnread - 1);
+      void markAccountRead(current);
+    }
+    renderHistory();
+    updateUserTitle();
+  } catch {
+    // 下一轮再查，不打断聊天。
+  }
+}
+
 function historyModel(thread) {
   if (thread.queued || thread.operator === "tangbao-pool") return "Auto";
   if (!thread.operator) return "";
@@ -362,7 +424,7 @@ function visibleThreads() {
 
 
 function renderHistory() {
-  history.replaceChildren();
+  historyList.replaceChildren();
   if (!visibleThreads().length) {
     const empty = document.createElement("p");
     empty.className = "hist-empty";
@@ -372,18 +434,26 @@ function renderHistory() {
     recover.href = "http://tangbao.phaeris.cn/__recover?stage=workers";
     recover.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.4" cy="8.4" r="4.8"/><path d="m12 12 4 4"/><path d="M6.2 8.4h4.4"/></svg><span class="hist-recover-copy"><strong>找不到旧对话？</strong><small>试着从旧页面找回</small></span><span class="hist-recover-arrow" aria-hidden="true">→</span>';
     empty.append(document.createElement("br"), recover);
-    history.append(empty);
+    historyList.append(empty);
     return;
   }
   const sections = [["账号对话", ownedThreads], ["此浏览器的匿名对话", store.threads]];
   for (const [label, threads] of sections) {
     if (!threads.length) continue;
     threads.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
-    const heading = document.createElement("h3"); heading.textContent = label; history.append(heading);
+    const heading = document.createElement("h3"); heading.textContent = label; historyList.append(heading);
     for (const thread of threads) {
       const row = document.createElement("div"); row.className = "hist-row";
       if (current?.id === thread.id) row.dataset.current = "true";
       if (thread.pinned) row.dataset.pinned = "true";
+      if (thread.unread) {
+        const dot = document.createElement("span");
+        dot.className = "hist-unread-dot";
+        dot.setAttribute("role", "img");
+        dot.setAttribute("aria-label", "有新回复");
+        dot.title = "有新回复";
+        row.append(dot);
+      }
       const link = document.createElement("a"); link.href = "/chat"; link.textContent = thread.title || "新对话";
       link.addEventListener("click", (event) => { event.preventDefault(); void openThread(thread.id); });
       row.append(link);
@@ -468,17 +538,17 @@ function renderHistory() {
         closeHistoryMenus();
         await removeThread(thread);
       });
-      row.append(more, menu); history.append(row);
+      row.append(more, menu); historyList.append(row);
       if (!thread.owned && TangbaoAccount.account?.verified) {
         const claim = document.createElement("button"); claim.type = "button"; claim.className = "history-claim history-claim-one"; claim.textContent = "关联此对话到账号"; claim.disabled = claiming;
-        claim.addEventListener("click", () => void claimThreads([thread])); history.append(claim);
+        claim.addEventListener("click", () => void claimThreads([thread])); historyList.append(claim);
       }
     }
     if (label === "账号对话" && ownedHasMore) {
       const more = document.createElement("button"); more.type = "button"; more.className = "history-claim history-claim-more";
       more.textContent = ownedLoading ? "正在加载…" : "加载更多账号对话"; more.disabled = ownedLoading;
       more.addEventListener("click", () => { void loadOwnedThreads(true).catch((err) => showSys(err.message)); });
-      history.append(more);
+      historyList.append(more);
     }
   }
 }
@@ -681,14 +751,18 @@ async function syncAccountHistory() {
   renderHistory();
   try { await loadOwnedThreads(); }
   catch (err) { showSys(err.message || "账号历史暂时无法读取，请稍后刷新。"); }
+  void refreshUnread();
   scheduleClaimPrompt();
 }
-window.addEventListener("tb:account-change", () => { void syncAccountHistory(); });
+window.addEventListener("tb:account-change", () => { syncApplyEntry(); void syncAccountHistory(); });
 window.addEventListener("tb:logout", () => {
+  syncApplyEntry();
+  setThreadUrl(null);
   messagePages.clear();
   loggedOut = true; historySequence++; viewVersion++;
   clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
   current = null; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; store = { threads: [], activeId: null };
+  accountUnread = 0; updateUserTitle();
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
@@ -797,6 +871,7 @@ async function tick() {
   ticking = (async () => {
     try {
       await loadModels(false);
+      await refreshUnread();
       await refresh();
     } catch {
       // 下一轮再看。失败不改掉已经写在页面上的话。
@@ -812,11 +887,37 @@ function closeSide() {
   body.classList.remove("drawer");
 }
 
+function setThreadUrl(id) {
+  const next = id ? `/chat?thread=${encodeURIComponent(id)}` : "/chat";
+  if (`${location.pathname}${location.search}` !== next) {
+    try { window.history.replaceState(null, "", next); } catch {}
+  }
+}
+
+async function closeThreadNotification(id) {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const notifications = await registration?.getNotifications({ tag: `user:${id}` }) || [];
+    for (const notification of notifications) notification.close();
+  } catch {}
+}
+
 async function openThread(id) {
   const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
+  const switched = current?.id !== id;
   const version = ++viewVersion;
+  if (switched) clearDraft();
   current = found;
+  setThreadUrl(id);
+  void closeThreadNotification(id);
+  if (found.owned) void markAccountRead(found);
+  else {
+    found.unread = false;
+    found.lastReadAt = found.updatedAt || Date.now();
+    saveStore();
+  }
   messages = [];
   threadModel = "";
   threadQueued = false;
@@ -840,6 +941,8 @@ async function openThread(id) {
 function newChat(pickModel) {
   viewVersion++;
   if (pickModel !== undefined && typeof pickModel !== "string") pickModel = undefined;
+  clearDraft();
+  setThreadUrl(null);
   current = null;
   messages = [];
   applyBlocked(false);
@@ -1005,6 +1108,11 @@ function clearAttach() {
   grow();
 }
 
+function clearDraft() {
+  input.value = "";
+  clearAttach();
+}
+
 async function addImages(files) {
   const list = [...files].filter(Boolean);
   if (!list.length) return;
@@ -1093,6 +1201,7 @@ async function sendText(text) {
     if (relevantAccount) remember(result, version === viewVersion);
     if (version !== viewVersion || !relevantAccount) return;
     current = result; threadQueued = Boolean(result.queued); threadModel = result.queued ? "" : result.operator || "";
+    setThreadUrl(result.id);
     titleEl.textContent = result.title || "";
     input.value = ""; pendingImages = []; $("#file").value = ""; showAttach();
     for (const image of images) URL.revokeObjectURL(image.url);
@@ -1123,6 +1232,7 @@ modelBtn.addEventListener("click", (event) => {
   card.hidden = !open;
   modelScrim.hidden = !open;
   modelBtn.setAttribute("aria-expanded", String(open));
+  if (open) void refreshModelStatuses();
 });
 modelClose.addEventListener("click", closeCard);
 modelScrim.addEventListener("click", closeCard);
@@ -1300,11 +1410,22 @@ log.addEventListener("click", async (event) => {
 });
 
 input.addEventListener("input", grow);
+let inputComposing = false;
+let inputCompositionEnded = 0;
+const coarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)");
+input.addEventListener("compositionstart", () => { inputComposing = true; });
+input.addEventListener("compositionend", () => {
+  inputComposing = false;
+  inputCompositionEnded = performance.now();
+});
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-    event.preventDefault();
-    composer.requestSubmit();
-  }
+  if (event.key !== "Enter" || event.shiftKey) return;
+  if (event.isComposing || inputComposing || event.keyCode === 229) return;
+  if (inputCompositionEnded && performance.now() - inputCompositionEnded < 80) return;
+  // 手机软键盘 Enter 只换行，发送走发送按钮；桌面键盘仍用 Enter 发送。
+  if (coarsePointer.matches) return;
+  event.preventDefault();
+  composer.requestSubmit();
 });
 composer.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1325,17 +1446,41 @@ $("#pick-image").addEventListener("click", () => {
   closePlus();
   $("#file").click();
 });
-const ASK_CHIPS = ["How are you", "哈基米", "咕咕", "锟斤拷"];
 const DRAW_CHIPS = ["画一只猫", "画一只兔子", "画一朵花", "画一轮月亮"];
+
+function openingQuestionsForActiveModel() {
+  const id = activeModel();
+  if (!id) return [];
+  const model = models.find((item) => item.id === id);
+  if (!Array.isArray(model?.openingQuestions)) return [];
+  return model.openingQuestions.filter((question) => typeof question === "string" && question.trim()).slice(0, 4);
+}
+
+function paintChips() {
+  const labels = making ? DRAW_CHIPS : openingQuestionsForActiveModel();
+  const box = $("#chips");
+  const current = [...box.querySelectorAll("button")].map((button) => button.textContent || "");
+  if (!labels.length) {
+    box.hidden = true;
+    if (current.length) box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  if (current.length === labels.length && current.every((label, index) => label === labels[index])) return;
+  box.replaceChildren();
+  for (const label of labels) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    box.append(button);
+  }
+}
 
 function setMaking(on) {
   making = on;
   $("#make").hidden = !on;
   input.placeholder = on ? "描述要画的东西" : "给糖包发消息";
-  const labels = on ? DRAW_CHIPS : ASK_CHIPS;
-  [...$("#chips").querySelectorAll("button")].forEach((button, index) => {
-    button.textContent = labels[index] || "";
-  });
+  paintChips();
   grow();
   if (on) input.focus();
 }
@@ -1401,12 +1546,16 @@ function paintModels() {
 
   const visible = modelSearchMode
     ? models.slice()
-    : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
+    : models.filter((model) => model.id === id || model.status === "online" || model.status === "idle" || model.status === "busy" || model.online === true);
+  if (!modelSearchMode) {
+    const rank = { online: 0, idle: 1, busy: 2 };
+    visible.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3));
+  }
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
-    const selectable = online || state === "busy";
+    const selectable = online || state === "idle" || state === "busy";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
@@ -1417,9 +1566,9 @@ function paintModels() {
     button.innerHTML =
       `<i data-on="${selectable ? "1" : "0"}"></i><span class="who"><b></b><small></small></span><small class="model-state"></small>`;
     button.querySelector("b").textContent = model.id;
-    button.querySelector(".who small").textContent = model.blurb || "";
+    button.querySelector(".who small").textContent = model.blurb || "还没写简介";
     button.querySelector(".model-state").textContent =
-      state === "online" ? "在线" : state === "busy" ? "忙碌" : "离开";
+      state === "online" ? "在线" : state === "idle" ? "暂离" : state === "busy" ? "忙碌" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
       if (!selectable) return;
@@ -1456,7 +1605,29 @@ function paintModels() {
     more.addEventListener("click", () => void loadMoreModels());
     list.append(more);
   }
+  paintChips();
   if (!current) applyModelStatus();
+}
+
+async function freshModelStatuses(list) {
+  if (!list.length) return list;
+  const byId = new Map();
+  for (let offset = 0; offset < list.length; offset += 60) {
+    const ids = list.slice(offset, offset + 60).map((model) => model.id);
+    try {
+      const data = await api(`/api/models/status?ids=${encodeURIComponent(ids.join(","))}`);
+      for (const item of data.models || []) byId.set(item.id, item);
+    } catch {
+      // 状态接口失败时沿用模型列表里的旧状态，不阻塞选型。
+    }
+  }
+  return list.map((model) => ({ ...model, ...(byId.get(model.id) || {}) }));
+}
+
+async function refreshModelStatuses() {
+  if (!models.length) return;
+  models = await freshModelStatuses(models);
+  paintModels();
 }
 
 async function loadModels(pick) {
@@ -1465,7 +1636,7 @@ async function loadModels(pick) {
   try {
     const data = await api("/api/models");
     if (seq !== modelSearchSeq || modelSearchMode) return;
-    models = data.models || [];
+    models = await freshModelStatuses(data.models || []);
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchMode = false;
     modelSearchQuery = "";
@@ -1509,7 +1680,7 @@ async function searchModels() {
   try {
     const data = await api(`/api/models?q=${encodeURIComponent(q)}&page=1`);
     if (seq !== modelSearchSeq) return;
-    models = data.models || [];
+    models = await freshModelStatuses(data.models || []);
     autoModel = typeof data.auto === "string" ? data.auto : "";
     modelSearchHasMore = Boolean(data.hasMore);
     modelSearchHidden = 0;
@@ -1532,7 +1703,7 @@ async function loadMoreModels() {
       `/api/models?q=${encodeURIComponent(modelSearchQuery)}&page=${page}`,
     );
     if (seq !== modelSearchSeq) return;
-    models = models.concat(data.models || []);
+    models = models.concat(await freshModelStatuses(data.models || []));
     autoModel = typeof data.auto === "string" ? data.auto : autoModel;
     modelSearchPage = page;
     modelSearchHasMore = Boolean(data.hasMore);
@@ -1561,10 +1732,19 @@ document.addEventListener("visibilitychange", () => {
 
 const pendingTimer = setInterval(tickPending, 15000);
 renderHistory();
+updateUserTitle();
 void (async () => {
+  syncApplyEntry();
   await TangbaoAccount.ready;
+  syncApplyEntry();
   await syncAccountHistory();
   await loadModels(true);
+  const linkedThread = new URLSearchParams(location.search).get("thread");
+  if (linkedThread && visibleThreads().some((item) => item.id === linkedThread)) {
+    await openThread(linkedThread);
+  } else if (linkedThread) {
+    setThreadUrl(null);
+  }
   if (current) {
     body.dataset.state = "chat";
     titleEl.textContent = current.title || "";
@@ -1593,16 +1773,25 @@ stage.addEventListener("scroll", () => {
   if (stage.scrollTop < 60) void loadOlderMessages();
 }, { passive: true });
 const sketch = $("#sketch");
+const sketchViewport = $("#sketch-viewport");
 const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
-let strokes = [];
-let redoStrokes = [];
+const FILL_TOLERANCE = 48;
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
+let actions = [];
+let cursor = 0;
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
 let erasing = false;
+let filling = false;
+let panning = false;
+let panStart = null;
+let zoom = 1;
 let padSize = { w: 1, h: 1, dpr: 1 };
+const baseCanvas = document.createElement("canvas");
+const basePen = baseCanvas.getContext("2d");
 
 function preparePad() {
   const width = Math.min(720, window.innerWidth - 64);
@@ -1611,44 +1800,190 @@ function preparePad() {
   padSize = { w: width, h: height, dpr };
   pad.width = Math.round(width * dpr);
   pad.height = Math.round(height * dpr);
+  baseCanvas.width = pad.width;
+  baseCanvas.height = pad.height;
+  applyZoomSize();
   pen.setTransform(dpr, 0, 0, dpr, 0, 0);
   pen.lineCap = "round";
   pen.lineJoin = "round";
-  redrawPad();
+  basePen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  basePen.lineCap = "round";
+  basePen.lineJoin = "round";
+  renderBase();
+  paintSketch();
 }
 
-function redrawPad() {
+function applyZoomSize() {
+  pad.style.width = `${padSize.w * zoom}px`;
+  pad.style.height = `${padSize.h * zoom}px`;
+  updateZoomControls();
+}
+
+function updateZoomControls() {
+  const percent = `${Math.round(zoom * 100)}%`;
+  $("#sketch-zoom-reset").textContent = percent;
+  $("#sketch-zoom-reset").setAttribute("aria-label", `当前缩放 ${percent}，点击恢复 100%`);
+  $("#sketch-zoom-out").disabled = zoom <= ZOOM_STEPS[0];
+  $("#sketch-zoom-in").disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+}
+
+function applyZoom(next, anchorX, anchorY) {
+  if (currentStroke) return;
+  const target = Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], next));
+  if (Math.abs(target - zoom) < 0.001) return;
+  const oldWidth = padSize.w * zoom;
+  const oldHeight = padSize.h * zoom;
+  const viewX = anchorX ?? sketchViewport.clientWidth / 2;
+  const viewY = anchorY ?? sketchViewport.clientHeight / 2;
+  const worldX = ((sketchViewport.scrollLeft + viewX) / oldWidth) * padSize.w;
+  const worldY = ((sketchViewport.scrollTop + viewY) / oldHeight) * padSize.h;
+  zoom = target;
+  applyZoomSize();
+  sketchViewport.scrollLeft = (worldX / padSize.w) * padSize.w * zoom - viewX;
+  sketchViewport.scrollTop = (worldY / padSize.h) * padSize.h * zoom - viewY;
+}
+
+function zoomStep(direction) {
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + direction))];
+  applyZoom(next);
+}
+
+function paintPaper(ctx) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+}
+
+function renderBase() {
+  paintPaper(basePen);
+  for (let i = 0; i < cursor; i += 1) {
+    const action = actions[i];
+    if (action.type === "stroke") paintStroke(basePen, action.stroke);
+    else if (action.type === "fill") applyFill(basePen, action);
+    else if (action.type === "clear") paintPaper(basePen);
+  }
+}
+
+function paintSketch() {
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.clearRect(0, 0, pad.width, pad.height);
+  pen.drawImage(baseCanvas, 0, 0);
   pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
-  pen.fillStyle = PAPER;
-  pen.fillRect(0, 0, padSize.w, padSize.h);
   pen.lineCap = "round";
   pen.lineJoin = "round";
-  for (const stroke of strokes) paintStroke(stroke);
-  if (currentStroke) paintStroke(currentStroke);
+  if (currentStroke) paintStroke(pen, currentStroke);
 }
 
-function paintStroke(stroke) {
+function commit(action) {
+  actions.length = cursor;
+  actions.push(action);
+  cursor = actions.length;
+}
+
+function paintStroke(ctx, stroke) {
   if (!stroke.points.length) return;
-  pen.strokeStyle = stroke.color;
-  pen.fillStyle = stroke.color;
-  pen.lineWidth = stroke.size;
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
+  ctx.lineWidth = stroke.size;
   const first = stroke.points[0];
   if (stroke.points.length === 1) {
-    pen.beginPath();
-    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
-    pen.fill();
+    ctx.beginPath();
+    ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    ctx.fill();
     return;
   }
-  pen.beginPath();
-  pen.moveTo(first.x, first.y);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
   for (let i = 1; i < stroke.points.length - 1; i += 1) {
     const point = stroke.points[i];
     const next = stroke.points[i + 1];
-    pen.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+    ctx.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
   }
   const last = stroke.points[stroke.points.length - 1];
-  pen.lineTo(last.x, last.y);
-  pen.stroke();
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+}
+
+function rgbOf(hex) {
+  const value = String(hex).replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return [31, 29, 26];
+  return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
+}
+
+function floodFill(ctx, seedX, seedY, color, tolerance) {
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return false;
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+  const seed = (seedY * width + seedX) * 4;
+  const sr = data[seed];
+  const sg = data[seed + 1];
+  const sb = data[seed + 2];
+  const [fr, fg, fb] = rgbOf(color);
+  if (sr === fr && sg === fg && sb === fb) return false;
+  const matches = (index) => Math.max(Math.abs(data[index] - sr), Math.abs(data[index + 1] - sg), Math.abs(data[index + 2] - sb)) <= tolerance;
+  const seen = new Uint8Array(width * height);
+  const stack = [[seedX, seedY]];
+  let changed = 0;
+  while (stack.length) {
+    const [startX, y] = stack.pop();
+    let x = startX;
+    while (x >= 0 && !seen[y * width + x] && matches((y * width + x) * 4)) x -= 1;
+    x += 1;
+    let up = false;
+    let down = false;
+    while (x < width && !seen[y * width + x] && matches((y * width + x) * 4)) {
+      const pixel = y * width + x;
+      seen[pixel] = 1;
+      const index = pixel * 4;
+      data[index] = fr;
+      data[index + 1] = fg;
+      data[index + 2] = fb;
+      data[index + 3] = 255;
+      changed += 1;
+      if (y > 0) {
+        const above = (y - 1) * width + x;
+        if (!seen[above] && matches(above * 4)) {
+          if (!up) { stack.push([x, y - 1]); up = true; }
+        } else {
+          up = false;
+        }
+      }
+      if (y < height - 1) {
+        const below = (y + 1) * width + x;
+        if (!seen[below] && matches(below * 4)) {
+          if (!down) { stack.push([x, y + 1]); down = true; }
+        } else {
+          down = false;
+        }
+      }
+      x += 1;
+    }
+  }
+  if (!changed) return false;
+  ctx.putImageData(image, 0, 0);
+  return true;
+}
+
+function applyFill(ctx, action) {
+  floodFill(ctx, Math.round(action.x * padSize.dpr), Math.round(action.y * padSize.dpr), action.color, action.tolerance ?? FILL_TOLERANCE);
+}
+
+function fillAt(x, y) {
+  if (currentStroke) return;
+  const color = penColor;
+  if (!floodFill(basePen, Math.round(x * padSize.dpr), Math.round(y * padSize.dpr), color, FILL_TOLERANCE)) return;
+  commit({ type: "fill", x, y, color, tolerance: FILL_TOLERANCE });
+  paintSketch();
+}
+
+function hasContent() {
+  return cursor > 0 && actions[cursor - 1].type !== "clear";
 }
 
 function padPoint(event) {
@@ -1659,27 +1994,75 @@ function padPoint(event) {
   };
 }
 
+function syncSizeControls() {
+  const enabled = !filling && !panning;
+  for (const button of document.querySelectorAll("[data-size]")) button.disabled = !enabled;
+}
+
 function setPenMode() {
   erasing = false;
+  filling = false;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function setEraserMode() {
   erasing = true;
+  filling = false;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
+}
+
+function setFillMode() {
+  erasing = false;
+  filling = true;
+  panning = false;
+  currentStroke = null;
+  sketchViewport.classList.remove("panning", "dragging");
+  sketchViewport.classList.add("filling");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "true");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
+}
+
+function setPanMode() {
+  erasing = false;
+  filling = false;
+  panning = true;
+  currentStroke = null;
+  sketchViewport.classList.remove("filling");
+  sketchViewport.classList.add("panning");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function openSketch() {
   closePlus();
-  strokes = [];
-  redoStrokes = [];
+  actions = [];
+  cursor = 0;
   currentStroke = null;
+  zoom = 1;
   setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
   TangbaoModal.open(sketch, $("#plus"));
+  sketchViewport.scrollLeft = 0;
+  sketchViewport.scrollTop = 0;
   requestAnimationFrame(preparePad);
 }
 
@@ -1690,25 +2073,54 @@ function closeSketch() {
 pad.addEventListener("pointerdown", (event) => {
   if (sketch.hidden) return;
   $("#sketch-err").textContent = "";
+  if (filling) {
+    const point = padPoint(event);
+    fillAt(point.x, point.y);
+    return;
+  }
   pad.setPointerCapture(event.pointerId);
+  if (panning) {
+    panStart = {
+      x: event.clientX,
+      y: event.clientY,
+      left: sketchViewport.scrollLeft,
+      top: sketchViewport.scrollTop,
+    };
+    sketchViewport.classList.add("dragging");
+    return;
+  }
   currentStroke = {
     color: erasing ? PAPER : penColor,
     size: erasing ? Math.max(penSize * 4, 16) : penSize,
     points: [padPoint(event)],
   };
-  redrawPad();
+  paintSketch();
 });
 pad.addEventListener("pointermove", (event) => {
-  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  if (!pad.hasPointerCapture(event.pointerId)) return;
+  if (panning && panStart) {
+    sketchViewport.scrollLeft = panStart.left - (event.clientX - panStart.x);
+    sketchViewport.scrollTop = panStart.top - (event.clientY - panStart.y);
+    return;
+  }
+  if (!currentStroke) return;
   currentStroke.points.push(padPoint(event));
-  redrawPad();
+  paintSketch();
 });
 function endStroke(event) {
-  if (!currentStroke) return;
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
-  if (currentStroke.points.length) strokes.push(currentStroke);
+  if (panning) {
+    panStart = null;
+    sketchViewport.classList.remove("dragging");
+    return;
+  }
+  const stroke = currentStroke;
   currentStroke = null;
-  redoStrokes = [];
+  if (stroke?.points.length) {
+    commit({ type: "stroke", stroke });
+    renderBase();
+  }
+  paintSketch();
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -1718,50 +2130,67 @@ document.querySelector(".sketch-tools").addEventListener("click", (event) => {
   const swatch = event.target.closest("[data-color]");
   if (size) {
     penSize = Number(size.dataset.size);
-    setPenMode();
+    if (!filling) setPenMode();
     for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
     size.setAttribute("aria-pressed", "true");
   }
   if (swatch) {
     penColor = swatch.dataset.color;
     $("#sketch-color").value = penColor;
-    setPenMode();
+    if (filling) setFillMode();
+    else setPenMode();
     for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
     swatch.setAttribute("aria-pressed", "true");
   }
 });
 $("#sketch-color").addEventListener("input", (event) => {
   penColor = event.target.value;
-  setPenMode();
+  if (filling) setFillMode();
+  else setPenMode();
   for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
 });
 $("#sketch-pen").addEventListener("click", setPenMode);
 $("#sketch-erase").addEventListener("click", setEraserMode);
+$("#sketch-fill").addEventListener("click", setFillMode);
+$("#sketch-pan").addEventListener("click", setPanMode);
+$("#sketch-zoom-out").addEventListener("click", () => zoomStep(-1));
+$("#sketch-zoom-in").addEventListener("click", () => zoomStep(1));
+$("#sketch-zoom-reset").addEventListener("click", () => applyZoom(1));
+sketchViewport.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  if (currentStroke) return;
+  const rect = sketchViewport.getBoundingClientRect();
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + (event.deltaY < 0 ? 1 : -1)))];
+  applyZoom(next, event.clientX - rect.left, event.clientY - rect.top);
+}, { passive: false });
 function undoSketch() {
-  const stroke = strokes.pop();
-  if (!stroke) return;
-  redoStrokes.push(stroke);
-  redrawPad();
+  if (!cursor) return;
+  cursor -= 1;
+  renderBase();
+  paintSketch();
 }
 
 function redoSketch() {
-  const stroke = redoStrokes.pop();
-  if (!stroke) return;
-  strokes.push(stroke);
-  redrawPad();
+  if (cursor >= actions.length) return;
+  cursor += 1;
+  renderBase();
+  paintSketch();
 }
 
 $("#sketch-undo").addEventListener("click", undoSketch);
 $("#sketch-redo").addEventListener("click", redoSketch);
 $("#sketch-clear").addEventListener("click", () => {
-  strokes = [];
-  redoStrokes = [];
-  redrawPad();
+  if (!hasContent()) return;
+  commit({ type: "clear" });
+  renderBase();
+  paintSketch();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
 $("#sketch-cancel").addEventListener("click", closeSketch);
 $("#sketch-ok").addEventListener("click", () => {
-  if (!strokes.length) {
+  if (!hasContent()) {
     $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
     return;
   }
@@ -1801,6 +2230,8 @@ document.addEventListener("keydown", (event) => {
     setPenMode();
   } else if (key === "e") {
     setEraserMode();
+  } else if (key === "f") {
+    setFillMode();
   } else if (event.key === "[") {
     penSize = Math.max(2, penSize - 1);
   } else if (event.key === "]") {

@@ -98,15 +98,46 @@ export async function accountBusinessRoute(request: Request, env: BusinessEnv): 
     const seat = await legacySeat(request, env);
     return json({ operatorId: seat?.operatorId || null, admin: seat?.super || false, migrationRequired: Boolean(seat) });
   }
+  if (path === "/api/account/unread" && request.method === "GET") {
+    const account = await requireAccount(request, env);
+    const [countRow, rows] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM threads t
+        WHERE t.account_id=? AND t.last_role='tangbao'
+        AND t.updated_at > COALESCE((SELECT r.last_read_at FROM thread_reads r
+          WHERE r.thread_id=t.id AND r.owner_kind='account' AND r.owner_id=?),0)`)
+        .bind(account.id, account.id).first<{ n: number }>(),
+      env.DB.prepare(`SELECT t.id,t.updated_at AS updatedAt FROM threads t
+        WHERE t.account_id=? AND t.last_role='tangbao'
+        AND t.updated_at > COALESCE((SELECT r.last_read_at FROM thread_reads r
+          WHERE r.thread_id=t.id AND r.owner_kind='account' AND r.owner_id=?),0)
+        ORDER BY t.updated_at DESC LIMIT 100`)
+        .bind(account.id, account.id).all<{ id: string; updatedAt: number }>(),
+    ]);
+    return json({ count: Number(countRow?.n) || 0, threads: rows.results });
+  }
   if (path === "/api/account/threads" && request.method === "GET") {
     const account = await requireAccount(request, env);
     const page = Math.max(1, Math.min(10000, Number(url.searchParams.get("page")) || 1));
-    const rows = await env.DB.prepare(`SELECT id,title,preview,updated_at AS updatedAt,operator_id AS operatorId,awaiting,
-        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='account' AND p.owner_id=?) AS pinned
+    const rows = await env.DB.prepare(`SELECT id,title,preview,updated_at AS updatedAt,operator_id AS operatorId,awaiting,last_role AS lastRole,
+        EXISTS(SELECT 1 FROM thread_pins p WHERE p.thread_id=threads.id AND p.owner_kind='account' AND p.owner_id=?) AS pinned,
+        CASE WHEN last_role='tangbao' AND NOT EXISTS(SELECT 1 FROM thread_reads r
+          WHERE r.thread_id=threads.id AND r.owner_kind='account' AND r.owner_id=? AND r.last_read_at>=threads.updated_at)
+          THEN 1 ELSE 0 END AS unread
       FROM threads WHERE account_id=? ORDER BY pinned DESC,updated_at DESC,id DESC LIMIT 101 OFFSET ?`)
-      .bind(account.id, account.id, (page - 1) * 100).all<Record<string, unknown>>();
-    const threads = rows.results.slice(0, 100).map((row) => ({ ...row, pinned: Boolean(row.pinned) }));
+      .bind(account.id, account.id, account.id, (page - 1) * 100).all<Record<string, unknown>>();
+    const threads = rows.results.slice(0, 100).map((row) => ({ ...row, pinned: Boolean(row.pinned), unread: Boolean(row.unread) }));
     return json({ threads, page, hasMore: rows.results.length > 100 });
+  }
+  const accountRead = path.match(/^\/api\/account\/threads\/([A-Za-z0-9_-]{16,80})\/read$/);
+  if (accountRead && request.method === "POST") {
+    const account = await requireAccount(request, env);
+    const thread = await env.DB.prepare("SELECT updated_at AS updatedAt FROM threads WHERE id=? AND account_id=?")
+      .bind(accountRead[1], account.id).first<{ updatedAt: number }>();
+    if (!thread) throw new AuthError(404, "THREAD_NOT_FOUND", "这段对话不在当前账号下。");
+    await env.DB.prepare(`INSERT INTO thread_reads(thread_id,owner_kind,owner_id,last_read_at) VALUES(?,'account',?,?)
+      ON CONFLICT(thread_id,owner_kind,owner_id) DO UPDATE SET last_read_at=excluded.last_read_at`)
+      .bind(accountRead[1], account.id, thread.updatedAt).run();
+    return json({ ok: true });
   }
   const accountRename = path.match(/^\/api\/account\/threads\/([A-Za-z0-9_-]{16,80})\/rename$/);
   if (accountRename && request.method === "POST") {

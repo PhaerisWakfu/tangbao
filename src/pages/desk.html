@@ -69,6 +69,12 @@
       <div class="presence" id="presence" aria-live="polite">
         <span class="presence-dot" aria-hidden="true"></span>
         <b id="presence-label">在线</b>
+        <button class="work-state" id="work-state" type="button" role="switch" aria-checked="true" hidden>
+          <span class="work-switch-track" aria-hidden="true">
+            <span class="work-state-label">营业中</span>
+            <span class="work-switch-knob"></span>
+          </span>
+        </button>
       </div>
       <p class="count" id="count"></p>
       <nav class="pile" id="pile" aria-label="消息"></nav>
@@ -80,7 +86,7 @@
         <button class="back text-btn" type="button" id="back-audit" hidden><svg class="i" aria-hidden="true"><use href="#i-back"/></svg>回到审计</button>
         <h2 id="slip-title">还没选消息</h2>
         <small id="slip-meta"></small>
-        <button class="shelve" type="button" id="shelve" hidden>先放下</button>
+        <button class="shelve" type="button" id="shelve" hidden>稍后处理</button>
         <button class="shelve" type="button" id="block" hidden>拉黑</button>
       </header>
         <nav class="message-nav" id="message-nav" aria-label="对话消息" hidden>
@@ -159,6 +165,11 @@
           <p class="page-sub">改型号后面那截，前缀 tangbao- 是固定的。</p>
         </header>
         <form class="profile-form" id="profile-form">
+          <div class="profile-card-head">
+            <span class="profile-kicker">模型资料</span>
+            <h3>笼屉里的名片</h3>
+            <p>型号决定别人怎么找到你；简介是一句话的自我介绍，开场问题会替换访客看到的默认建议。</p>
+          </div>
           <label class="field" for="profile-suffix">
             模型 ID
             <span class="profile-id">
@@ -170,10 +181,17 @@
             简介
             <textarea id="profile-blurb" name="blurb" rows="3" maxlength="12" placeholder="一句话，十二个字以内"></textarea>
           </label>
-          <p class="profile-hint">简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
+          <div class="profile-opening">
+            <span class="profile-opening-title">开场问题</span>
+            <div class="opening-list" id="opening-list"></div>
+            <button class="opening-add" type="button" id="opening-add">+ 添加一条</button>
+          </div>
+          <p class="profile-hint">开场问题最多四条，每条二十个字以内；只显示填写过的条目，全部留空时聊天页不显示建议按钮。简介可以留空。改型号后旧对话不会丢，但其他设备需要重新登录。</p>
           <p class="err" id="profile-err" role="alert"></p>
           <p class="profile-ok" id="profile-ok"></p>
-          <button class="primary" type="submit">保存</button>
+          <div class="profile-actions">
+            <button class="primary" type="submit">保存资料</button>
+          </div>
         </form>
       </div>
     </section>
@@ -188,6 +206,8 @@
         <div class="sketch-tool-group">
           <button type="button" id="sketch-pen" aria-pressed="true">画笔 <kbd>B</kbd></button>
           <button type="button" id="sketch-erase">橡皮 <kbd>E</kbd></button>
+          <button type="button" id="sketch-fill" aria-pressed="false">填色 <kbd>F</kbd></button>
+          <button type="button" id="sketch-pan" aria-pressed="false">移动</button>
         </div>
         <div class="sketch-tool-group">
           <button type="button" data-size="2.5">细</button>
@@ -203,13 +223,20 @@
           <button type="button" class="swatch" data-color="#b58a2a" style="--c:#b58a2a" aria-label="姜黄"></button>
           <label class="sketch-color"><input type="color" id="sketch-color" value="#1f1d1a" aria-label="自定义颜色"><span>自选</span></label>
         </div>
+        <div class="sketch-tool-group sketch-zoom" role="group" aria-label="画布缩放">
+          <button type="button" id="sketch-zoom-out" aria-label="缩小画布">−</button>
+          <button type="button" id="sketch-zoom-reset" aria-label="恢复 100% 缩放">100%</button>
+          <button type="button" id="sketch-zoom-in" aria-label="放大画布">+</button>
+        </div>
         <div class="sketch-tool-group sketch-actions">
           <button type="button" id="sketch-undo">撤销 <kbd>Ctrl Z</kbd></button>
           <button type="button" id="sketch-redo">重做 <kbd>Ctrl ⇧ Z</kbd></button>
           <button type="button" id="sketch-clear">清空</button>
         </div>
       </div>
-      <canvas id="sketch-pad"></canvas>
+      <div class="sketch-viewport" id="sketch-viewport">
+        <canvas id="sketch-pad"></canvas>
+      </div>
       <p class="sketch-err" id="sketch-err"></p>
       <footer>
         <button class="text-btn" type="button" id="sketch-cancel">取消</button>

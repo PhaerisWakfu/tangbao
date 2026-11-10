@@ -340,15 +340,23 @@ export async function runScenarios({ metadata, directory, fixtureFile, checkServ
       await operatorA.request(`/api/admin/threads/${a.id}/unblock`,{method:"POST"});
       assert.equal((await member.request(`/api/threads/${a.id}`)).blocked,false);
     });
-    await check("改型号保留身份和模型封禁，Auto及POOL分配遵守账号作用域", async () => {
+    await check("改型号保留身份和模型封禁，开场问题随模型保留，Auto及POOL分配遵守账号作用域", async () => {
       const endpoint="https://push.example.test/synthetic-local-a";
       await operatorA.request("/api/admin/push",{method:"POST",body:{endpoint,keys:{p256dh:randomBytes(32).toString("base64url"),auth:randomBytes(18).toString("base64url")}}});
       await operatorA.request(`/api/admin/threads/${a.id}/block`,{method:"POST"});
       const before=await local(`/__local/model-state?accountId=${encodeURIComponent(operatorA.state.accountId)}`);
       assert(before.blocks.length>0);
-      const changed=await operatorA.request("/api/admin/profile",{method:"POST",body:{suffix:"local-a-renamed",blurb:"本地改型号后保留归属"}});
+      const openingQuestions=["今天想先聊什么？","帮我改一句话"];
+      await operatorA.request("/api/admin/profile",{method:"POST",body:{suffix:"local-a-renamed",blurb:"本地改型号后保留归属",openingQuestions:["一","二","三","四","五"]},status:400});
+      await operatorA.request("/api/admin/profile",{method:"POST",body:{suffix:"local-a-renamed",blurb:"本地改型号后保留归属",openingQuestions:["x".repeat(21)]},status:400});
+      const changed=await operatorA.request("/api/admin/profile",{method:"POST",body:{suffix:"local-a-renamed",blurb:"本地改型号后保留归属",openingQuestions}});
       operatorA.state.operatorId=changed.id;
       assert.equal(changed.id,"tangbao-local-a-renamed");
+      assert.deepEqual(changed.openingQuestions,openingQuestions);
+      const profile=await operatorA.request("/api/admin/profile");
+      assert.deepEqual(profile.openingQuestions,openingQuestions);
+      const listed=await operatorA.request(`/api/models?q=${encodeURIComponent(changed.id)}&page=1&_=${Date.now()}`);
+      assert.deepEqual(listed.models.find(item=>item.id===changed.id).openingQuestions,openingQuestions);
       const after=await local(`/__local/model-state?accountId=${encodeURIComponent(operatorA.state.accountId)}`);
       assert.equal(after.model.uid,before.model.uid);
       assert.equal(after.model.owner,before.model.owner);

@@ -11,7 +11,7 @@
 - 账号新建对话支持跨设备历史。旧匿名历史由用户主动选择关联，并验证原对话凭证；不根据 IP、visitor ID 或历史申请邮箱自动认领。
 - 登录默认长期保持，使用约 400 天的持久 cookie，并在活跃使用时续期。退出撤销当前会话、清理本站 cookie 和客户端缓存，下一次需要密码登录；设置不提供切换账号功能。
 - 模型停用影响该模型接单和回复，账号停用影响账号所有会话；两项操作分开。
-- 发信使用 Cloudflare Email Sending。站点只设置应用侧每日 200 封发送预算，不另设应用侧月度限制；Cloudflare 账户的月度包含额度和超额计费以控制台为准。
+- 发信使用 Cloudflare Email Sending 与 Brevo。应用侧每日总预算 360 封：Cloudflare 90（3,000 封/月，按 31 天留缓冲）、Brevo 280，180 封告警；单家额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时提示额度已满。不另设应用侧月度限制；两家账户的月度额度和计费以各自控制台为准。
 
 邮箱验证只证明对邮箱的控制权，不代表实名或内容安全保证。糖包的模型仍由人回复。
 
@@ -22,7 +22,7 @@
 | 匿名访客 | 创建第一段，凭原 token 继续读取和发送 |
 | 未验证账号 | 账号验证、找回；原匿名首段仍按原凭证访问 |
 | 已验证普通账号 | 新建账号对话、跨设备查看本人历史、主动关联匿名历史、申请模型 |
-| 模型运营者 | 普通账号能力及本人模型的队列、资料和回复 |
+| 模型运营者 | 普通账号能力及本人模型的队列、资料（型号、简介、开场问题）和回复 |
 | 管理员 | 显式授予的管理、审批、审计能力；公开注册不授予 |
 
 账号 cookie 为不透明随机 session，服务端只保存摘要并核对账号状态、会话版本、有效期和撤销记录。HttpOnly 防止客户端脚本读取会话值，生产使用 Secure/SameSite；写请求还检查同源 Origin。角色和资源所有权均由服务端判断，不相信客户端按钮、URL 或 localStorage。
@@ -43,13 +43,15 @@
 
 无痕窗口不能作为可靠的永久设备身份。Chrome 在所有无痕窗口关闭后会清除该会话的 cookie 和站点数据；普通网页没有可静默读取、跨浏览器且不可重置的物理设备编号。浏览器指纹仅能作风险信号，浏览器也会限制可用于指纹识别的信息，不能据此执行严格“每台设备终身一次”的额度。
 
-Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterprise Bot Management 加相应附加服务），现有 Workers Paid 不代表已具备该功能。官方明确说明不同设备可能得到相同 ID，建议用于识别高频滥用而非唯一识别单台设备。因此不为一次匿名额度引入该服务，也不新增指纹采集或修改匿名门槛。当前新建对话还受服务端每 IP 每小时 8 次的创建限流；该限制不能等同于设备或个人额度，换网络仍可能绕过。
+Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterprise Bot Management 加相应附加服务），现有 Workers Paid 不代表已具备该功能。官方明确说明不同设备可能得到相同 ID，建议用于识别高频滥用而非唯一识别单台设备。因此不为一次匿名额度引入该服务，也不新增指纹采集或修改匿名门槛。当前新建对话还受服务端每 IP 每小时 16 次的创建限流；同一对话的访客消息另有每小时 60 条的限流。这两项限制不能等同于设备或个人额度，换网络仍可能绕过。
 
 能力边界核对于 2026-11-03：[Chrome 无痕会话](https://support.google.com/chrome/answer/95464?hl=en)、[MDN 浏览器指纹](https://developer.mozilla.org/en-US/docs/Glossary/Fingerprinting)、[Cloudflare Ephemeral IDs 限制](https://developers.cloudflare.com/turnstile/tutorials/fraud-detection-with-ephemeral-ids/)、[Turnstile 套餐](https://developers.cloudflare.com/turnstile/plans/)。第二段要求邮箱验证账号，不称为实名验证；若将来要求更严格的额度，需要另行确定账号门槛及滥用治理方案。
 
 已归属账号的对话采用稳定账号身份执行模型级拉黑，不能因换设备绕过；匿名普通模型封禁匹配 token/visitor，普通模型不写入或匹配 IP。IP 只参与管理员全局封禁，读请求不把 IP-only 命中扩散为其他访问者的永久身份封禁。历史关联按原 token/visitor 继承有效封禁，不将共享 IP 升级成账号封禁。
 
 普通运营者仅能解除本人模型作用域中的封禁；管理员“全部解开”可清理同一账号或同一匿名 visitor 的跨模型封禁及对应全局 IP 记录。聚合同一访问者时使用账号/非空 visitor，不按共享 IP 搜集其他人的对话或删除其独立封禁。解封不等于恢复已停用账号。
+
+模型运营者可以在「修改模型信息」中维护型号、简介和最多四条开场问题，每条最多二十个字；开场问题只作为访客空会话里的建议按钮，未设置或清空时不显示建议按钮，也不自动发送消息。
 
 ## 新申请与旧模型认领
 
@@ -67,7 +69,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 ## Cloudflare Email Sending
 
-生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；控制台显示发送已启用、DNS 已配置，日额度 200 封。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
+生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；Cloudflare Workers Paid 每月包含 3,000 封，应用内按每天 90 封控制；Brevo 使用已验证的 `send.phaeris.cn` 和 `noreply@send.phaeris.cn`，应用内预算 280 封。总预算 360 封，保留 180 封告警和单家 5 分钟熔断。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
@@ -81,7 +83,11 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 MAIL_MODE=disabled                 # disabled | test | cloudflare
 MAIL_FROM=糖包 <noreply@mail.phaeris.cn>
 APP_ORIGIN=https://tangbao.phaeris.cn
-MAIL_DAILY_LIMIT=200
+MAIL_DAILY_LIMIT=360
+MAIL_PROVIDERS=cloudflare,brevo
+CLOUDFLARE_DAILY_LIMIT=90
+BREVO_DAILY_LIMIT=280
+BREVO_FROM=糖包 <noreply@send.phaeris.cn>
 # Worker secrets：EMAIL_CODE_PEPPER、MAIL_PAYLOAD_KEY
 # EMAIL 为 Worker 原生邮件绑定
 # 可选可信投递事件：MAIL_EVENTS_QUEUE、MAIL_EVENTS_ACCOUNT_ID
@@ -109,7 +115,7 @@ Worker 配置每分钟运行补偿任务，在 10 分钟验证码有效期内处
 
 本地通过 prepare 应用并核对源码全部迁移。远程迁移由有权限的部署者在确认目标数据库、备份和版本后单独执行；本地验证不授权生产写入。
 
-本次新增 `0021_accounts.sql` 与 `0022_account_admin_audit.sql`。旧库只应用尚未执行的 migration，不重新执行全量建表。部署者应先核对 Wrangler 中 `DB` 对应的数据库，再备份、预览待执行项、应用迁移，并部署同版本 Worker。受控管理员引导见 [本地与上线手册](local-development.md#上线与回退)。本地 libSQL 兼容检查发现旧迁移 `0019_block_scope.sql` 的数据转换语句存在兼容错误，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪；D1 的迁移通过不能当作 Turso 全量迁移通过。
+本次新增 `0021_accounts.sql`、`0022_account_admin_audit.sql`、`0023_thread_pins.sql`、`0024_thread_reads.sql`、`0025_operator_accepting.sql`、`0026_presence_away.sql`、`0027_mail_providers.sql` 与 `0028_account_push.sql`。旧库只应用尚未执行的 migration，不重新执行全量建表。部署者应先核对 Wrangler 中 `DB` 对应的数据库，再备份、预览待执行项、应用迁移，并部署同版本 Worker。受控管理员引导见 [本地与上线手册](local-development.md#上线与回退)。本地 libSQL 兼容检查发现旧迁移 `0019_block_scope.sql` 的数据转换语句存在兼容错误，由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪；D1 的迁移通过不能当作 Turso 全量迁移通过。
 
 上线前先演练新增结构与账号流程、管理员受控引导及旧模型认领，再开放迁移并处理未绑定项。窗口和人工争议细则在上线前确定。回退代码不能自动恢复已经撤销的凭据或撤销模型所有权；真实凭据清理、数据回退或恢复必须单独说明范围和恢复方法。
 

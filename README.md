@@ -8,6 +8,10 @@
 
 这不是医疗、法律或危机援助服务。
 
+## 概念来源
+
+“一个人坐在 AI 聊天壳里回话”这个设定参考了更早的同类项目 [ChatTJB](https://chattjb.org/)。据我们了解，ChatTJB 后来因参与的人太多、运营不过来而停止服务。糖包没有使用它的代码、标志或原文；界面、文案和具体的人都是按糖包自己的方式重新做的。
+
 ## 目录
 
 ```text
@@ -19,7 +23,7 @@ src/                  站点逻辑和页面
   pages/              对话页、关于页、隐私页、后台页
   client/             页面脚本
 public/               样式、字体、图标和公开图片
-migrations/           D1 表结构（0001–0023）
+migrations/           D1 表结构（0001–0029）
 design/               设计稿和截图，不参与 Worker 运行
 scripts/              本地预览、测试、截图和字体生成
 wrangler.jsonc        Cloudflare 配置
@@ -31,7 +35,7 @@ wrangler.jsonc        Cloudflare 配置
 - Cloudflare Workers 提供页面和 API
 - D1 保存对话、模型、申请、举报等数据
 - Workers KV 保存用户上传的图片
-- Cloudflare Email Sending 发送邮箱验证和找回邮件；应用侧默认每日上限 200 封，账户月度包含额度和超额计费以 Cloudflare 控制台为准
+- Cloudflare Email Sending 与 Brevo 发送邮箱验证和找回邮件；应用侧每日总预算 360 封，Cloudflare 90 封（按 3,000 封/月留出 31 天缓冲）、Brevo 280 封，180 封告警；单家额度错误会熔断并切换到另一家，两家都不可用时明确提示；账户月度额度和计费以两家控制台为准
 - Cron 每分钟刷新首页在线状态并补偿可重试的邮件任务
 - 可选：通过 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 使用 Turso
 
@@ -103,7 +107,9 @@ npm run check
 
 `node scripts/smoke.mjs` 是 `local:verify` 的兼容入口，使用全新隔离实例执行当前业务回归，不读取根目录凭据。
 
-浏览器检查与截图使用 `npm run browser:local -- --instance demo` / `npm run shoot:local -- --instance demo`，先按[本地手册](docs/local-development.md)启动隔离实例。只接受实例名，校验本地服务标记，不接受任意基址或读取根目录凭据。默认 Chrome；`TANGBAO_BROWSER_CHANNEL` 可选择 chrome、msedge、chromium。检查当前首页、/chat、/desk、/about 的宽窄屏入口和共创弹层键盘行为；账号、审批、心跳分配和权限以 `local:verify` 及多身份人工验收为准。截图留在实例的忽略目录，不写入 design。迁移脚本已统一使用 `DB` binding；非默认目标仍须显式追加 `--config`，例如 `npm run migrate:remote -- --config wrangler.production.jsonc`。
+浏览器检查与截图使用 `npm run browser:local -- --instance demo` / `npm run shoot:local -- --instance demo`，先按[本地手册](docs/local-development.md)启动隔离实例。只接受实例名，校验本地服务标记，不接受任意基址或读取根目录凭据。默认 Chrome；`TANGBAO_BROWSER_CHANNEL` 可选择 chrome、msedge、chromium。检查当前首页、/chat、/desk、/about 的宽窄屏入口和共创弹层键盘行为；账号、审批、心跳分配和权限以 `local:verify` 及多身份人工验收为准。截图留在实例的忽略目录，不写入 design。
+
+迁移脚本已统一使用 `DB` binding；`npm run deploy` 与 `npm run migrate:remote` 已固定指向 `wrangler.production.jsonc`，其他目标（例如 `wrangler.accounts-source.jsonc`）仍须显式追加 `--config`。
 
 ## 后续开发入口
 

@@ -38,7 +38,7 @@ node --test scripts/migrations.test.mjs
 
 对应 [#23](https://github.com/PhaerisWakfu/tangbao/issues/23)。使用包含该修复的代码前，必须按顺序应用所有迁移，包括 `0024_app_schema_version.sql`、`0025_message_paging.sql`、`0026_security_maintenance.sql` 和 `0027_clear_legacy_credentials.sql`。本地 `local:prepare` / `local:verify` 自动核对清单；旧实例先停止旧进程，再 prepare 并重启。
 
-合并并行分支后同时保留 `0023_image_cleanup_jobs.sql` 与 `0023_thread_pins.sql`，不重命名已经存在于迁移台账的文件。完整目录共 28 份 SQL，结构标记仍为 `app_schema_version=26`，标记不是文件计数。D1 按完整文件名记录；Turso 工具按文件名及摘要核验既有历史，只执行尚未登记的文件，并拒绝修改或删除已登记 SQL。旧实例升级也须补齐置顶表，缺少时相关请求明确不可用。
+合并并行分支后保留完整迁移文件名，包括同编号的图片清理/置顶、结构版本/已读、分页/接单、维护/暂离、旧口令清理/邮件通道迁移；不重命名已经存在于迁移台账的文件。迁移记录必须与当前目录逐项一致，不能按最高编号推断文件数；结构标记仍为 `app_schema_version=26`，标记不是文件计数。D1 按完整文件名记录；Turso 工具按文件名及摘要核验既有历史，只执行尚未登记的文件，并拒绝修改或删除已登记 SQL。旧实例升级须补齐两侧尚未执行的迁移，缺少时相关请求明确不可用。
 
 `0024` 建立专用版本标记，`0025` 增加对话消息顺序索引并升级为 `app_schema_version=25`，不复用旧请求可能覆盖的 `schema_v`。Worker 不再在请求中建表、加列或回填。API、会创建匿名身份的 `/chat` 入口、定时及邮件事件处理先进行只读版本/核心字段检查；不就绪时 API 返回 `503 SCHEMA_NOT_READY`，聊天入口显示升级/不可用提示，后台工作不启动。静态资源和说明页仍可读取，维护模式规则保留。
 
@@ -79,6 +79,8 @@ npm run local:info -- --instance epic-5-demo
 ```
 
 使用 `local:info` 输出的首页、聊天页、后台及“本地验收与验证码”地址。不要凭旧记录猜端口或实例凭据。验收面板 URL 含本地实例 nonce，只在回环主机生效，不放入公开 Issue 或提交截图。
+
+手工验收固定复用同一个实例和端口，不要每次改代码新建 instance：改代码时停止该实例的 `dev`，对同一实例重新执行 `prepare` 补迁移，再用 `dev` 启动；`prepare` 不清数据，端口和 role hostname 保持不变，浏览器里的登录、草稿和匿名历史才继续有效。`local:verify` 的临时实例和随机端口只用于自动回归，不作为手工登录/保存数据的入口；换 instance 或端口等于换 origin，旧浏览器数据不会跟随。
 
 本地验收面板提供：
 

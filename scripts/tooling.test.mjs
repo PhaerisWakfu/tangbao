@@ -6,6 +6,9 @@ import { createClient } from "@libsql/client";
 import { migrate } from "./migrate-turso.mjs";
 import { localBrowserTarget } from "./local-browser-target.mjs";
 
+const migrationDirectory = new URL("../migrations/", import.meta.url);
+const migrationNames = (await readdir(migrationDirectory)).filter(name => name.endsWith(".sql")).sort();
+
 async function fixture(t) {
   await mkdir(new URL("../.tmp/", import.meta.url), { recursive: true });
   const dir = await mkdtemp(new URL("../.tmp/turso-cli-", import.meta.url));
@@ -15,7 +18,7 @@ async function fixture(t) {
 }
 test("Turso entry applies all migrations and reruns without duplicating", async t => {
   const { client } = await fixture(t);
-  assert.equal((await migrate(client, new URL("../migrations/", import.meta.url))).length, 28);
+  assert.deepEqual(await migrate(client, migrationDirectory), migrationNames);
   assert.deepEqual(await migrate(client, new URL("../migrations/", import.meta.url)), []);
   assert.equal((await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows[0].value, "26");
 });
@@ -37,7 +40,7 @@ for (const missing of ["0023_thread_pins.sql", "0023_image_cleanup_jobs.sql", "0
     if (missing.startsWith("0027")) await client.execute("INSERT INTO applications(id,suffix,email,status,created_at,pass_note) VALUES('synthetic-app','synthetic','synthetic@example.test','pending',1,'synthetic-copy')");
     assert.deepEqual(await migrate(client, directory), [missing]);
     assert.equal((await client.execute("SELECT value FROM settings WHERE key='synthetic-keep'")).rows[0].value, "unchanged");
-    assert.equal((await client.execute("SELECT count(*) n FROM _tangbao_migrations")).rows[0].n, 28);
+    assert.deepEqual((await client.execute("SELECT name FROM _tangbao_migrations ORDER BY name")).rows.map(row => row.name), migrationNames);
     if (missing.startsWith("0027")) assert.equal((await client.execute("SELECT pass_note FROM applications WHERE id='synthetic-app'")).rows[0].pass_note, null);
     assert.deepEqual(await migrate(client, directory), []);
   });

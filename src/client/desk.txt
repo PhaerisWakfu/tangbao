@@ -10,6 +10,7 @@ const messagePages = new TangbaoMessagePages(api);
 const answer = $("#answer");
 const presence = $("#presence");
 const presenceLabel = $("#presence-label");
+const workState = $("#work-state");
 const count = $("#count");
 const loginErr = $("#login-err");
 const gateCard = $("#login");
@@ -25,10 +26,56 @@ const profileForm = $("#profile-form");
 let profileRequested = new URLSearchParams(location.search).get("profile") === "1";
 const profileSuffix = $("#profile-suffix");
 const profileBlurb = $("#profile-blurb");
+const openingList = $("#opening-list");
+const openingAdd = $("#opening-add");
 const profileErr = $("#profile-err");
 const profileOk = $("#profile-ok");
 
+function openingFields() {
+  return [...openingList.querySelectorAll("input")];
+}
+
+function syncOpeningAdd() {
+  const full = openingFields().length >= 4;
+  openingAdd.disabled = full;
+  openingAdd.title = full ? "最多四条开场问题" : "";
+}
+
+function addOpeningRow(value = "", focus = false) {
+  if (openingFields().length >= 4) return;
+  const row = document.createElement("div");
+  row.className = "opening-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 20;
+  input.autocomplete = "off";
+  input.placeholder = "二十个字以内";
+  input.value = value;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "opening-remove";
+  remove.setAttribute("aria-label", "删除这条开场问题");
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    row.remove();
+    syncOpeningAdd();
+  });
+  row.append(input, remove);
+  openingList.append(row);
+  syncOpeningAdd();
+  if (focus) input.focus();
+}
+
+function paintOpeningRows(values = []) {
+  openingList.replaceChildren();
+  values.slice(0, 4).forEach((value) => addOpeningRow(value));
+  syncOpeningAdd();
+}
+
+openingAdd.addEventListener("click", () => addOpeningRow("", true));
+
 let waiting = 0;
+let unread = 0;
 let pending = 0;
 let applyPage = 1;
 let auditPage = 1;
@@ -47,12 +94,17 @@ let shown = "";
 let timer = 0;
 let ticking = null;
 let pollingAccountId = null;
+let heartbeatTimer = 0;
+let presenceWarmup = false;
+const HIDDEN_GRACE = 5 * 60 * 1000;
 let pendingImages = [];
 let readonly = false;
 let seat = { super: false, operatorId: "" };
 let deskAccountId = null;
 let deskSyncSequence = 0;
 let loggedOut = TangbaoAccount.logoutPending;
+const deepLinkThread = new URLSearchParams(location.search).get("thread");
+let deepLinkOpened = false;
 const MAX_IMAGES = 6;
 
 class ApiError extends Error {
@@ -114,6 +166,7 @@ function showDesk(on) {
     gateCard.classList.remove("is-booting");
     gateCard.setAttribute("aria-busy", "false");
     waiting = 0;
+    unread = 0;
     pending = 0;
     applyPage = 1;
     auditPage = 1;
@@ -125,7 +178,13 @@ function showDesk(on) {
 }
 
 function paintTitle() {
-  document.title = waiting > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
+  document.title = unread > 0 || pending > 0 ? "(新消息) 笼屉" : "笼屉";
+}
+
+function applyWorkState(accepting) {
+  workState.setAttribute("aria-checked", String(accepting));
+  workState.querySelector(".work-state-label").textContent = accepting ? "营业中" : "打烊中";
+  workState.title = accepting ? "营业中：可以自动分配新对话" : "打烊中：不再自动分配新对话，已有对话仍可回复";
 }
 
 function applyPresence(status) {
@@ -181,7 +240,7 @@ function slip(item, kind) {
   meta.textContent = kind === "wait"
     ? `等了 ${spent(Date.now() - item.updatedAt)}`
     : kind === "shelved"
-      ? `放下于 ${clock(item.updatedAt)}`
+      ? `稍后处理于 ${clock(item.updatedAt)}`
       : kind === "blocked"
         ? `拉黑于 ${clock(item.updatedAt)}`
         : `回于 ${clock(item.updatedAt)}`;
@@ -270,7 +329,7 @@ function renderQueue(data) {
     pile.append(recentTitle);
     for (const item of recent) pile.append(slip(item, "done"));
   }
-  foldPile("先放下", data.shelved || [], "shelved");
+  foldPile("稍后处理", data.shelved || [], "shelved");
   foldPile("已拉黑", data.blocked || [], "blocked");
 }
 
@@ -302,7 +361,7 @@ function renderThread(data) {
   reply.hidden = locked;
   if (!data.thread.awaiting) {
     shelve.dataset.confirm = "";
-    shelve.textContent = "先放下";
+    shelve.textContent = "稍后处理";
   }
   if (data.thread.blocked) {
     if (block.dataset.confirm !== "1") block.textContent = seat.super ? "全部解开" : "解开";
@@ -316,7 +375,7 @@ function renderThread(data) {
     : data.thread.awaiting
       ? `等了 ${spent(Date.now() - data.thread.updatedAt)}`
       : last && last.role === "visitor"
-        ? "先放下了"
+        ? "稍后处理了"
         : "已回复";
   $("#answer").placeholder = last && last.role === "visitor" && last.draw
     ? "他要一张图。画完放进来，或写一句。"
@@ -373,10 +432,21 @@ function renderThread(data) {
 }
 
 async function loadQueue() {
+  if (!heartbeatTimer && TangbaoAccount.account?.verified && !document.hidden) await sendPresence(false);
   const data = await api("/api/admin/queue");
   waiting = (data.waiting || []).length;
+  unread = (data.waiting || []).filter((item) => item.unread).length;
   pending = Number(data.pending) || 0;
   seat = { super: Boolean(data.super), operatorId: data.operatorId || "" };
+  workState.hidden = !seat.operatorId;
+  applyWorkState(data.accepting !== false);
+  startPresenceHeartbeat();
+  if (!document.hidden && data.status?.status === "away" && !presenceWarmup) {
+    presenceWarmup = true;
+    window.setTimeout(() => {
+      if (!document.hidden) void loadQueue();
+    }, 300);
+  }
   showDesk(true);
   $("#desk-nav").hidden = !seat.super;
   renderQueue(data);
@@ -384,7 +454,10 @@ async function loadQueue() {
   if (profileRequested) {
     profileRequested = false;
     if (location.search) window.history.replaceState(null, "", "/desk");
-    if (!seat.super) void openProfilePane();
+    if (seat.operatorId && seat.operatorId !== "tangbao-vme50-flash") void openProfilePane();
+  } else if (!deepLinkOpened && deepLinkThread) {
+    deepLinkOpened = true;
+    if (/^[A-Za-z0-9_-]{16,80}$/.test(deepLinkThread)) void openSlip(deepLinkThread);
   }
 }
 
@@ -394,10 +467,12 @@ async function loadProfile() {
   const data = await api("/api/admin/profile");
   profileSuffix.value = data.suffix || "";
   profileBlurb.value = data.blurb || "";
+  const openings = Array.isArray(data.openingQuestions) ? data.openingQuestions : [];
+  paintOpeningRows(openings);
 }
 
 async function openProfilePane() {
-  if (seat.super) return;
+  if (!seat.operatorId || seat.operatorId === "tangbao-vme50-flash") return;
   showPane("profile");
   try {
     await loadProfile();
@@ -416,12 +491,17 @@ async function saveProfile(event) {
     const oldId = seat.operatorId;
     const data = await api("/api/admin/profile", {
       method: "POST",
-      body: { suffix: profileSuffix.value.trim(), blurb: profileBlurb.value.trim() },
+      body: {
+        suffix: profileSuffix.value.trim(),
+        blurb: profileBlurb.value.trim(),
+        openingQuestions: openingFields().map((field) => field.value.trim()).filter(Boolean),
+      },
     });
     seat.operatorId = data.id;
     profileSuffix.value = data.suffix;
     profileBlurb.value = data.blurb;
-    profileOk.textContent = data.id === oldId ? "简介换好了。" : "型号换好了。旧对话都还在。";
+    paintOpeningRows(Array.isArray(data.openingQuestions) ? data.openingQuestions : []);
+    profileOk.textContent = data.id === oldId ? "资料换好了。" : "型号换好了。旧对话都还在。";
     if (data.id !== oldId) {
       selected = null;
       shown = "";
@@ -451,9 +531,27 @@ function showPane(name, nav) {
   }
 }
 
+function setDeskThreadUrl(id) {
+  const next = id ? `/desk?thread=${encodeURIComponent(id)}` : "/desk";
+  if (`${location.pathname}${location.search}` !== next) {
+    try { window.history.replaceState(null, "", next); } catch {}
+  }
+}
+
+async function closeDeskThreadNotification(id) {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const notifications = await registration?.getNotifications({ tag: `desk:${id}` }) || [];
+    for (const notification of notifications) notification.close();
+  } catch {}
+}
+
 async function openSlip(id, fromAudit) {
   const version = ++threadViewVersion;
   readonly = Boolean(fromAudit);
+  setDeskThreadUrl(id);
+  void closeDeskThreadNotification(id);
   showPane("thread", readonly ? "audit" : "thread");
   if (id !== selected) {
     shown = "";
@@ -469,6 +567,9 @@ async function openSlip(id, fromAudit) {
     const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
     if (selected !== id || version !== threadViewVersion) return;
     renderThread(data);
+    if (!readonly && data.thread.operatorId === seat.operatorId) {
+      await api(`/api/admin/threads/${id}/read`, { method: "POST" }).catch(() => {});
+    }
     await loadQueue();
   } catch (err) {
     if (version !== threadViewVersion) return;
@@ -487,17 +588,50 @@ async function openSlip(id, fromAudit) {
   if (!reply.hidden) answer.focus();
 }
 
+function sendPresence(away, preferBeacon = false, graceMs = 0) {
+  if (!TangbaoAccount.account?.verified) return Promise.resolve();
+  const body = JSON.stringify({ away, graceMs });
+  if (preferBeacon && navigator.sendBeacon) {
+    try {
+      if (navigator.sendBeacon("/api/admin/presence", new Blob([body], { type: "application/json" }))) return Promise.resolve();
+    } catch {}
+  }
+  return fetch("/api/admin/presence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    credentials: "same-origin",
+    keepalive: away,
+  }).catch(() => {});
+}
+
+function startPresenceHeartbeat() {
+  if (!seat.operatorId || document.hidden) return;
+  if (heartbeatTimer) return;
+  void sendPresence(false);
+  heartbeatTimer = window.setInterval(() => {
+    if (!document.hidden) sendPresence(false);
+  }, 25000);
+}
+
+function stopPresenceHeartbeat(away, preferBeacon = false, graceMs = 0) {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = 0;
+  if (away) sendPresence(true, preferBeacon, graceMs);
+}
+
 function arm() {
   clearTimeout(timer);
-  if (desk.hidden) return;
+  if (desk.hidden || document.hidden) return;
   const fresh = waiting > 0 || pending > 0;
-  const wait = document.hidden ? 120000 : fresh ? 30000 : POLL_MS;
+  const wait = fresh ? 30000 : POLL_MS;
   timer = setTimeout(() => {
     void tick();
   }, wait);
 }
 
 async function tick() {
+  if (document.hidden) return;
   const account = TangbaoAccount.account;
   if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
   if (ticking && pollingAccountId === account.id) return ticking;
@@ -581,6 +715,20 @@ deskRename.addEventListener("click", (event) => {
   if (event.target === deskRename) closeDeskRename();
 });
 document.addEventListener("click", closeSlipMenus);
+workState.addEventListener("click", async () => {
+  if (!seat.operatorId || workState.disabled) return;
+  const accepting = workState.getAttribute("aria-checked") !== "true";
+  workState.disabled = true;
+  try {
+    await api("/api/admin/work-state", { method: "POST", body: { accepting } });
+    applyWorkState(accepting);
+    await loadQueue();
+  } catch (error) {
+    replyErr.textContent = error.message || "接单状态没有保存。";
+  } finally {
+    workState.disabled = false;
+  }
+});
 $("#block").addEventListener("click", async () => {
   if (!selected || $("#block").hidden) return;
   const button = $("#block");
@@ -611,16 +759,16 @@ $("#shelve").addEventListener("click", async () => {
   const button = $("#shelve");
   if (button.dataset.confirm !== "1") {
     button.dataset.confirm = "1";
-    button.textContent = "放下";
+    button.textContent = "确认稍后";
     window.setTimeout(() => {
       if (button.dataset.confirm !== "1") return;
       button.dataset.confirm = "";
-      button.textContent = "先放下";
+      button.textContent = "稍后处理";
     }, 2200);
     return;
   }
   button.dataset.confirm = "";
-  button.textContent = "先放下";
+  button.textContent = "稍后处理";
   try {
     await api(`/api/admin/threads/${selected}/shelve`, { method: "POST" });
     shown = "";
@@ -637,6 +785,8 @@ function resetDeskView() {
   messagePages.clear();
   clearTimeout(timer); applyToken++; auditToken++;
   threadViewVersion++;
+  presenceWarmup = false;
+  stopPresenceHeartbeat(true);
   selected = null; shown = ""; readonly = false;
   seat = { super: false, operatorId: "" };
   thread.replaceChildren(); pile.replaceChildren();
@@ -645,7 +795,7 @@ function resetDeskView() {
   reply.hidden = true; answer.value = "";
   for (const image of pendingImages) URL.revokeObjectURL(image.url);
   pendingImages = []; showAttach();
-  $("#profile-suffix").value = ""; $("#profile-blurb").value = "";
+  $("#profile-suffix").value = ""; $("#profile-blurb").value = ""; paintOpeningRows([]);
   closeViewer(); closeSketch();
   closeSlipMenus(); closeDeskRename();
   showPane("thread"); showDesk(false);
@@ -716,7 +866,7 @@ legacyBind.addEventListener("click", async () => {
   }
 });
 window.addEventListener("tb:account-change", () => { void syncDeskAccount(); });
-window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });
+window.addEventListener("tb:logout", () => { loggedOut = true; deskSyncSequence++; setDeskThreadUrl(null); resetDeskView(); $("#gate-note").textContent = "此设备已退出。下次使用需输入邮箱和密码。"; });
 
 $("#look").addEventListener("click", () => {
   void tick();
@@ -1357,11 +1507,19 @@ $("#back-audit").addEventListener("click", () => {
   void loadAudit();
 });
 
+let answerComposing = false;
+let answerCompositionEnded = 0;
+answer.addEventListener("compositionstart", () => { answerComposing = true; });
+answer.addEventListener("compositionend", () => {
+  answerComposing = false;
+  answerCompositionEnded = performance.now();
+});
 answer.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
-    event.preventDefault();
-    reply.requestSubmit();
-  }
+  if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
+  if (event.isComposing || answerComposing || event.keyCode === 229) return;
+  if (answerCompositionEnded && performance.now() - answerCompositionEnded < 80) return;
+  event.preventDefault();
+  reply.requestSubmit();
 });
 
 reply.addEventListener("submit", async (event) => {
@@ -1523,16 +1681,25 @@ answer.addEventListener("paste", async (event) => {
 });
 
 const sketch = $("#sketch");
+const sketchViewport = $("#sketch-viewport");
 const pad = $("#sketch-pad");
 const pen = pad.getContext("2d");
 const PAPER = "#fffaf3";
-let strokes = [];
-let redoStrokes = [];
+const FILL_TOLERANCE = 48;
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5];
+let actions = [];
+let cursor = 0;
 let currentStroke = null;
 let penSize = 6;
 let penColor = "#1f1d1a";
 let erasing = false;
+let filling = false;
+let panning = false;
+let panStart = null;
+let zoom = 1;
 let padSize = { w: 1, h: 1, dpr: 1 };
+const baseCanvas = document.createElement("canvas");
+const basePen = baseCanvas.getContext("2d");
 
 function preparePad() {
   const width = Math.min(720, window.innerWidth - 64);
@@ -1541,44 +1708,190 @@ function preparePad() {
   padSize = { w: width, h: height, dpr };
   pad.width = Math.round(width * dpr);
   pad.height = Math.round(height * dpr);
+  baseCanvas.width = pad.width;
+  baseCanvas.height = pad.height;
+  applyZoomSize();
   pen.setTransform(dpr, 0, 0, dpr, 0, 0);
   pen.lineCap = "round";
   pen.lineJoin = "round";
-  redrawPad();
+  basePen.setTransform(dpr, 0, 0, dpr, 0, 0);
+  basePen.lineCap = "round";
+  basePen.lineJoin = "round";
+  renderBase();
+  paint();
 }
 
-function redrawPad() {
+function applyZoomSize() {
+  pad.style.width = `${padSize.w * zoom}px`;
+  pad.style.height = `${padSize.h * zoom}px`;
+  updateZoomControls();
+}
+
+function updateZoomControls() {
+  const percent = `${Math.round(zoom * 100)}%`;
+  $("#sketch-zoom-reset").textContent = percent;
+  $("#sketch-zoom-reset").setAttribute("aria-label", `当前缩放 ${percent}，点击恢复 100%`);
+  $("#sketch-zoom-out").disabled = zoom <= ZOOM_STEPS[0];
+  $("#sketch-zoom-in").disabled = zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+}
+
+function applyZoom(next, anchorX, anchorY) {
+  if (currentStroke) return;
+  const target = Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], next));
+  if (Math.abs(target - zoom) < 0.001) return;
+  const oldWidth = padSize.w * zoom;
+  const oldHeight = padSize.h * zoom;
+  const viewX = anchorX ?? sketchViewport.clientWidth / 2;
+  const viewY = anchorY ?? sketchViewport.clientHeight / 2;
+  const worldX = ((sketchViewport.scrollLeft + viewX) / oldWidth) * padSize.w;
+  const worldY = ((sketchViewport.scrollTop + viewY) / oldHeight) * padSize.h;
+  zoom = target;
+  applyZoomSize();
+  sketchViewport.scrollLeft = (worldX / padSize.w) * padSize.w * zoom - viewX;
+  sketchViewport.scrollTop = (worldY / padSize.h) * padSize.h * zoom - viewY;
+}
+
+function zoomStep(direction) {
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + direction))];
+  applyZoom(next);
+}
+
+function paintPaper(ctx) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+}
+
+function renderBase() {
+  paintPaper(basePen);
+  for (let i = 0; i < cursor; i += 1) {
+    const action = actions[i];
+    if (action.type === "stroke") paintStroke(basePen, action.stroke);
+    else if (action.type === "fill") applyFill(basePen, action);
+    else if (action.type === "clear") paintPaper(basePen);
+  }
+}
+
+function paint() {
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.clearRect(0, 0, pad.width, pad.height);
+  pen.drawImage(baseCanvas, 0, 0);
   pen.setTransform(padSize.dpr, 0, 0, padSize.dpr, 0, 0);
-  pen.fillStyle = PAPER;
-  pen.fillRect(0, 0, padSize.w, padSize.h);
   pen.lineCap = "round";
   pen.lineJoin = "round";
-  for (const stroke of strokes) paintStroke(stroke);
-  if (currentStroke) paintStroke(currentStroke);
+  if (currentStroke) paintStroke(pen, currentStroke);
 }
 
-function paintStroke(stroke) {
+function commit(action) {
+  actions.length = cursor;
+  actions.push(action);
+  cursor = actions.length;
+}
+
+function paintStroke(ctx, stroke) {
   if (!stroke.points.length) return;
-  pen.strokeStyle = stroke.color;
-  pen.fillStyle = stroke.color;
-  pen.lineWidth = stroke.size;
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
+  ctx.lineWidth = stroke.size;
   const first = stroke.points[0];
   if (stroke.points.length === 1) {
-    pen.beginPath();
-    pen.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
-    pen.fill();
+    ctx.beginPath();
+    ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2);
+    ctx.fill();
     return;
   }
-  pen.beginPath();
-  pen.moveTo(first.x, first.y);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
   for (let i = 1; i < stroke.points.length - 1; i += 1) {
     const point = stroke.points[i];
     const next = stroke.points[i + 1];
-    pen.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+    ctx.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
   }
   const last = stroke.points[stroke.points.length - 1];
-  pen.lineTo(last.x, last.y);
-  pen.stroke();
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+}
+
+function rgbOf(hex) {
+  const value = String(hex).replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(value)) return [31, 29, 26];
+  return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
+}
+
+function floodFill(ctx, seedX, seedY, color, tolerance) {
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  if (seedX < 0 || seedY < 0 || seedX >= width || seedY >= height) return false;
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+  const seed = (seedY * width + seedX) * 4;
+  const sr = data[seed];
+  const sg = data[seed + 1];
+  const sb = data[seed + 2];
+  const [fr, fg, fb] = rgbOf(color);
+  if (sr === fr && sg === fg && sb === fb) return false;
+  const matches = (index) => Math.max(Math.abs(data[index] - sr), Math.abs(data[index + 1] - sg), Math.abs(data[index + 2] - sb)) <= tolerance;
+  const seen = new Uint8Array(width * height);
+  const stack = [[seedX, seedY]];
+  let changed = 0;
+  while (stack.length) {
+    const [startX, y] = stack.pop();
+    let x = startX;
+    while (x >= 0 && !seen[y * width + x] && matches((y * width + x) * 4)) x -= 1;
+    x += 1;
+    let up = false;
+    let down = false;
+    while (x < width && !seen[y * width + x] && matches((y * width + x) * 4)) {
+      const pixel = y * width + x;
+      seen[pixel] = 1;
+      const index = pixel * 4;
+      data[index] = fr;
+      data[index + 1] = fg;
+      data[index + 2] = fb;
+      data[index + 3] = 255;
+      changed += 1;
+      if (y > 0) {
+        const above = (y - 1) * width + x;
+        if (!seen[above] && matches(above * 4)) {
+          if (!up) { stack.push([x, y - 1]); up = true; }
+        } else {
+          up = false;
+        }
+      }
+      if (y < height - 1) {
+        const below = (y + 1) * width + x;
+        if (!seen[below] && matches(below * 4)) {
+          if (!down) { stack.push([x, y + 1]); down = true; }
+        } else {
+          down = false;
+        }
+      }
+      x += 1;
+    }
+  }
+  if (!changed) return false;
+  ctx.putImageData(image, 0, 0);
+  return true;
+}
+
+function applyFill(ctx, action) {
+  floodFill(ctx, Math.round(action.x * padSize.dpr), Math.round(action.y * padSize.dpr), action.color, action.tolerance ?? FILL_TOLERANCE);
+}
+
+function fillAt(x, y) {
+  if (currentStroke) return;
+  const color = penColor;
+  if (!floodFill(basePen, Math.round(x * padSize.dpr), Math.round(y * padSize.dpr), color, FILL_TOLERANCE)) return;
+  commit({ type: "fill", x, y, color, tolerance: FILL_TOLERANCE });
+  paint();
+}
+
+function hasContent() {
+  return cursor > 0 && actions[cursor - 1].type !== "clear";
 }
 
 function padPoint(event) {
@@ -1589,27 +1902,75 @@ function padPoint(event) {
   };
 }
 
+function syncSizeControls() {
+  const enabled = !filling && !panning;
+  for (const button of document.querySelectorAll("[data-size]")) button.disabled = !enabled;
+}
+
 function setPenMode() {
   erasing = false;
+  filling = false;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function setEraserMode() {
   erasing = true;
+  filling = false;
+  panning = false;
+  sketchViewport.classList.remove("panning", "dragging", "filling");
   $("#sketch-erase").setAttribute("aria-pressed", "true");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
   $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
+}
+
+function setFillMode() {
+  erasing = false;
+  filling = true;
+  panning = false;
+  currentStroke = null;
+  sketchViewport.classList.remove("panning", "dragging");
+  sketchViewport.classList.add("filling");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "true");
+  $("#sketch-pan").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  syncSizeControls();
+}
+
+function setPanMode() {
+  erasing = false;
+  filling = false;
+  panning = true;
+  currentStroke = null;
+  sketchViewport.classList.remove("filling");
+  sketchViewport.classList.add("panning");
+  $("#sketch-erase").setAttribute("aria-pressed", "false");
+  $("#sketch-fill").setAttribute("aria-pressed", "false");
+  $("#sketch-pen").setAttribute("aria-pressed", "false");
+  $("#sketch-pan").setAttribute("aria-pressed", "true");
+  syncSizeControls();
 }
 
 function openSketch() {
   closePlus();
-  strokes = [];
-  redoStrokes = [];
+  actions = [];
+  cursor = 0;
   currentStroke = null;
+  zoom = 1;
   setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
   TangbaoModal.open(sketch, $("#plus"));
+  sketchViewport.scrollLeft = 0;
+  sketchViewport.scrollTop = 0;
   requestAnimationFrame(preparePad);
 }
 
@@ -1620,25 +1981,54 @@ function closeSketch() {
 pad.addEventListener("pointerdown", (event) => {
   if (sketch.hidden) return;
   $("#sketch-err").textContent = "";
+  if (filling) {
+    const point = padPoint(event);
+    fillAt(point.x, point.y);
+    return;
+  }
   pad.setPointerCapture(event.pointerId);
+  if (panning) {
+    panStart = {
+      x: event.clientX,
+      y: event.clientY,
+      left: sketchViewport.scrollLeft,
+      top: sketchViewport.scrollTop,
+    };
+    sketchViewport.classList.add("dragging");
+    return;
+  }
   currentStroke = {
     color: erasing ? PAPER : penColor,
     size: erasing ? Math.max(penSize * 4, 16) : penSize,
     points: [padPoint(event)],
   };
-  redrawPad();
+  paint();
 });
 pad.addEventListener("pointermove", (event) => {
-  if (!currentStroke || !pad.hasPointerCapture(event.pointerId)) return;
+  if (!pad.hasPointerCapture(event.pointerId)) return;
+  if (panning && panStart) {
+    sketchViewport.scrollLeft = panStart.left - (event.clientX - panStart.x);
+    sketchViewport.scrollTop = panStart.top - (event.clientY - panStart.y);
+    return;
+  }
+  if (!currentStroke) return;
   currentStroke.points.push(padPoint(event));
-  redrawPad();
+  paint();
 });
 function endStroke(event) {
-  if (!currentStroke) return;
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
-  if (currentStroke.points.length) strokes.push(currentStroke);
+  if (panning) {
+    panStart = null;
+    sketchViewport.classList.remove("dragging");
+    return;
+  }
+  const stroke = currentStroke;
   currentStroke = null;
-  redoStrokes = [];
+  if (stroke?.points.length) {
+    commit({ type: "stroke", stroke });
+    renderBase();
+  }
+  paint();
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -1648,50 +2038,67 @@ document.querySelector(".sketch-tools").addEventListener("click", (event) => {
   const swatch = event.target.closest("[data-color]");
   if (size) {
     penSize = Number(size.dataset.size);
-    setPenMode();
+    if (!filling) setPenMode();
     for (const button of document.querySelectorAll("[data-size]")) button.removeAttribute("aria-pressed");
     size.setAttribute("aria-pressed", "true");
   }
   if (swatch) {
     penColor = swatch.dataset.color;
     $("#sketch-color").value = penColor;
-    setPenMode();
+    if (filling) setFillMode();
+    else setPenMode();
     for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
     swatch.setAttribute("aria-pressed", "true");
   }
 });
 $("#sketch-color").addEventListener("input", (event) => {
   penColor = event.target.value;
-  setPenMode();
+  if (filling) setFillMode();
+  else setPenMode();
   for (const button of document.querySelectorAll("[data-color]")) button.removeAttribute("aria-pressed");
 });
 $("#sketch-pen").addEventListener("click", setPenMode);
 $("#sketch-erase").addEventListener("click", setEraserMode);
+$("#sketch-fill").addEventListener("click", setFillMode);
+$("#sketch-pan").addEventListener("click", setPanMode);
+$("#sketch-zoom-out").addEventListener("click", () => zoomStep(-1));
+$("#sketch-zoom-in").addEventListener("click", () => zoomStep(1));
+$("#sketch-zoom-reset").addEventListener("click", () => applyZoom(1));
+sketchViewport.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  if (currentStroke) return;
+  const rect = sketchViewport.getBoundingClientRect();
+  const index = ZOOM_STEPS.findIndex((value) => Math.abs(value - zoom) < 0.001);
+  const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, (index < 0 ? 2 : index) + (event.deltaY < 0 ? 1 : -1)))];
+  applyZoom(next, event.clientX - rect.left, event.clientY - rect.top);
+}, { passive: false });
 function undoSketch() {
-  const stroke = strokes.pop();
-  if (!stroke) return;
-  redoStrokes.push(stroke);
-  redrawPad();
+  if (!cursor) return;
+  cursor -= 1;
+  renderBase();
+  paint();
 }
 
 function redoSketch() {
-  const stroke = redoStrokes.pop();
-  if (!stroke) return;
-  strokes.push(stroke);
-  redrawPad();
+  if (cursor >= actions.length) return;
+  cursor += 1;
+  renderBase();
+  paint();
 }
 
 $("#sketch-undo").addEventListener("click", undoSketch);
 $("#sketch-redo").addEventListener("click", redoSketch);
 $("#sketch-clear").addEventListener("click", () => {
-  strokes = [];
-  redoStrokes = [];
-  redrawPad();
+  if (!hasContent()) return;
+  commit({ type: "clear" });
+  renderBase();
+  paint();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
 $("#sketch-cancel").addEventListener("click", closeSketch);
 $("#sketch-ok").addEventListener("click", () => {
-  if (!strokes.length) {
+  if (!hasContent()) {
     $("#sketch-err").textContent = "还没画。先在纸上落一笔。";
     return;
   }
@@ -1730,6 +2137,8 @@ document.addEventListener("keydown", (event) => {
     setPenMode();
   } else if (key === "e") {
     setEraserMode();
+  } else if (key === "f") {
+    setFillMode();
   } else if (event.key === "[") {
     penSize = Math.max(2, penSize - 1);
   } else if (event.key === "]") {
@@ -1768,8 +2177,17 @@ document.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (!desk.hidden) void tick();
+  if (desk.hidden) return;
+  if (document.hidden) {
+    clearTimeout(timer);
+    stopPresenceHeartbeat(true, false, HIDDEN_GRACE);
+  } else {
+    presenceWarmup = false;
+    startPresenceHeartbeat();
+    void tick();
+  }
 });
+window.addEventListener("pagehide", () => stopPresenceHeartbeat(true, true));
 
 void TangbaoAccount.ready.then(syncDeskAccount);
 

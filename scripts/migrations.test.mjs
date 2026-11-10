@@ -59,8 +59,9 @@ test("0027 clears all legacy copies while preserving verification, model state a
     messages:(await client.execute("SELECT * FROM messages ORDER BY id")).rows,
     version:(await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows,
   });
-  const before = await snapshot(); await apply(client, migrations.filter(name => name.startsWith("0027")));
+  const cleanupMigration = ["0027_clear_legacy_credentials.sql"];
+  const before = await snapshot(); await apply(client, cleanupMigration);
   assert.equal((await client.execute("SELECT count(*) AS n FROM applications WHERE pass_note IS NOT NULL")).rows[0].n,0);
   assert.deepEqual(await snapshot(),before);
-  await apply(client, migrations.filter(name => name.startsWith("0027"))); assert.deepEqual(await snapshot(),before);
+  await apply(client, cleanupMigration); assert.deepEqual(await snapshot(),before);
 });

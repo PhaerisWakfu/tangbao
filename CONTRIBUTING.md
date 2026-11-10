@@ -49,6 +49,19 @@ Git 提交以中文为主，首行标题后必须空一行，再用正文说明�
 
 PR 使用仓库模板，提交后把分支、变更与验证记录回填 Issue。代码完成、提交、推送、发布和验收分别记录，验收完成前不自动关闭 Issue。
 
+## 分支清理
+
+合并到 `main` 后及时删除自己的功能或修复分支，避免远端堆积。删除前先确认分支已经完全合并：
+
+```bash
+git fetch origin --prune
+git branch -r --merged origin/main
+git merge-base --is-ancestor origin/<branch> origin/main
+git push origin --delete <branch>
+```
+
+只删除**自己创建且已合并**的分支。`main`、未合并分支和他人分支必须保留；删除他人分支前先取得对方确认。本地对应分支用 `git branch -d` 清理，不要用 `-D` 删除未合并分支。
+
 ## 版本与发布 tag
 
 生产发布使用 annotated tag，按语义化版本递增，标记实际发布的 `main` 提交：
@@ -61,6 +74,8 @@ v2.0.0    不兼容变更
 ```
 
 每次发布创建一个新 tag。**已推送的 tag 不移动、不覆盖、不强制更新**；发现发布问题应修复后递增版本并新建 tag。发布说明需记录 tag、发布提交、生产 Worker 版本和已应用的 D1 migration。
+
+每个 tag 必须使用 annotated tag，并在注解里用一两句简短说明概括本次发布改了什么；不得创建空说明 tag。tag 说明面向用户可感知的变化，具体部署信息仍记录在发布说明中。
 
 本地协作规则、个人接手分析/Todo、截图和验收产物不提交；这些文件由 `.gitignore` 排除。前端规范、账号设计、Issue 流程、本地部署手册和必要源码/脚本/模板可以提交。新的个人材料放 `.tmp/`、`.local/` 或 `private-assets/`，不要在可发布文档中链接本地专属文件。
 
