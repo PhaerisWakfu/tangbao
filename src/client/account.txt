@@ -588,7 +588,6 @@
         notice.textContent = mailMessage(data); renderCooldown();
       })); resend.dataset.resend = "";
       renderCooldown();
-      button("稍后验证", () => close(null));
       button("收不到验证码？更换邮箱", () => switchMode("change-email"));
     }
     if (mode === "change-email") button("返回验证邮箱", () => switchMode("verify"));
