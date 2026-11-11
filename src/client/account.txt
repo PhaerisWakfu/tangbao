@@ -589,7 +589,7 @@
       })); resend.dataset.resend = "";
       renderCooldown();
       button("稍后验证", () => close(null));
-      button("邮箱填错了？更换邮箱", () => switchMode("change-email"));
+      button("收不到验证码？更换邮箱", () => switchMode("change-email"));
     }
     if (mode === "change-email") button("返回验证邮箱", () => switchMode("verify"));
     if (mode === "change" || mode === "claim" || mode === "confirm") button("返回账号", () => { claim = null; switchMode("manage"); });
