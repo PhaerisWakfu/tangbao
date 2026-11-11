@@ -105,12 +105,11 @@ function providerLimit(env: MailEnv, provider: MailProvider): number {
   return value;
 }
 
-// MAIL_PROVIDERS is the send order and is configuration, not policy: production
-// runs Cloudflare only. The Brevo branch stays dormant so switching providers is
-// a configuration change rather than a code change.
+// MAIL_PROVIDERS is the send order. Production runs Cloudflare first for its
+// monthly free allowance, then Brevo. Providers without credentials drop out.
 function mailProviders(env: MailEnv): MailProvider[] {
   if (env.MAIL_MODE === "test") return ["cloudflare"];
-  const configured = (env.MAIL_PROVIDERS || "cloudflare")
+  const configured = (env.MAIL_PROVIDERS || "cloudflare,brevo")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item): item is MailProvider => item === "cloudflare" || item === "brevo");
