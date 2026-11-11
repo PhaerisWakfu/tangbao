@@ -255,6 +255,7 @@ function botRow(message, askedAt) {
     '<button type="button" aria-disabled="true" data-tip="他只写一遍" aria-label="重新生成"><svg class="i"><use href="#i-redo"/></svg></button>' +
     "<time></time>" +
     "</div></div>";
+  TangbaoReports.attachMessage(row.querySelector(".acts"), message, current?.operator === "tangbao-vme50-flash" ? "糖包本人" : current?.operator || "模型");
   const summary = row.querySelector("summary");
   summary.textContent = `已思考（用时 ${spent(took)}）`;
   summary.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-chev"/></svg>');
@@ -744,7 +745,7 @@ async function syncAccountHistory() {
     historyAccountId = nextId; historySequence++; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false;
     if (current?.owned) {
       viewVersion++; current = null; threadModel = ""; threadQueued = false;
-      painted = ""; paint([]); titleEl.textContent = ""; updateReportEntry();
+      painted = ""; paint([]); titleEl.textContent = "";
       input.value = ""; clearAttach(); body.dataset.state = "empty"; applyBlocked(false);
     }
   }
@@ -766,10 +767,8 @@ window.addEventListener("tb:logout", () => {
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
-  if (reportModal) TangbaoModal.close(reportModal);
-  $("#report-reason").value = "";
   body.dataset.state = "empty"; titleEl.textContent = ""; log.replaceChildren();
-  blocked = false; sending = false; grow(); updateReportEntry(); renderHistory(); showSys("");
+  blocked = false; sending = false; grow(); renderHistory(); showSys("");
 });
 
 async function removeThread(thread) {
@@ -792,7 +791,6 @@ function forget(id) {
   current = null;
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   painted = "";
   openAwaiting = true;
   paint([]);
@@ -828,13 +826,14 @@ async function refresh(fresh = false) {
     const previousReported = Boolean(current.reported);
     current.operator = data.operator || "";
     current.queued = Boolean(data.queued);
-    current.reported = Boolean(data.reported);
+    current.reported = false;
+    TangbaoReports.observeRevision(data.reportingRevision);
+    TangbaoReports.refresh();
     if (previousOperator !== current.operator || previousQueued !== current.queued || previousReported !== current.reported || (data.title && data.title !== current.title)) {
       if (data.title) current.title = data.title;
       saveStore();
       renderHistory();
     }
-    updateReportEntry();
     const scrollTop = stage.scrollTop;
     const reading = stage.scrollHeight - stage.clientHeight - scrollTop > 100;
     paint(data.messages || []);
@@ -921,7 +920,6 @@ async function openThread(id) {
   messages = [];
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   store.activeId = found.owned ? null : id;
   saveStore();
   renderHistory();
@@ -948,7 +946,6 @@ function newChat(pickModel) {
   applyBlocked(false);
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   store.activeId = null;
   saveStore();
   painted = "";
@@ -1297,88 +1294,6 @@ document.addEventListener("keydown", (event) => {
   }
   closeCard();
   closeSide();
-});
-
-const reportOpen = $("#report-open");
-const reportModal = $("#report");
-const reportReason = $("#report-reason");
-const reportTarget = $("#report-target");
-const reportErr = $("#report-err");
-const reportSubmit = $("#report-submit");
-
-function canReport() {
-  return Boolean(
-    current &&
-      current.operator &&
-      current.operator !== "tangbao-pool" &&
-      !current.queued,
-  );
-}
-
-function updateReportEntry() {
-  if (!reportOpen) return;
-  reportOpen.hidden = !canReport();
-  reportOpen.textContent = current?.reported ? "已举报" : "举报模型";
-}
-
-function openReport() {
-  if (!canReport()) {
-    showSys("这条还没有模型接手。");
-    return;
-  }
-  if (current.reported) {
-    showSys("这条已经举报过了。");
-    return;
-  }
-  const label = current.operator === "tangbao-vme50-flash" ? "糖包本人" : current.operator;
-  reportTarget.textContent = `被举报：${label}`;
-  reportReason.value = "";
-  reportErr.textContent = "";
-  TangbaoModal.open(reportModal);
-  $("#report-close").focus();
-}
-
-function closeReport() {
-  TangbaoModal.close(reportModal);
-  updateReportEntry();
-}
-
-reportOpen?.addEventListener("click", openReport);
-$("#report-close")?.addEventListener("click", closeReport);
-reportModal?.addEventListener("click", (event) => {
-  if (event.target === reportModal) closeReport();
-});
-reportSubmit?.addEventListener("click", async () => {
-  if (!current || !canReport()) return;
-  const reason = reportReason.value.trim();
-  if ([...reason].length < 2) {
-    reportErr.textContent = "写一下举报原因。";
-    return;
-  }
-  reportSubmit.disabled = true;
-  reportErr.textContent = "";
-  try {
-    const data = await api(`/api/threads/${current.id}/report`, {
-      method: "POST",
-      token: current.token,
-      body: { reason },
-    });
-    current.reported = true;
-    saveStore();
-    closeReport();
-    showSys(data.already ? "这条已经举报过了。" : "举报已收到，感谢。");
-  } catch (err) {
-    reportErr.textContent = err.message;
-  } finally {
-    reportSubmit.disabled = false;
-  }
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && reportModal && !reportModal.hidden) {
-    closeReport();
-    return;
-  }
 });
 
 $("#new").addEventListener("click", () => newChat());
@@ -1753,7 +1668,6 @@ void (async () => {
 })();
 
 TangbaoModal.bind($("#viewer"), closeViewer);
-TangbaoModal.bind(reportModal, closeReport);
 TangbaoModal.bind(claimPrompt, closeClaimPrompt);
 
 async function loadOlderMessages() {

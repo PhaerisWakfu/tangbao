@@ -27,13 +27,9 @@ async function fixture(t, complete = true) {
   const database = new scope.Database(client), statements = [];
   const binding = { prepare(sql) { statements.push(sql); return database.prepare(sql); } };
   return { client, binding, statements, check: scope.exports.assertSchemaReady, advance: n => { now += n; },
-    upgrade: () => client.executeMultiple(migration24 + "\n" + migration25 + "\n" + migration26 + "\n" + migration27),
+    upgrade: async () => { for(const name of (await readdir(path.join(root,"migrations"))).filter(n=>n.endsWith(".sql") && n>="0024").sort()) await client.executeMultiple(await readFile(path.join(root,"migrations",name),"utf8")); },
   };
 }
-const migration24 = await readFile(path.join(root, "migrations/0024_app_schema_version.sql"), "utf8");
-const migration25 = await readFile(path.join(root, "migrations/0025_message_paging.sql"), "utf8");
-const migration26 = await readFile(path.join(root, "migrations/0026_security_maintenance.sql"), "utf8");
-const migration27 = await readFile(path.join(root, "migrations/0027_clear_legacy_credentials.sql"), "utf8");
 const missing = error => error.code === "SCHEMA_NOT_READY" && !error.message.includes("SELECT");
 
 test("missing migration fails without schema repair or user-data writes", async t => {
@@ -77,4 +73,8 @@ test("a version marker cannot hide a missing message paging index", async t => {
 test("a pre-merge schema marker cannot hide the missing pin migration", async t => {
   const f = await fixture(t); await f.client.execute("DROP TABLE thread_pins");
   await assert.rejects(f.check(f.binding), missing);
+});
+test("举报结构标记不能掩盖缺失的证据清理索引", async t => {
+  const f=await fixture(t);await f.client.execute('DROP INDEX idx_message_images_key');
+  await assert.rejects(f.check(f.binding),missing);
 });

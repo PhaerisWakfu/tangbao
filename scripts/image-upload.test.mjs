@@ -18,7 +18,7 @@ assert.equal(functions.length, names.length);
 const adapter = ast.statements.filter(n => (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
   ["d1Meta", "TursoStatement", "TursoDatabase"].includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
 const code = ts.transpileModule(adapter + "\n" + cleanup + "\n" + functions.map(n => n.getText(ast)).join("\n") +
-  "\nglobalThis.Database=TursoDatabase;globalThis.append=writeMessage;", {
+  "\nglobalThis.Database=TursoDatabase;globalThis.append=(env,id,role,incoming,awaiting)=>writeMessage(env,id,role,incoming,awaiting,null);", {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
@@ -29,6 +29,7 @@ async function fixture(t) {
   for (const file of ["0001_init.sql", "0003_images.sql", "0004_message_images.sql", "0005_draw.sql", "0017_thread_last_role.sql", "0023_image_cleanup_jobs.sql"]) {
     await client.executeMultiple(await readFile(path.join(root, "migrations", file), "utf8"));
   }
+  await client.executeMultiple("ALTER TABLE messages ADD COLUMN author_account_id TEXT; CREATE TABLE report_images(image_key TEXT)");
   let now = 1_800_000_000_000;
   class AuthError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
   const scope = { exports: {}, Date: { now: () => now }, randomId: () => randomUUID(), AuthError, console: { log() {} } };

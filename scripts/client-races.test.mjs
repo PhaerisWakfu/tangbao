@@ -30,7 +30,7 @@ function desk() {
   const node = () => ({ hidden: false, textContent: "", value: "", focus() {}, replaceChildren() {}, scrollIntoView() {}, querySelectorAll: () => [] });
   const button = { disabled: false };
   const context = { Date, FormData, Set, URL: { revokeObjectURL() {} },
-    selected: "a", threadViewVersion: 0, readonly: false, shown: "", waiting: 0, pending: 0, timer: 0, ticking: null, pollingAccountId: null,
+    activeReportId:null,TangbaoReports:{cancelReview(){},observeRevision(){},refresh(){}},selected: "a", threadViewVersion: 0, readonly: false, shown: "", waiting: 0, pending: 0, timer: 0, ticking: null, pollingAccountId: null,
     POLL_MS: 60000, deskAccountId: "account", loggedOut: false, replying: false, replyGuard: { key: "", at: 0 }, pendingImages: [],
     seat: { operatorId: "operator" }, setDeskThreadUrl() {}, closeDeskThreadNotification: async () => {},
     thread: node(), replyErr: node(), answer: node(), reply: { ...node(), querySelector: () => button }, desk: node(), document: { hidden: false },

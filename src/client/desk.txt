@@ -84,6 +84,7 @@ let auditModelPage = 1;
 let auditModelQuery = "";
 let auditModelTimer = 0;
 let auditState = "";
+let activeReportId = null;
 let applyToken = 0;
 let auditToken = 0;
 let applyStamp = "";
@@ -349,6 +350,8 @@ function messageScroller() {
 }
 
 function renderThread(data) {
+  TangbaoReports.observeRevision(data.reportingRevision);
+  TangbaoReports.refresh();
   $("#slip-title").textContent = data.thread.title;
   const last = data.messages.at(-1);
   const own = data.thread.operatorId === seat.operatorId;
@@ -425,6 +428,13 @@ function renderThread(data) {
     const meta = document.createElement("small");
     const who = message.role === "tangbao" ? (locked ? "糖包" : "你") : "对方";
     meta.textContent = message.draw ? `${who} · 要一张图 · ${clock(message.createdAt)}` : `${who} · ${clock(message.createdAt)}`;
+    if (message.canReport) {
+      const acts = document.createElement("div"); acts.className = "report-message-acts";
+      const copy = document.createElement("button"); copy.type="button";copy.className="copy";copy.setAttribute("aria-label","复制");
+      copy.innerHTML='<svg viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="2.2"/><path d="M13 7V5.7A1.7 1.7 0 0 0 11.3 4H5.7A1.7 1.7 0 0 0 4 5.7v5.6A1.7 1.7 0 0 0 5.7 13H7"/></svg>';
+      copy.addEventListener("click",()=>void navigator.clipboard.writeText(message.body || "").catch(()=>{replyErr.textContent="复制失败，请重试。";}));
+      acts.append(copy); TangbaoReports.attachMessage(acts,message);wrap.append(acts);
+    }
     wrap.append(meta);
     thread.append(wrap);
   }
@@ -519,7 +529,7 @@ async function saveProfile(event) {
 }
 
 function showPane(name, nav) {
-  if (name !== "thread") threadViewVersion++;
+  if (name !== "thread") { threadViewVersion++; activeReportId=null; TangbaoReports.cancelReview(thread); }
   $("#pane-thread").hidden = name !== "thread";
   $("#pane-apply").hidden = name !== "apply";
   $("#pane-audit").hidden = name !== "audit";
@@ -548,6 +558,8 @@ async function closeDeskThreadNotification(id) {
 }
 
 async function openSlip(id, fromAudit) {
+  TangbaoReports.cancelReview(thread);
+  activeReportId = null;
   const version = ++threadViewVersion;
   readonly = Boolean(fromAudit);
   setDeskThreadUrl(id);
@@ -641,7 +653,7 @@ async function tick() {
       await loadQueue();
       const id = selected;
       const version = threadViewVersion;
-      if (id && !$("#pane-thread").hidden) {
+      if (id && !activeReportId && !$("#pane-thread").hidden) {
         const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
         if (selected === id && version === threadViewVersion && !$("#pane-thread").hidden) renderThread(data);
       }
@@ -1344,6 +1356,17 @@ auditSearch.addEventListener("input", () => {
   }, 300);
 });
 
+async function openReportReview(id) {
+  activeReportId=id; selected=null; const version=++threadViewVersion; readonly=true; shown="";
+  showPane("thread","audit"); reply.hidden=true;
+  $("#slip-title").textContent="举报审核";$("#slip-meta").textContent="";
+  $("#block").hidden=true;$("#shelve").hidden=true;$("#back-audit").hidden=false;
+  $("#message-nav").hidden=true;
+  await TangbaoReports.adminReview(thread,id,()=>{auditStamp="";},threadId=>openSlip(threadId,true));
+  if (activeReportId!==id || version!==threadViewVersion) return;
+  if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({block:"start"});
+}
+
 async function loadAudit() {
   const token = ++auditToken;
   const params = new URLSearchParams({ page: String(auditPage), mpage: String(auditModelPage) });
@@ -1362,6 +1385,7 @@ async function loadAudit() {
   const operatorPages = Number(data.operatorPages) || 1;
   const lead = $("#audit-lead");
   if (lead) {
+    lead.hidden = auditState === "reported";
     lead.textContent = "";
     if (!total) {
       lead.textContent = auditModel ? "这个型号还没有对话" : "还没有对话";
@@ -1375,7 +1399,11 @@ async function loadAudit() {
     }
   }
   const mark = JSON.stringify(data);
-  if (mark === auditStamp) return;
+  if (mark === auditStamp) {
+    const cases = $("#new-report-cases");
+    if (auditState === "reported" && cases) await TangbaoReports.adminList(cases, openReportReview, auditModel);
+    return;
+  }
   auditStamp = mark;
   const box = $("#audit");
 
@@ -1454,6 +1482,7 @@ async function loadAudit() {
   const note = document.createElement("span");
   note.className = "talks-note";
   const stateLabel = { waiting: "在等", replied: "已回", reported: "举报" }[auditState];
+  note.hidden = auditState === "reported";
   note.textContent = stateLabel || (auditModel ? "只看这个型号" : "最近更新");
   const filter = document.createElement("div");
   filter.className = "audit-filter";
@@ -1470,11 +1499,17 @@ async function loadAudit() {
   const list = document.createElement("div");
   list.className = "talks-list";
   const threads = data.threads || [];
-  if (!threads.length) {
+  if (!threads.length && auditState !== "reported") {
     const empty = document.createElement("p");
     empty.className = "quiet";
     empty.textContent = auditModel ? "这个型号还没有对话。" : "还没有对话。";
     list.append(empty);
+  }
+  if (auditState === "reported") {
+    const cases = document.createElement("div");cases.id="new-report-cases";
+    void TangbaoReports.adminList(cases, openReportReview, auditModel);
+    list.prepend(cases);
+    if (threads.length) { const label=document.createElement("h3");label.textContent="历史举报";list.append(label); }
   }
   for (const item of threads) list.append(auditLine(item));
   talksCol.append(talksHead, list);
@@ -1486,7 +1521,14 @@ $("#desk-nav").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   readonly = false;
+  const leavingReport = Boolean(activeReportId);
+  TangbaoReports.cancelReview(thread);
+  activeReportId = null;
   const next = button.dataset.view;
+  if (leavingReport && next === "thread") {
+    thread.replaceChildren(); reply.hidden=true; shown="";
+    $("#slip-title").textContent="还没选消息";$("#slip-meta").textContent="";$("#back-audit").hidden=true;
+  }
   showPane(next);
   const reveal = () => {
     if (!window.matchMedia("(max-width: 860px)").matches) return;
@@ -1502,6 +1544,7 @@ $("#desk-nav").addEventListener("click", (event) => {
 });
 
 $("#back-audit").addEventListener("click", () => {
+  activeReportId = null;
   readonly = false;
   showPane("audit");
   void loadAudit();

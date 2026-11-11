@@ -157,7 +157,7 @@ npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file
 
 `0027` 清理当前数据库中的旧口令明文副本，保留原验证摘要和模型状态。部署后只核对 postflight 的 `legacy_credential_copies=0`，不输出原值；这一步不清理已有备份或平台恢复点。恢复旧备份时须在开放服务前接续全部迁移并再次核对，不恢复旧口令展示能力。
 
-迁移后版本记录必须与所选部署提交的迁移目录逐项一致，不固定按 22 份判断。当前代码要求 `settings` 中 key 为 `app_schema_version` 的值为 `26`；缺失时相关入口返回 `503 SCHEMA_NOT_READY`，不会自动补表，处理方式见[严格迁移说明](local-development.md#严格迁移与缺失提示)。旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
+迁移后版本记录必须与所选部署提交的迁移目录逐项一致，不固定按 22 份判断。当前代码要求 `settings` 中 key 为 `app_schema_version` 的值为 `30`（包含 `0030_reports.sql` 举报升级）；缺失时相关入口返回 `503 SCHEMA_NOT_READY`，不会自动补表，处理方式见[严格迁移说明](local-development.md#严格迁移与缺失提示)。旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
 
 这条导入流程针对尚未启用账号的 0001–0020 源库。将来复制已经升级的 0021/0022 数据库时，须另行处理复制来的账号会话、验证码、认领证明、outbox 和通知任务，不能直接启动真实发信。
 

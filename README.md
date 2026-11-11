@@ -116,6 +116,7 @@ npm run check
 - [参与开发](CONTRIBUTING.md)：分支命名（`feat/`、`fix/`、`hotfix/`、`chore/`、`docs/`、`refactor/`）、提交范围与检查入口
 - [前端规范](docs/frontend.md)：样式、交互、响应式、可访问性和验证要求
 - [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
+- [举报与信誉](docs/reports.md)：双向消息举报、审核扣分、本人记录及规则版本
 - [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending
 - [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
 

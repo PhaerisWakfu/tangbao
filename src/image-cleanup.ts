@@ -60,7 +60,9 @@ export async function processImageCleanup(env: ImageCleanupEnv, threadId?: strin
 
   for (const job of jobs.results) {
     try {
-      await env.IMAGES.delete(job.image_key);
+      const referenced = await env.DB.prepare(`SELECT 1 AS found FROM message_images WHERE image_key=?
+        UNION ALL SELECT 1 FROM report_images WHERE image_key=? LIMIT 1`).bind(job.image_key, job.image_key).first();
+      if (!referenced) await env.IMAGES.delete(job.image_key);
       await env.DB.prepare("DELETE FROM image_cleanup_jobs WHERE image_key = ?").bind(job.image_key).run();
     } catch {
       const delay = Math.min(MAX_RETRY_DELAY, RETRY_DELAY * 2 ** Math.min(job.attempts, 6));

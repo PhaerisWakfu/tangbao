@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runBlockMergeScenarios } from "./local-block-scenarios.mjs";
 import { runConcurrencyScenarios } from "./local-concurrency-scenarios.mjs";
+import { runReportScenarios } from "./local-report-scenarios.mjs";
 
 function freshAccountPassword() {
   // Exactly 20 characters, with letters, digits and punctuation guaranteed.
@@ -406,6 +407,7 @@ export async function runScenarios({ metadata, directory, fixtureFile, checkServ
       assert.equal((await device.request(`/api/threads/${a.id}`)).blocked,false);
     });
     if (includeEdgeScenarios) {
+      await runReportScenarios({actor,admin,operatorA,operatorB,check,advance});
       await runBlockMergeScenarios({ actor, admin, operatorA, operatorB, check, checkServer, directory });
       await runAccountEdgeScenarios({ actor, admin, local, testMail, advance, check, bootstrap });
       await runConcurrencyScenarios({ actor, admin, operatorA, operatorB, check, checkServer, directory, metadata });

@@ -20,7 +20,7 @@ test("Turso entry applies all migrations and reruns without duplicating", async 
   const { client } = await fixture(t);
   assert.deepEqual(await migrate(client, migrationDirectory), migrationNames);
   assert.deepEqual(await migrate(client, new URL("../migrations/", import.meta.url)), []);
-  assert.equal((await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows[0].value, "26");
+  assert.equal((await client.execute("SELECT value FROM settings WHERE key='app_schema_version'")).rows[0].value, "30");
 });
 test("Turso refuses untracked populated schema", async t => {
   const { client } = await fixture(t); await client.execute("CREATE TABLE keep_me(id INT)");

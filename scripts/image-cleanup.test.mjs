@@ -13,7 +13,7 @@ const cleanupSource = await readFile(path.join(root, "src/image-cleanup.ts"), "u
 const ast = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true);
 const adapterSource = ast.statements.filter(n => (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
   ["d1Meta", "TursoStatement", "TursoDatabase"].includes(n.name?.text)).map(n => n.getText(ast)).join("\n");
-const deletionSource = "async function deleteThread(" + source.split("async function deleteThread(")[1].split("\nfunction reportReasonOf")[0];
+const deletionSource = "async function deleteThread(" + source.split("async function deleteThread(")[1].split("\nasync function visitorMessage")[0];
 const compile = text => ts.transpileModule(text, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
@@ -27,6 +27,7 @@ async function fixture(t) {
   for (const name of ["0001_init.sql", "0003_images.sql", "0004_message_images.sql", "0005_draw.sql", "0023_image_cleanup_jobs.sql"]) {
     await client.executeMultiple(await readFile(path.join(root, "migrations", name), "utf8"));
   }
+  await client.executeMultiple("CREATE TABLE report_images(report_id TEXT,image_id TEXT,image_key TEXT); CREATE INDEX idx_report_images_key ON report_images(image_key)");
   const scope = {};
   new Script(compile(adapterSource + "\nglobalThis.Database = TursoDatabase;")).runInNewContext(scope);
   const db = new scope.Database(client);
@@ -138,4 +139,19 @@ test("duplicate cleanup jobs and concurrent drains are idempotent", async t => {
   await f.job("concurrent"); const worker = f.loadWorker();
   await Promise.all([worker.drain(f.env), worker.drain(f.env)]);
   assert.equal(await f.count("image_cleanup_jobs"), 0); assert.equal(f.files.size, 0);
+});
+
+test("举报图片在删除聊天后仍保留，遗留清理任务也不能删掉证据", async t => {
+  const f=await fixture(t),worker=f.loadWorker();await f.thread('evidence',2);
+  await f.client.execute("INSERT INTO report_images(report_id,image_id,image_key) VALUES('case','i-evidence-0','img/evidence-0')");
+  await worker.remove({},f.env,'evidence');
+  assert.deepEqual([...f.files.keys()],['img/evidence-0']);assert.equal(await f.count('image_cleanup_jobs'),0);
+  await f.client.execute({sql:"INSERT INTO image_cleanup_jobs(image_key,thread_id,next_attempt_at,created_at) VALUES('img/evidence-0','evidence',?,?)",args:[f.now(),f.now()]});
+  await worker.drain(f.env);assert(f.files.has('img/evidence-0'));assert.equal(await f.count('image_cleanup_jobs'),0);
+});
+
+test("清理器复核仍在使用的消息图片，避免并发清理误删", async t => {
+  const f=await fixture(t);await f.thread('live');
+  await f.client.execute({sql:"INSERT INTO image_cleanup_jobs(image_key,thread_id,next_attempt_at,created_at) VALUES('img/live-0','live',?,?)",args:[f.now(),f.now()]});
+  await f.loadWorker().drain(f.env);assert(f.files.has('img/live-0'));assert.equal(f.calls.length,0);
 });

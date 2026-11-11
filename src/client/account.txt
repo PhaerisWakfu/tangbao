@@ -411,7 +411,10 @@
       const profileStatus = document.createElement("span");
       profileStatus.className = "account-profile-status" + (account.verified ? " is-verified" : " is-pending");
       profileStatus.textContent = account.verified ? "邮箱已验证" : "邮箱待验证";
-      profileBody.append(profileLabel, profileEmail, profileStatus);
+      const statusRow = document.createElement("div"); statusRow.className="account-profile-status-row";
+      statusRow.append(profileStatus);
+      profileBody.append(profileLabel, profileEmail, statusRow);
+      void window.TangbaoReports?.attachAccount(statusRow, account);
       profile.append(profileIcon, profileBody);
       content.append(profile);
 
@@ -428,7 +431,8 @@
         name.textContent = label;
         const hint = document.createElement("small");
         hint.textContent = note;
-        copy.append(name, hint);
+        copy.append(name);
+        if (note) copy.append(hint);
         const arrow = document.createElement("span");
         arrow.className = "account-action-arrow";
         arrow.setAttribute("aria-hidden", "true");
@@ -482,6 +486,7 @@
       if (account.verified) {
         addPushAction("account", "开启糖包消息通知", "糖包回复你的对话时提醒；需要允许浏览器通知");
       }
+      if (account.verified) addAction("举报记录", "", () => window.TangbaoReports.openRecords());
       addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
       content.append(actions);
 

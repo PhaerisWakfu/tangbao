@@ -15,6 +15,8 @@ import manifestJson from "./client/manifest.txt";
 import accountJs from "./client/account.txt";
 import modalJs from "./client/modal.txt";
 import messagesJs from "./client/messages.txt";
+import reportsJs from "./client/reports.txt";
+import { reportRoute } from "./reports";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
@@ -450,6 +452,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     if (method === "POST" && /\/api\/auth\/(register|email\/resend|email\/change|password\/forgot)$/.test(path)) ctx.waitUntil(processMailOutbox(env));
     return path === "/api/auth/me" ? withGuestCookie(request, env, authenticated) : authenticated;
   }
+  const reporting = await reportRoute(request, env);
+  if (reporting) return reporting;
   const accountResponse = await accountBusinessRoute(request, env);
   if (accountResponse) return accountResponse;
   const accountDisable = path.match(/^\/api\/admin\/accounts\/([A-Za-z0-9_-]{16,80})\/disable$/);
@@ -526,9 +530,6 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const unblock = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/unblock$/);
   if (unblock && method === "POST") return unblockThread(request, env, unblock[1]);
 
-  const report = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})\/report$/);
-  if (report && method === "POST") return reportThread(request, env, report[1]);
-
   const visitor = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})(\/messages)?$/);
   if (visitor) {
     const id = visitor[1];
@@ -583,7 +584,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   // 资源用裸地址：页面 HTML 是 no-store，脚本每次回源校验，不靠 URL 上的版本号刷缓存。
   const script =
-    path === "/assets/messages.js" ? messagesJs
+    path === "/assets/reports.js" ? reportsJs
+      : path === "/assets/messages.js" ? messagesJs
       : path === "/assets/modal.js" ? modalJs
         : path === "/assets/account.js" ? accountJs
           : path === "/assets/app.js" ? appJs
@@ -1017,8 +1019,8 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
       env.DB.prepare(`INSERT INTO threads(id,token_hash,title,preview,created_at,updated_at,awaiting,visitor_hash,ip_hash,operator_id,auto_home,queued,last_role,account_id,guest_identity_id)
         SELECT ?,?,?,?,?,?,1,?,?,?,?,?,'visitor',?,? WHERE changes()=1`)
         .bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued, account?.id || null, guest?.id || null),
-      env.DB.prepare("INSERT INTO messages(id,thread_id,role,body,draw,created_at) SELECT ?,?,'visitor',?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)")
-        .bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now, id),
+      env.DB.prepare("INSERT INTO messages(id,thread_id,role,body,draw,created_at,author_account_id) SELECT ?,?,'visitor',?,?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)")
+        .bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now, account?.id || null, id),
       ...stored.map((image, position) => env.DB.prepare(`INSERT INTO message_images(id,message_id,image_key,image_type,position)
         SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)`).bind(image.id, messageId, image.key, image.type, position, id)),
     ];
@@ -1060,7 +1062,7 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
   const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
   const [messages, operator] = await Promise.all([
-    listMessages(env, id, new URL(request.url).searchParams),
+    listMessages(env, id, new URL(request.url).searchParams, thread.account_id, "tangbao"),
     operatorPresence(env, thread.operator_id),
   ]);
   const status = statusPayload(publicPresence(operator.status));
@@ -1069,7 +1071,8 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     operator: thread.operator_id,
     awaiting: thread.awaiting === 1,
     queued: thread.queued === 1,
-    reported: thread.reported_at > 0,
+    reportingRevision: thread.reporting_revision || 0,
+    reported: false,
     blocked: seen.blocked,
     ...messages,
     status,
@@ -1085,6 +1088,7 @@ async function deleteThread(request: Request, env: AppEnv, id: string): Promise<
       `INSERT INTO image_cleanup_jobs (image_key, thread_id, attempts, next_attempt_at, created_at)
        SELECT image_key, ?, 0, ?, ? FROM message_images
        WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+         AND NOT EXISTS(SELECT 1 FROM report_images r WHERE r.image_key=message_images.image_key)
        ON CONFLICT(image_key) DO NOTHING`,
     ).bind(id, now, now, id),
     env.DB.prepare(
@@ -1096,35 +1100,6 @@ async function deleteThread(request: Request, env: AppEnv, id: string): Promise<
   await processImageCleanup(env, id).catch(() => {
     console.log(JSON.stringify({ event: "image_cleanup_deferred" }));
   });
-  return json({ ok: true });
-}
-
-function reportReasonOf(value: unknown): string {
-  if (typeof value !== "string") throw new HttpError(400, "写一下举报原因。");
-  const text = sanitize(value);
-  if ([...text].length < 2) throw new HttpError(400, "写一下举报原因。");
-  if ([...text].length > 500) throw new HttpError(400, "举报原因太长了。");
-  return text;
-}
-
-async function reportThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  const thread = await loadOwned(env, id, bearer(request), request);
-  const seen = await attachIdentity(env, thread, request, thread.operator_id);
-  if (seen.blocked) throw new HttpError(403, BLOCKED);
-  if (thread.queued === 1 || thread.operator_id === POOL_MODEL) {
-    throw new HttpError(400, "这条还没有模型接手。");
-  }
-  if (!(await allow(env, `report:${thread.token_hash}`, 3, HOUR))) {
-    throw new HttpError(429, "举报先歇一会儿。");
-  }
-  const payload = await readJson(request);
-  const reason = reportReasonOf(payload.reason);
-  const result = await env.DB.prepare(
-    "UPDATE threads SET reported_at = ?, report_reason = ? WHERE id = ? AND reported_at = 0",
-  )
-    .bind(Date.now(), reason, id)
-    .run();
-  if (result.meta.changes !== 1) return json({ ok: true, already: true });
   return json({ ok: true });
 }
 
@@ -1145,7 +1120,7 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
   }
   // Admission applies only to new conversations. Continuing an existing thread
   // remains possible even when the selected model's new-thread queue is full.
-  await writeMessage(env, id, "visitor", incoming, 1);
+  await writeMessage(env, id, "visitor", incoming, 1, thread.account_id);
   const shown = caption(incoming.body, incoming.images.length);
   const preview = incoming.draw ? `要一张图 · ${shown}` : shown;
   noteVisitor(
@@ -2265,7 +2240,9 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       pinned: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
-  const messages = await listMessages(env, id, new URL(request.url).searchParams);
+  const ownSeat = thread.operator_id === seat.operatorId;
+  const messages = await listMessages(env, id, new URL(request.url).searchParams, ownSeat ? seat.accountId : null, "visitor");
+  const reporting = await env.DB.prepare("SELECT report_revision || ':' || (SELECT revision FROM report_policy_active WHERE singleton=1) AS report_revision FROM account_reputations WHERE account_id=?").bind(seat.accountId).first<{report_revision:string}>();
   const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
@@ -2277,6 +2254,7 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       blocked,
       pinned: Boolean(thread.pinned),
     },
+    reportingRevision: reporting?.report_revision || 0,
     ...messages,
   });
 }
@@ -2336,7 +2314,7 @@ async function adminReply(request: Request, env: AppEnv, id: string, ctx: Execut
     .first<{ operator_id: string; title: string; account_id: string | null }>();
   if (!exists) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
-  await writeMessage(env, id, "tangbao", incoming, 0);
+  await writeMessage(env, id, "tangbao", incoming, 0, seat.accountId);
   await touchReply(env, seat, Date.now());
   if (exists.account_id) {
     ctx.waitUntil(notifyAccount(env, exists.account_id, id, exists.title, caption(incoming.body, incoming.images.length)));
@@ -2372,7 +2350,7 @@ async function serveImage(request: Request, env: AppEnv, id: string): Promise<Re
   return new Response(bytes, { headers: { "content-type": row.image_type || "application/octet-stream", "cache-control": "private, no-store" } });
 }
 
-async function listMessages(env: AppEnv, threadId: string, query = new URLSearchParams()) {
+async function listMessages(env: AppEnv, threadId: string, query = new URLSearchParams(), viewer: string | null = null, opposingRole = "") {
   const after = query.get("after"), before = query.get("before");
   // Existing main pages use timestamp/id cursors. Only the incremental client
   // opts into write order, so open pages retain their original cursor contract.
@@ -2397,10 +2375,10 @@ async function listMessages(env: AppEnv, threadId: string, query = new URLSearch
   const order = writtenOrder ? `rowid ${direction}` : `created_at ${direction},id ${direction}`;
   const values = !anchor ? [] : writtenOrder ? [anchor.position] : [anchor.createdAt, anchor.createdAt, anchor.id];
   const rows = await env.DB.prepare(
-    `SELECT id, role, body, draw, created_at AS createdAt FROM messages
+    `SELECT id, role, body, draw, created_at AS createdAt, author_account_id AS author FROM messages
      WHERE thread_id=? ${boundary}
      ORDER BY ${order} LIMIT 51`,
-  ).bind(threadId, ...values).all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+  ).bind(threadId, ...values).all<{ id: string; role: string; body: string; draw: number; createdAt: number; author: string | null }>();
   const more = rows.results.length > 50;
   const selected = rows.results.slice(0, 50);
   if (!after) selected.reverse();
@@ -2423,7 +2401,7 @@ async function listMessages(env: AppEnv, threadId: string, query = new URLSearch
     }
   }
   return {
-    messages: selected.map(message => ({ ...message, images: grouped.get(message.id) ?? [] })),
+    messages: selected.map(({author, ...message}) => ({ ...message, canReport: Boolean(viewer && author && author !== viewer && message.role === opposingRole), images: grouped.get(message.id) ?? [] })),
     hasMore: !after && more,
     messagePage: { oldest: selected[0]?.id || null, newest: selected.at(-1)?.id || after || null,
       hasOlder: !after && more, hasNewer: Boolean(after) && more },
@@ -2436,6 +2414,7 @@ async function writeMessage(
   role: "visitor" | "tangbao",
   incoming: Incoming,
   awaiting: number,
+  authorAccount: string | null,
 ): Promise<void> {
   const messageId = randomId(16);
   const now = Date.now();
@@ -2447,13 +2426,14 @@ async function writeMessage(
     const shown = caption(incoming.body, stored.length);
     batchStarted = true;
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
+      env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at, author_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
         messageId,
         threadId,
         role,
         incoming.body,
         draw,
         now,
+        authorAccount,
       ),
       ...imageInserts(env, messageId, stored),
       env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
@@ -2546,7 +2526,7 @@ async function presenceHistory(env: AppEnv) {
 
 async function loadOwned(env: AppEnv, id: string, token: string, request: Request) {
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at, account_id FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at, account_id, (SELECT report_revision || ':' || (SELECT revision FROM report_policy_active WHERE singleton=1) FROM account_reputations WHERE account_id=threads.account_id) AS reporting_revision FROM threads WHERE id = ?",
   )
     .bind(id)
     .first<{
@@ -2560,6 +2540,7 @@ async function loadOwned(env: AppEnv, id: string, token: string, request: Reques
       operator_id: string;
       queued: number;
       reported_at: number;
+      reporting_revision: string;
     }>();
   if (thread?.account_id) {
     const account = await requireAccount(request, env);
