@@ -11,7 +11,7 @@
 - 账号新建对话支持跨设备历史。旧匿名历史由用户主动选择关联，并验证原对话凭证；不根据 IP、visitor ID 或历史申请邮箱自动认领。
 - 登录默认长期保持，使用约 400 天的持久 cookie，并在活跃使用时续期。退出撤销当前会话、清理本站 cookie 和客户端缓存，下一次需要密码登录；设置不提供切换账号功能。
 - 模型停用影响该模型接单和回复，账号停用影响账号所有会话；两项操作分开。
-- 发信使用 Brevo 与 Cloudflare Email Sending，默认顺序为 Brevo 优先、Cloudflare 承接突增流量和熔断切换。应用侧每日总预算 1,200 封：Brevo 280、Cloudflare 920，180 封告警；单家额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时提示额度已满。不另设应用侧月度限制；两家账户的月度额度和计费以各自控制台为准。
+- 发信使用 Brevo 与 Cloudflare Email Sending，默认顺序为 Brevo 优先、Cloudflare 承接突增流量和熔断切换。应用侧每日总预算 1,200 封：Brevo 280、Cloudflare 920；用到当日预算 90% 时按 UTC 日期去重，推送一次飞书提醒（未配置 `FEISHU_WEBHOOK` 时只写日志）。单家额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时提示额度已满。不另设应用侧月度限制；两家账户的月度额度和计费以各自控制台为准。
 
 邮箱验证只证明对邮箱的控制权，不代表实名或内容安全保证。糖包的模型仍由人回复。
 
@@ -71,7 +71,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
-当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key，也不要求向开发者提供 Cloudflare Account ID 或 API Token。部署者用自己的 Wrangler 登录完成发布；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 是站点保护验证码和邮件内容所需的 Worker Secrets。部署顺序、Secrets 放置、管理员引导和完整验收见[部署交接手册](accounts-rollout.md)。
+当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key，也不要求向开发者提供 Cloudflare Account ID 或 API Token。部署者用自己的 Wrangler 登录完成发布；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 是站点保护验证码和邮件内容所需的 Worker Secrets，邮件额度提醒用的 `FEISHU_WEBHOOK` 同样按 Secret 配置。部署顺序、Secrets 放置、管理员引导和完整验收见[部署交接手册](accounts-rollout.md)。
 
 与 [Send emails 入门指南的 Workers 栏](https://developers.cloudflare.com/email-service/get-started/send-emails/) 对照：`wrangler.jsonc` 配置 `send_email` 的 `EMAIL` 绑定，`src/email.ts` 调用 `env.EMAIL.send({to, from, subject, text, headers})`，保存返回的 `messageId`。验证码先进入持久 outbox 再调用该绑定；纯文本邮件无需额外提供 HTML。
 
@@ -86,7 +86,9 @@ MAIL_PROVIDERS=brevo,cloudflare
 CLOUDFLARE_DAILY_LIMIT=920
 BREVO_DAILY_LIMIT=280
 BREVO_FROM=糖包 <noreply@send.phaeris.cn>
-# Worker secrets：EMAIL_CODE_PEPPER、MAIL_PAYLOAD_KEY
+# 邮件每日预算用到 90% 时推送到飞书群；留空只写日志
+FEISHU_WEBHOOK=
+# Worker secrets：EMAIL_CODE_PEPPER、MAIL_PAYLOAD_KEY、FEISHU_WEBHOOK
 # EMAIL 为 Worker 原生邮件绑定
 # 可选可信投递事件：MAIL_EVENTS_QUEUE、MAIL_EVENTS_ACCOUNT_ID
 ```

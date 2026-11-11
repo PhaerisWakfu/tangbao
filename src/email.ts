@@ -11,6 +11,7 @@ export type MailEnv = {
   BREVO_DAILY_LIMIT?: string;
   BREVO_API_KEY?: string;
   BREVO_FROM?: string;
+  FEISHU_WEBHOOK?: string;
   AUTH_TEST_NOW?: string;
   MAIL_TEST_FAILURE?: string;
   EMAIL?: { send(message: { to: string; from: string | { email: string; name?: string }; subject: string; text: string; headers?: Record<string, string> }): Promise<{ messageId: string }> };
@@ -24,7 +25,8 @@ const encoder = new TextEncoder();
 const CODE_TTL = 10 * 60_000;
 const MAIL_BLOCK_PREFIX = "mail_blocked_until:";
 const MAIL_BREAKER_MS = 5 * 60_000;
-const MAIL_WARN_AT = 180;
+// One alert per UTC day, once this share of the daily budget is used.
+const MAIL_WARN_RATIO = 0.9;
 type MailProvider = "cloudflare" | "brevo";
 export type MailPurpose = "verify" | "reset";
 type Payload = { email: string; code: string; purpose: MailPurpose };
@@ -119,6 +121,38 @@ function breakerKey(provider: MailProvider): string {
   return `${MAIL_BLOCK_PREFIX}${provider}`;
 }
 
+/**
+ * Operational alert for the maintainers. It is deliberately best-effort: a slow
+ * or broken webhook must never block, fail or retry the request whose mail
+ * challenge happened to cross the threshold. The webhook URL is never logged.
+ */
+async function notifyMailBudget(env: MailEnv, budget: { day: string; used: number; limit: number }): Promise<void> {
+  const webhook = (env.FEISHU_WEBHOOK || "").trim();
+  if (!webhook) return;
+  try {
+    const percent = Math.round((budget.used / budget.limit) * 100);
+    const text = [
+      "糖包 · 邮件额度提醒",
+      `日期（UTC）：${budget.day}`,
+      `已用：${budget.used} / ${budget.limit}（${percent}%）`,
+      `剩余：${Math.max(0, budget.limit - budget.used)}`,
+      `通道顺序：Brevo ${providerLimit(env, "brevo")} → Cloudflare ${providerLimit(env, "cloudflare")}`,
+    ].join("\n");
+    const response = await fetch(webhook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ msg_type: "text", content: { text } }),
+      signal: AbortSignal.timeout(3_000),
+    });
+    const raw = await response.text();
+    let code = 0;
+    try { code = Number((JSON.parse(raw) as { code?: number }).code ?? 0) || 0; } catch {}
+    if (!response.ok || code !== 0) throw new Error(`feishu status ${response.status} code ${code}`);
+  } catch (error) {
+    console.log(JSON.stringify({ event: "mail_budget_alert_failed", message: error instanceof Error ? error.message : "unknown" }));
+  }
+}
+
 /** All guards, revocation and budget reservations run in one D1/Turso write batch. */
 export async function createMailChallenge(env: MailEnv, account: { id: string; email: string }, purpose: MailPurpose): Promise<{ challengeId: string; mailStatus: string }> {
   if (env.MAIL_MODE !== "test" && env.MAIL_MODE !== "cloudflare") throw new MailError(503, "MAIL_DISABLED", "暂时无法发送验证邮件，请稍后重试。");
@@ -160,11 +194,14 @@ export async function createMailChallenge(env: MailEnv, account: { id: string; e
   }
   try {
     const budget = await env.DB.prepare("SELECT used FROM mail_budgets WHERE period = ?").bind(day).first<{ used: number }>();
-    if ((budget?.used || 0) >= MAIL_WARN_AT) {
+    const used = budget?.used || 0;
+    const limit = dailyLimit(env);
+    if (used >= Math.ceil(limit * MAIL_WARN_RATIO)) {
       const warningKey = `mail_budget_warned:${day}`;
-      const warned = await env.DB.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").bind(warningKey, String(budget?.used || 0)).run();
+      const warned = await env.DB.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)").bind(warningKey, String(used)).run();
       if (warned.meta.changes === 1) {
-        console.log(JSON.stringify({ event: "mail_budget_warning", period: day, used: budget?.used || 0, limit: dailyLimit(env) }));
+        console.log(JSON.stringify({ event: "mail_budget_warning", period: day, used, limit }));
+        await notifyMailBudget(env, { day, used, limit });
       }
     }
   } catch {}
