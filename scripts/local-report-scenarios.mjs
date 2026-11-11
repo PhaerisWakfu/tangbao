@@ -15,7 +15,7 @@ export async function runReportScenarios({actor,admin,operatorA,operatorB,check,
     await operator.request(`/api/admin/threads/${thread.id}`,{method:'POST',body});
     const data=await visitor.request(`/api/threads/${thread.id}`);return{thread,message:data.messages.at(-1),visitorMessage:data.messages[0]};
   }
-  const create=(client,message,key=randomUUID(),status=201)=>client.request('/api/reports',{method:'POST',body:{messageId:message.id,reason:'合成举报原因',requestKey:key},status});
+  const create=(client,message,key=randomUUID(),status=201)=>client.request('/api/reports',{method:'POST',body:{messageId:message.id,typeCode:'other',reason:'合成举报原因',requestKey:key},status});
   async function preview(id,outcome='rejected') {return admin.request(`/api/admin/reports/${id}/preview`,{method:'POST',body:{outcome,reason:'合成审核原因'}});}
   async function decide(id,outcome='rejected') {const impact=await preview(id,outcome);const result=await admin.request(`/api/admin/reports/${id}/decision`,{method:'POST',body:{outcome,reason:'合成审核原因',token:impact.token}});return{impact,result};}
   let first;
@@ -24,7 +24,12 @@ export async function runReportScenarios({actor,admin,operatorA,operatorB,check,
     assert.equal(first.message.canReport,true);assert.equal(first.message.author,undefined);
     await create(stranger,first.message,undefined,403);
     await stranger.request('/api/admin/reports',{status:403});
-    const anonymous=actor('report-anonymous');await anonymous.request('/api/reports',{method:'POST',body:{messageId:first.message.id,reason:'匿名举报',requestKey:randomUUID()},status:401});
+    const anonymous=actor('report-anonymous');
+    await anonymous.request('/api/reports',{method:'POST',body:{messageId:first.message.id,typeCode:'other',requestKey:randomUUID()},status:401});
+    await anonymous.request(`/api/threads/${first.thread.id}/report`,{method:'POST',body:{typeCode:'other'},status:401});
+    await anonymous.request('/api/reports/states',{method:'POST',body:{messageIds:[first.message.id]},status:401});
+    await anonymous.request('/api/reports',{status:401});
+    await anonymous.request('/api/reputation',{status:401});
     const read=await operatorA.request(`/api/admin/threads/${first.thread.id}`);assert.equal(read.messages[0].canReport,true);
     const reverse=(await create(operatorA,first.visitorMessage)).report;
     await decide(reverse.id,'rejected');assert.equal((await operatorA.request('/api/reputation')).score,99);
@@ -37,7 +42,7 @@ export async function runReportScenarios({actor,admin,operatorA,operatorB,check,
     row=results[0].report;assert.equal(results[1].report.id,row.id);
     assert.equal((await user.request('/api/reports?requestKey='+key)).report.id,row.id);
     await create(device,first.message,undefined,409);
-    await device.request('/api/reports',{method:'POST',body:{messageId:first.message.id,reason:'修改原提交内容',requestKey:key},status:409});
+    await device.request('/api/reports',{method:'POST',body:{messageId:first.message.id,typeCode:'other',reason:'修改原提交内容',requestKey:key},status:409});
     const states=await user.request('/api/reports/states',{method:'POST',body:{messageIds:[first.message.id]}});assert.equal(states.states[0].state,'pending');
     await stranger.request(`/api/reports/${row.id}`,{status:404});
   });
@@ -85,9 +90,30 @@ export async function runReportScenarios({actor,admin,operatorA,operatorB,check,
   });
   await check('举报：旧线程入口适配同一工单，重放不重复计分或占位',async()=>{
     const v=actor('report-legacy-adapter');await v.register();const c=await conversation(v,operatorB);
-    const old=await v.request(`/api/threads/${c.thread.id}/report`,{method:'POST',body:{reason:'旧页面合成举报'},status:201});
-    const replay=await v.request(`/api/threads/${c.thread.id}/report`,{method:'POST',body:{reason:'旧页面合成举报'}});assert.equal(replay.report.id,old.report.id);
+    const old=await v.request(`/api/threads/${c.thread.id}/report`,{method:'POST',body:{typeCode:'other',reason:'旧页面合成举报'},status:201});
+    const replay=await v.request(`/api/threads/${c.thread.id}/report`,{method:'POST',body:{typeCode:'other',reason:'旧页面合成举报'}});assert.equal(replay.report.id,old.report.id);
     assert.equal((await v.request('/api/reports')).reports.length,1);
     await decide(old.report.id);assert.equal((await v.request('/api/reputation')).score,99);
+  });
+  await check('举报：类型必选并冻结，原因选填且长文本完整保存',async()=>{
+    const v=actor('report-types');await v.register();const c=await conversation(v,operatorB);
+    const states=await v.request('/api/reports/states',{method:'POST',body:{messageIds:[c.message.id]}});
+    assert.ok(states.reportTypes.some(type=>type.code==='sexual'&&type.label==='色情低俗'));
+    const payload={messageId:c.message.id,requestKey:randomUUID()};
+    await v.request('/api/reports',{method:'POST',body:payload,status:400});
+    await v.request('/api/reports',{method:'POST',body:{...payload,typeCode:'unknown'},status:400});
+    const first=(await v.request('/api/reports',{method:'POST',body:{...payload,typeCode:'harassment',typeLabel:'伪造类型'},status:201})).report;
+    assert.equal(first.reason,'');assert.equal(first.typeCode,'harassment');assert.equal(first.typeLabel,'辱骂骚扰');
+    await v.request('/api/reports',{method:'POST',body:{...payload,typeCode:'spam_scam'},status:409});
+    assert.equal((await admin.request(`/api/reports/${first.id}`)).report.typeLabel,'辱骂骚扰');
+    await decide(first.id);
+    const reason='较长的合成说明🌟\n"引号"与表情'.repeat(2000);
+    const second=(await v.request('/api/reports',{method:'POST',body:{messageId:c.message.id,typeCode:'privacy',reason,requestKey:randomUUID()},status:201})).report;
+    assert.equal(second.reason,reason);assert.equal(second.typeLabel,'泄露隐私');
+    assert.equal((await admin.request(`/api/reports/${second.id}`)).report.reason,reason);
+    for(const [client,url] of [[v,'/api/reports'],[admin,'/api/admin/reports']]){
+      const preview=(await client.request(url)).reports.find(r=>r.id===second.id);
+      assert.equal(preview.reason,[...reason].slice(0,200).join(''));assert.equal(preview.typeCode,'privacy');
+    }
   });
 }

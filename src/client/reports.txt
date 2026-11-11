@@ -7,7 +7,7 @@
   const date = n => new Date(n).toLocaleString('zh-CN', { hour12: false });
   let generation=0, revision=null, queued=false, busy=false, reviewStatus='pending', reviewCursor=null;
   const entries = new Set(), visible = new Set(), cache = new Map(), dialogs = new Set(), reviewViews = new WeakMap(), listViews = new WeakMap();
-  let limits={reasonMinLength:2,reasonMaxLength:500,minimumReportScore:60};
+  let limits={minimumReportScore:60}, reportTypes=[];
   function dialog(title) {
     const d=el('dialog','account-help-dialog report-dialog'); d.hidden=true;
     const card=el('div','account-help-card'), head=el('header'), h=el('h2','',title);
@@ -36,6 +36,7 @@
   }
   function result(box,row) {
     box.append(el('p','report-status',statusName[row.status]));
+    if(row.typeLabel)box.append(el('p','report-type',row.typeLabel));
     if(row.targetLabel)box.append(el('p','',row.targetLabel));
     if(row.reason)box.append(el('p','report-reason',row.reason));
     evidence(box,row);
@@ -68,7 +69,7 @@
     try {
       const data=await request('/api/reports/states',{messageIds:[...new Set(pending.map(e=>e.id))]});
       if(gen!==generation || rev!==revision) return;
-      limits=data.limits || limits;
+      limits=data.limits || limits;reportTypes=data.reportTypes || [];
       data.states.forEach(s=>cache.set(s.id,s)); entries.forEach(e=>{if(cache.has(e.id))paint(e,cache.get(e.id));});
     } catch { /* Keep unavailable controls hidden; retry on the next chat refresh. */ }
     finally {busy=false; if(gen===generation && pending.some(e=>cache.has(e.id))) schedule();}
@@ -90,33 +91,36 @@
     entry.sentinel=sentinel;sentinels.set(sentinel,entry);observer.observe(sentinel);
   }
   async function openSubmit(message) {
+    if(!window.TangbaoAccount?.account?.verified)return;
     const d=dialog('举报消息'), gen=generation;
     d.content.append(el('p','',message.reportLabel));
     if(message.body)d.content.append(el('blockquote','report-evidence',message.body)); images(d.content,message.images);
-    const label=el('label','report-label','举报原因'), input=el('textarea'); input.rows=4; input.maxLength=limits.reasonMaxLength; input.minLength=limits.reasonMinLength; input.required=true;
-    label.append(input); const err=errorNode(); let requestKey=crypto.randomUUID(), sentReason=null;
+    const typeLabel=el('label','report-label','举报类型'),select=el('select');select.required=true;
+    const placeholder=el('option','','请选择');placeholder.value='';select.append(placeholder);
+    reportTypes.forEach(t=>{const option=el('option','',t.label);option.value=t.code;select.append(option);});select.value='';typeLabel.append(select);
+    const label=el('label','report-label','举报原因（选填）'),input=el('textarea');input.rows=4;label.append(input);
+    const err=errorNode();let requestKey=crypto.randomUUID(),attempt=null;
     const submit=button('提交举报',async()=>{
-      const reason=sentReason===null?input.value.trim():sentReason; if(!reason){showError(err,new Error('请填写举报原因。'));input.focus();return;}
-      submit.disabled=true; err.hidden=true;
+      const next=attempt || {typeCode:select.value,reason:input.value.trim()};
+      if(!next.typeCode){showError(err,new Error('请选择举报类型。'));select.focus();return;}
+      submit.disabled=true;err.hidden=true;
       try {
-        // Resolve an uncertain previous write before permitting changed content.
-        if(sentReason!==null) {
+        if(attempt){
           const recovered=await request('/api/reports?requestKey='+encodeURIComponent(requestKey));
           if(gen!==generation || !d.node.isConnected)return;
           if(recovered.report){d.content.replaceChildren();result(d.content,recovered.report);invalidate();return;}
-
         }
-        sentReason=reason;input.readOnly=true;
-        const data=await request('/api/reports',{messageId:message.id,reason,requestKey});
+        attempt=next;select.disabled=true;input.readOnly=true;
+        const data=await request('/api/reports',{messageId:message.id,...attempt,requestKey});
         if(gen!==generation || !d.node.isConnected)return;
-        d.content.replaceChildren(); result(d.content,data.report); invalidate();
+        d.content.replaceChildren();result(d.content,data.report);invalidate();
       }catch(e){if(gen===generation && d.node.isConnected){
-        if(e.statusCode>=400 && e.statusCode<500){sentReason=null;requestKey=crypto.randomUUID();input.readOnly=false;}
+        if(e.statusCode>=400 && e.statusCode<500){attempt=null;requestKey=crypto.randomUUID();select.disabled=false;input.readOnly=false;}
         showError(err,e);invalidate();}}
       finally{submit.disabled=false;}
     },'report-primary');
     const actions=el('div','report-review-actions');actions.append(button('取消',d.close),submit);
-    d.content.append(label,el('p','report-risk','举报失败会扣除你的信誉分'),err,actions);d.open();input.focus();
+    d.content.append(typeLabel,label,el('p','report-risk','举报失败会扣除你的信誉分'),err,actions);d.open();select.focus();
   }
   async function attachAccount(container,account) {
     if(!account.verified)return;
@@ -140,7 +144,7 @@
       const data=await request('/api/reports'+(cursor?'?cursor='+encodeURIComponent(cursor):''));
       if(gen!==generation || !d.node.isConnected)return;
       if(!data.reports.length && !list.childElementCount)list.append(el('p','','暂无记录'));
-      data.reports.forEach(row=>{const b=button('',()=>void openRecord(row.id,d,()=>d.content.replaceChildren(list,err,more)),'report-record');b.append(el('strong','',`${row.direction==='sent'?(row.targetLabel || '我发起的举报'):'收到的举报'} · ${statusName[row.status]}`),el('span','',row.title),el('time','',date(row.createdAt)));if(row.deduction)b.append(el('span','',`信誉分 −${row.deduction}`));list.append(b);});
+      data.reports.forEach(row=>{const b=button('',()=>void openRecord(row.id,d,()=>d.content.replaceChildren(list,err,more)),'report-record');b.append(el('strong','',`${row.direction==='sent'?(row.targetLabel || '我发起的举报'):'收到的举报'} · ${statusName[row.status]}`),el('span','',row.title),el('span','report-type',row.typeLabel),el('time','',date(row.createdAt)));if(row.deduction)b.append(el('span','',`信誉分 −${row.deduction}`));list.append(b);});
       cursor=data.cursor;more.hidden=!cursor;
     }catch(e){if(gen===generation)showError(err,e);}finally{more.disabled=false;}}
     d.content.append(list,err,more);d.open();await load();
@@ -159,7 +163,7 @@
       const stamp=JSON.stringify([reviewStatus,reviewCursor,model,data]);if(container.dataset.reportStamp===stamp)return;
       container.dataset.reportStamp=stamp;container.replaceChildren(tools,list,err);
       if(!data.reports.length)list.append(el('p','quiet','暂无举报'));
-      data.reports.forEach(row=>{const b=button('',()=>onOpen(row.id),'audit-line report-record');b.append(el('strong','',row.title),el('span','',row.reason),el('time','',date(row.createdAt)));list.append(b);});
+      data.reports.forEach(row=>{const b=button('',()=>onOpen(row.id),'audit-line report-record');b.append(el('strong','',row.title),el('span','report-type',row.typeLabel));if(row.reason)b.append(el('span','',row.reason));b.append(el('time','',date(row.createdAt)));list.append(b);});
       next.hidden=!data.cursor;next.dataset.cursor=data.cursor || '';tools.append(prev,next);
     }catch(e){if(valid()){container.replaceChildren(tools,list,err);showError(err,e);}}
   }
@@ -169,7 +173,7 @@
     const gen=generation,valid=()=>gen===generation && container.isConnected && reviewViews.get(container)===view;container.replaceChildren();const err=errorNode();container.append(err);
     try {
       const {report}=await request('/api/reports/'+id);if(!valid())return;
-      const box=el('section','report-review');box.append(el('h3','',report.title),el('p','report-reason',report.reason));
+      const box=el('section','report-review');box.append(el('h3','',report.title),el('p','report-type',report.typeLabel));if(report.reason)box.append(el('p','report-reason',report.reason));
       evidence(box,report,true);
       box.append(el('p','report-parties',`举报人 ${report.reporterId.slice(0,8)} · 信誉 ${report.reporterScore} 分`),el('p','report-parties',`被举报人 ${report.targetId.slice(0,8)} · 信誉 ${report.targetScore} 分`),el('time','report-date',date(report.createdAt)));
       container.append(box);

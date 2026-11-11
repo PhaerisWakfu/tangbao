@@ -8,13 +8,13 @@ export type ReportPolicy = {
   successLimit: number; pendingPerPair: number; pendingTargets: number;
   failureWindowSeconds: number; upheldPenalty: number;
   failureBands: { through: number | null; points: number }[];
-  reasonMinLength: number; reasonMaxLength: number; reviewReasonMaxLength: number;
+  reportTypes: { code: string; label: string }[]; reviewReasonMaxLength: number;
   submissionsPerThread: number; rateWindowSeconds: number; pageSize: number; maxPageSize: number;
 };
 type Policy = { id: string; policy: ReportPolicy };
 type Case = {
   id: string; reporter_id: string; target_id: string; thread_id: string; message_id: string;
-  reporter_role: string; target_label: string; thread_title: string; snapshot: string; reason: string;
+  type_code: string; type_label: string; reporter_role: string; target_label: string; thread_title: string; snapshot: string; reason: string;
   request_key: string; fingerprint: string; created_at: number; creation_policy_id: string;
   status: 'pending' | 'upheld' | 'rejected'; review_reason: string | null; decided_at: number | null;
   decision_policy_id: string | null; affected_id: string | null; nominal_penalty: number | null;
@@ -27,8 +27,9 @@ const fail = (status: number, code: string, message: string): never => { throw n
 const reply = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
 const text = (v: unknown) => typeof v === 'string' ? v.trim() : '';
 const keyValid = (v: string) => /^[A-Za-z0-9_-]{8,100}$/.test(v);
-async function body(request: Request): Promise<Record<string, unknown>> {
-  const bytes = await readRequestBytes(request, 16_000, () => new AuthError(413, 'REPORT_BODY_LIMIT', '内容太长了。'));
+const REPORT_REQUEST_MAX_BYTES = 256 * 1024;
+async function body(request: Request, limit = 16_000): Promise<Record<string, unknown>> {
+  const bytes = await readRequestBytes(request, limit, () => new AuthError(413, 'REPORT_BODY_LIMIT', '提交内容过大，请缩小后重试。'));
   try { const value = JSON.parse(new TextDecoder().decode(bytes)); if (!value || Array.isArray(value) || typeof value !== 'object') throw 0; return value; }
   catch { return fail(400, 'REPORT_BODY_INVALID', '提交内容不正确。'); }
 }
@@ -56,7 +57,7 @@ function mayRead(row: Case, account: Account) {
 function dto(row: Case, account: Account, detail = false) {
   const own = row.affected_id === account.id;
   const result: Record<string, unknown> = { id: row.id, title: row.thread_title, reason: row.reason, status: row.status,
-    targetLabel: row.reporter_id === account.id ? row.target_label : null,
+    targetLabel: row.reporter_id === account.id ? row.target_label : null, typeCode:row.type_code, typeLabel:row.type_label,
     direction: row.reporter_id === account.id ? 'sent' : 'received', createdAt: row.created_at, decidedAt: row.decided_at,
     reviewReason: row.review_reason, deduction: own ? Number(row.score_before) - Number(row.score_after) : 0,
     scoreBefore: own ? row.score_before : null, scoreAfter: own ? row.score_after : null };
@@ -114,7 +115,7 @@ const errors: Record<string, [number, string]> = {
   REPORT_PENDING_LIMIT: [409, '待审核的举报已达上限。'], REPORT_REPUTATION_LOW: [403, '信誉分不足，暂时不能举报。'],
   REPORT_ACCOUNT_REQUIRED: [403, '双方都有已验证的账号才可举报。'], REPORT_MESSAGE_FORBIDDEN: [403, '这条消息无法举报。'],
   REPORT_IMPACT_CHANGED: [409, '扣分结果已变化，请重新确认。'], REPORT_POLICY_CHANGED: [409, '举报规则已更新，请重试。'],
-  REPORT_REASON_INVALID: [400, '请填写有效的举报原因。'], REPORT_IMMUTABLE: [409, '该举报已处理，请刷新查看结果。'],
+  REPORT_TYPE_INVALID: [400, '请选择有效的举报类型。'], REPORT_IMMUTABLE: [409, '该举报已处理，请刷新查看结果。'],
   REPORT_REVIEW_REASON_INVALID: [400, '请填写审核原因。'], REPORT_ADMIN_REQUIRED: [403, '没有审核权限。'],
 };
 function databaseError(error: unknown): never {
@@ -130,19 +131,24 @@ async function create(request: Request, env: ReportEnv, account: Account, data: 
       AND m.author_account_id IS NOT NULL ORDER BY m.rowid DESC LIMIT 1`).bind(thread, account.id).first<Source>();
     if (row && sourceRole(row, account)) messageId = row.id;
   }
-  const reason = text(data.reason).replace(/\u0000/g, '');
-  const fingerprint = await sha256(JSON.stringify([messageId, reason]));
-  const requestKey = text(data.requestKey) || (thread ? `legacy_${fingerprint}` : '');
+  if (data.reason != null && typeof data.reason !== 'string') return fail(400,'REPORT_REASON_INVALID','举报原因格式不正确。');
+  const reason = text(data.reason).replace(/\u0000/g,''), typeCode = text(data.typeCode);
+  const fingerprint = await sha256(JSON.stringify([messageId, typeCode, reason]));
+  // Preserve recovery of pre-category submissions without accepting a new untyped report.
+  const oldFingerprint = !typeCode ? await sha256(JSON.stringify([messageId,text(data.reason).replace(/\u0000/g,'')])) : null;
+  const requestKey = text(data.requestKey) || (thread ? `legacy_${oldFingerprint || fingerprint}` : '');
   if (!keyValid(requestKey)) return fail(400, 'REPORT_REQUEST_KEY', '请重新打开举报窗口。');
   const replay = async () => env.DB.prepare('SELECT * FROM reports WHERE reporter_id=? AND request_key=?').bind(account.id, requestKey).first<Case>();
+  const matches = (row:Case) => row.fingerprint === fingerprint || row.type_code === 'legacy' && row.fingerprint === oldFingerprint;
   const previous = await replay();
   if (previous) {
-    if (previous.fingerprint !== fingerprint) return fail(409, 'REPORT_KEY_REUSED', '同一次提交的内容已变化，请重新打开举报窗口。');
+    if (!matches(previous)) return fail(409, 'REPORT_KEY_REUSED', '同一次提交的内容已变化，请重新打开举报窗口。');
     return reply({ report: await details(env, previous, account), replayed: true });
   }
   const p = await current(env);
-  if ([...reason].length < p.policy.reasonMinLength || [...reason].length > p.policy.reasonMaxLength)
-    return fail(400, 'REPORT_REASON_INVALID', `举报原因须为${p.policy.reasonMinLength}至${p.policy.reasonMaxLength}个字。`);
+  if (!typeCode) return fail(400,'REPORT_TYPE_REQUIRED',thread ? '请刷新页面后选择举报类型。' : '请选择举报类型。');
+  const type = p.policy.reportTypes.find(t=>t.code===typeCode);
+  if (!type) return fail(400,'REPORT_TYPE_INVALID','请选择有效的举报类型。');
   const source = await env.DB.prepare(`${sourceSQL} WHERE m.id=?`).bind(messageId).first<Source>();
   const role = source && sourceRole(source, account);
   if (!source || !role || thread && source.thread_id !== thread) return fail(403, 'REPORT_MESSAGE_FORBIDDEN', '这条消息无法举报。');
@@ -162,13 +168,13 @@ async function create(request: Request, env: ReportEnv, account: Account, data: 
   const id = crypto.randomUUID();
   try {
     await env.DB.prepare(`INSERT INTO reports(id,reporter_id,target_id,thread_id,message_id,reporter_role,target_label,model_uid,
-      thread_title,snapshot,reason,request_key,fingerprint,created_at,creation_policy_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      thread_title,snapshot,reason,request_key,fingerprint,created_at,creation_policy_id,type_code,type_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .bind(id, account.id, target, source.thread_id, source.id, role, role === 'visitor' ? source.operator_id : '用户', source.operator_uid || source.operator_id,
-        source.title, snapshot, reason, requestKey, fingerprint, authNow(env), p.id).run();
+        source.title, snapshot, reason, requestKey, fingerprint, authNow(env), p.id, type.code, type.label).run();
   } catch (error) {
     const recovered = await replay().catch(() => null);
     if (recovered) {
-      if (recovered.fingerprint !== fingerprint) return fail(409, 'REPORT_KEY_REUSED', '同一次提交的内容已变化。');
+      if (!matches(recovered)) return fail(409, 'REPORT_KEY_REUSED', '同一次提交的内容已变化。');
       return reply({ report: await details(env, recovered, account), replayed: true });
     }
     try { databaseError(error); } catch (mapped) { if (mapped instanceof AuthError) throw mapped; }
@@ -181,14 +187,19 @@ export function validateReportPolicy(value: unknown): ReportPolicy {
   const p = value as ReportPolicy;
   const bounds: Record<string, [number, number]> = { initialScore: [1,100], minimumScore: [0,99], minimumReportScore: [1,100],
     successLimit: [1,10], pendingPerPair: [1,10], pendingTargets: [1,20], failureWindowSeconds: [1,31536000],
-    upheldPenalty: [1,100], reasonMinLength: [1,100], reasonMaxLength: [1,2000], reviewReasonMaxLength: [1,2000],
+    upheldPenalty: [1,100], reviewReasonMaxLength: [1,2000],
     submissionsPerThread: [1,100], rateWindowSeconds: [1,86400], pageSize: [1,50], maxPageSize: [1,50] };
-  if (Object.keys(p).some(k => !(k in bounds) && k !== 'failureBands') || Object.keys(bounds).some(k => {
+  if (Object.keys(p).some(k => !(k in bounds) && k !== 'failureBands' && k !== 'reportTypes') || Object.keys(bounds).some(k => {
     const n = (p as unknown as Record<string, number>)[k]; return !Number.isSafeInteger(n) || n < bounds[k][0] || n > bounds[k][1];
   }) || !(p.minimumScore < p.minimumReportScore && p.minimumReportScore <= p.initialScore) ||
-    p.pendingPerPair > p.successLimit || p.reasonMinLength > p.reasonMaxLength || p.pageSize > p.maxPageSize ||
+    p.pendingPerPair > p.successLimit || p.pageSize > p.maxPageSize ||
     !Array.isArray(p.failureBands) || !p.failureBands.length || p.failureBands.length > 20)
     return fail(400, 'REPORT_POLICY_INVALID', '规则取值或边界不正确。');
+  if (!Array.isArray(p.reportTypes) || !p.reportTypes.length || p.reportTypes.length>20 ||
+      p.reportTypes.some(t=>!t || typeof t.code!=='string' || !/^[a-z][a-z0-9_]{0,39}$/.test(t.code) || t.code==='legacy' ||
+        typeof t.label!=='string' || !t.label.trim() || t.label!==t.label.trim() || [...t.label].length>80) ||
+      new Set(p.reportTypes.map(t=>t.code)).size!==p.reportTypes.length || new Set(p.reportTypes.map(t=>t.label)).size!==p.reportTypes.length)
+    return fail(400,'REPORT_POLICY_INVALID','举报类型配置不正确。');
   let previous = 0, previousPoints = 0;
   p.failureBands.forEach((band, i) => {
     if (!band || !Number.isSafeInteger(band.points) || band.points < 1 || band.points > 100 || band.points < previousPoints ||
@@ -226,6 +237,10 @@ function cursorOf(url: URL) {
 }
 async function listing(env: ReportEnv, account: Account, url: URL, audit: boolean) {
   const p = await current(env); const limit = Math.min(p.policy.maxPageSize, Math.max(1, Math.floor(Number(url.searchParams.get('limit'))) || p.policy.pageSize));
+  // Long reasons and evidence belong to the detail read, not every queue refresh.
+  const columns = `id,reporter_id,target_id,thread_id,reporter_role,target_label,thread_title,type_code,type_label,
+    substr(reason,1,200) AS reason,status,created_at,decided_at,review_reason,affected_id,nominal_penalty,
+    score_before,score_after,creation_policy_id,decision_policy_id`;
   const cursor = cursorOf(url); const tail = cursor ? ' AND (created_at<? OR (created_at=? AND id<?))' : '';
   const values = cursor ? [cursor[0],cursor[0],cursor[1]] : [];
   let rows: Case[];
@@ -234,12 +249,12 @@ async function listing(env: ReportEnv, account: Account, url: URL, audit: boolea
     if (!['pending','upheld','rejected'].includes(status)) return fail(400, 'REPORT_STATUS_INVALID', '举报状态不正确。');
     const model = url.searchParams.get('model');
     const operator = model ? await env.DB.prepare('SELECT operator_uid FROM operators WHERE id=?').bind(model).first<{operator_uid:string}>() : null;
-    rows = (await env.DB.prepare(`SELECT * FROM reports WHERE status=?${model ? ' AND model_uid=?' : ''}${tail} ORDER BY created_at DESC,id DESC LIMIT ?`)
+    rows = (await env.DB.prepare(`SELECT ${columns} FROM reports WHERE status=?${model ? ' AND model_uid=?' : ''}${tail} ORDER BY created_at DESC,id DESC LIMIT ?`)
       .bind(status, ...(model ? [operator?.operator_uid || model] : []), ...values, limit+1).all<Case>()).results;
   } else {
     const branches = await Promise.all([
-      env.DB.prepare(`SELECT * FROM reports WHERE reporter_id=?${tail} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(account.id,...values,limit+1).all<Case>(),
-      env.DB.prepare(`SELECT * FROM reports WHERE target_id=? AND status='upheld'${tail} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(account.id,...values,limit+1).all<Case>(),
+      env.DB.prepare(`SELECT ${columns} FROM reports WHERE reporter_id=?${tail} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(account.id,...values,limit+1).all<Case>(),
+      env.DB.prepare(`SELECT ${columns} FROM reports WHERE target_id=? AND status='upheld'${tail} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(account.id,...values,limit+1).all<Case>(),
     ]);
     rows = branches.flatMap(r => r.results).sort((a,b) => b.created_at-a.created_at || b.id.localeCompare(a.id));
   }
@@ -255,7 +270,9 @@ async function policyRoute(request: Request, env: ReportEnv, url: URL) {
   const data = await body(request); let policy: ReportPolicy;
   if (url.pathname.endsWith('/rollback') || data.version) {
     const v = await env.DB.prepare('SELECT policy FROM report_policy_versions WHERE id=?').bind(text(data.version)).first<{ policy: string }>();
-    if (!v) return fail(404, 'REPORT_POLICY_NOT_FOUND', '规则版本不存在。'); policy = validateReportPolicy(JSON.parse(v.policy));
+    if (!v) return fail(404, 'REPORT_POLICY_NOT_FOUND', '规则版本不存在。'); const old = JSON.parse(v.policy);
+    const {reasonMinLength,reasonMaxLength,...rest} = old;
+    policy = validateReportPolicy({...rest,reportTypes:old.reportTypes || active.policy.reportTypes});
   } else policy = validateReportPolicy(data.policy);
   const reason = text(data.reason);
   const token = await sha256(JSON.stringify([active.id,policy,reason]));
@@ -290,7 +307,7 @@ export async function reportRoute(request: Request, env: ReportEnv): Promise<Res
     if (!score) return fail(503,'REPORT_STATE_UNAVAILABLE','信誉分暂不可用，请稍后重试。');
     const p = await current(env); return reply({ ...score, minimumReportScore: p.policy.minimumReportScore });
   }
-  if (path === '/api/reports' && method === 'POST' || legacy && method === 'POST') return create(request,env,account,await body(request),legacy?.[1]);
+  if (path === '/api/reports' && method === 'POST' || legacy && method === 'POST') return create(request,env,account,await body(request,REPORT_REQUEST_MAX_BYTES),legacy?.[1]);
   if (path === '/api/reports' && method === 'GET') {
     const key = url.searchParams.get('requestKey');
     if (key) {
@@ -315,7 +332,7 @@ export async function reportRoute(request: Request, env: ReportEnv): Promise<Res
       .bind(account.id,...targets).all<{target_id:string;locked:number;pending:string|null;pendingCount:number;remaining:number}>()).results : [];
     const reputation = await env.DB.prepare('SELECT score FROM account_reputations WHERE account_id=?').bind(account.id).first<{score:number}>();
     if (!reputation) return fail(503,'REPORT_STATE_UNAVAILABLE','举报暂时不可用，请稍后重试。');
-    return reply({ limits: {reasonMinLength:p.policy.reasonMinLength,reasonMaxLength:p.policy.reasonMaxLength,minimumReportScore:p.policy.minimumReportScore}, states: ids.map(id=> {
+    return reply({ reportTypes:p.policy.reportTypes, limits: {minimumReportScore:p.policy.minimumReportScore}, states: ids.map(id=> {
       const source=sources.find(s=>s.id===id); if(!source || !sourceRole(source,account)) return {id,state:'unavailable'};
       const pair=pairs.find(p=>p.target_id===source.author_account_id);
       return {id,state:pair?.locked?'locked':pair && pair.pendingCount>=Math.min(p.policy.pendingPerPair,pair.remaining)?'pending':Number(reputation?.score)<p.policy.minimumReportScore?'restricted':'available',reportId:pair?.pending || null};

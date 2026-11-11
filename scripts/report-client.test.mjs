@@ -16,13 +16,13 @@ function node(tag='',cls='',text=''){
 function setup(names){
   const dialogs=[];const context={URLSearchParams,generation:0,reviewViews:new WeakMap(),listViews:new WeakMap(),reviewStatus:'pending',reviewCursor:null,
     el:node,errorNode:()=>node('p'),showError:(n,e)=>n.textContent=e.message,date:n=>String(n),evidence(){},statusName:{pending:'待审核',upheld:'举报成功',rejected:'举报失败'},
-    button:(label,action,cls)=>Object.assign(node('button',cls,label),{action}),invalidate(){},crypto,limits:{reasonMaxLength:500,reasonMinLength:2},
+    button:(label,action,cls)=>Object.assign(node('button',cls,label),{action}),invalidate(){},crypto,limits:{minimumReportScore:60},reportTypes:[{code:'other',label:'其他'}],window:{TangbaoAccount:{account:{verified:true}}},
     dialog(title){const d={node:node('dialog'),content:node('div'),open(){},close(){d.node.isConnected=false;}};dialogs.push(d);return d;},images(){},result:(box,row)=>box.append(node('p','',row.status)),
   };
   new Script(declarations.filter(n=>names.includes(n.name.text)).map(n=>n.getText(ast)).join('\n')).runInNewContext(context);
   const flatten=n=>[n,...n.children.flatMap(flatten)];return{context,dialogs,flatten};
 }
-const report=id=>({id,title:id,reason:'合成举报',status:'upheld',reporterId:'reporter',targetId:'target',reporterScore:100,targetScore:95,createdAt:1,decidedAt:2,scoreBefore:100,scoreAfter:95,reviewReason:'合成裁决'});
+const report=id=>({id,title:id,typeCode:'other',typeLabel:'其他',reason:'合成举报',status:'upheld',reporterId:'reporter',targetId:'target',reporterScore:100,targetScore:95,createdAt:1,decidedAt:2,scoreBefore:100,scoreAfter:95,reviewReason:'合成裁决'});
 test('切换工单后迟到的详情不能覆盖当前工单',async()=>{
   const {context:c,flatten}=setup(['cancelReview','adminReview']);const a=defer(),b=defer(),container=node();c.request=path=>path.endsWith('/a')?a.promise:b.promise;
   const first=c.adminReview(container,'a'),second=c.adminReview(container,'b');b.resolve({report:report('b')});await second;
@@ -50,6 +50,7 @@ test('提交结果未知时重试保留原内容及请求键；先查原请求�
   c.request=async(path,data)=>{if(data){writes.push(data);if(writes.length===1)throw new Error('网络中断');return{report:{status:'pending'}};}gets++;return{report:null};};
   await c.openSubmit({id:'selected',body:'合成消息',reportLabel:'合成对象'});
   const input=flatten(dialogs[0].content).find(n=>n.tag==='textarea'),submit=flatten(dialogs[0].content).find(n=>n.textContent==='提交举报');
+  flatten(dialogs[0].content).find(n=>n.tag==='select').value='other';
   input.value='首次举报原因';await submit.action();assert.equal(input.readOnly,true);
   await submit.action();assert.equal(gets,1);assert.equal(writes.length,2);assert.equal(writes[0].requestKey,writes[1].requestKey);assert.equal(writes[1].reason,'首次举报原因');
 });
@@ -76,4 +77,19 @@ test('离开工单后迟到的读取不会把手机页面滚回审核区',async(
   new Script(fn.getText(ast)).runInNewContext(context);
   const loading=context.openReportReview('case');context.activeReportId=null;context.threadViewVersion++;
   response.resolve();await loading;assert.equal(scrolls,0);
+});
+test('分类未选不能提交；只选择分类即可提交空原因，长原因不裁剪',async()=>{
+  const {context:c,dialogs,flatten}=setup(['openSubmit']),writes=[];
+  c.request=async(path,data)=>{writes.push(data);return{report:{status:'pending'}};};
+  await c.openSubmit({id:'message',reportLabel:'对方'});
+  let controls=flatten(dialogs[0].content),select=controls.find(n=>n.tag==='select'),submit=controls.find(n=>n.textContent==='提交举报');
+  await submit.action();assert.equal(writes.length,0);
+  select.value='other';await submit.action();assert.equal(writes[0].reason,'');assert.equal(writes[0].typeCode,'other');
+  await c.openSubmit({id:'another',reportLabel:'对方'});controls=flatten(dialogs[1].content);
+  controls.find(n=>n.tag==='select').value='other';controls.find(n=>n.tag==='textarea').value='长内容😀'.repeat(3000);
+  await controls.find(n=>n.textContent==='提交举报').action();assert.equal(writes[1].reason,'长内容😀'.repeat(3000));
+});
+test('匿名状态不会打开举报弹窗，即使旧消息对象带可举报标记',async()=>{
+  const {context:c,dialogs}=setup(['openSubmit','attachMessage']);c.window.TangbaoAccount.account=null;
+  await c.openSubmit({id:'stale',canReport:true});c.attachMessage(node(),{id:'stale',canReport:true});assert.equal(dialogs.length,0);
 });

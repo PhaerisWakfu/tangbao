@@ -14,10 +14,10 @@ const compile=s=>ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.E
 const reports=compile(await readFile(path.join(root,'src/reports.ts'),'utf8'));
 const bytes=compile(await readFile(path.join(root,'src/request-body.ts'),'utf8'));
 class AuthError extends Error{constructor(status,code,message){super(message);Object.assign(this,{status,code});}}
-async function fixture(t){
+async function fixture(t,withTypes=true){
   await mkdir(path.join(root,'.tmp'),{recursive:true});const dir=await mkdtemp(path.join(root,'.tmp/report-test-'));
   const client=createClient({url:`file:${path.join(dir,'synthetic.db')}`});t.after(async()=>{client.close();await rm(dir,{recursive:true,force:true});});
-  for(const file of(await readdir(path.join(root,'migrations'))).filter(n=>n.endsWith('.sql')).sort())await client.executeMultiple(await readFile(path.join(root,'migrations',file),'utf8'));
+  for(const file of(await readdir(path.join(root,'migrations'))).filter(n=>n.endsWith('.sql')&&(withTypes||n<'0031')).sort())await client.executeMultiple(await readFile(path.join(root,'migrations',file),'utf8'));
   const sql=async(query,...args)=>(await client.execute({sql:query,args})).rows;
   for(const id of ['a','b','c','d','e','f','admin','reviewer']){
     await sql("INSERT INTO accounts(id,email,password_hash,verified_at,created_at,updated_at) VALUES(?,?,'synthetic',1,1,1)",id,`${id}@example.test`);
@@ -51,12 +51,12 @@ async function fixture(t){
     if(image)await sql("INSERT INTO message_images(id,message_id,image_key,image_type,position) VALUES(?,?,'img/synthetic','image/png',0)",`image-${sequence}`,id);
     return{id,thread};
   }
-  const create=async(actor,m,key=crypto.randomUUID(),status=201)=>call(actor,'/api/reports',{messageId:m.id,reason:'合成举报原因',requestKey:key},status);
+  const create=async(actor,m,key=crypto.randomUUID(),status=201)=>call(actor,'/api/reports',{messageId:m.id,typeCode:'other',reason:'合成举报原因',requestKey:key},status);
   async function decide(id,outcome='rejected',actor='admin'){
     const reason='合成审核理由';const p=await call(actor,`/api/admin/reports/${id}/preview`,{outcome,reason});
     const result=await call(actor,`/api/admin/reports/${id}/decision`,{outcome,reason,token:p.token});return{...p,result};
   }
-  return{sql,call,message,create,decide,env,db,setNow:v=>now=v,now:()=>now,loseInsert:()=>loseInsert=true,loseDecision:()=>loseDecision=true};
+  return{sql,call,message,create,decide,env,db,applyTypes:async()=>client.executeMultiple(await readFile(path.join(root,'migrations/0031_report_types.sql'),'utf8')),setNow:v=>now=v,now:()=>now,loseInsert:()=>loseInsert=true,loseDecision:()=>loseDecision=true};
 }
 test('双向消息授权、匿名和旧消息边界、普通用户不可读取他人信誉或审核',async t=>{
   const f=await fixture(t),m=await f.message();
@@ -87,9 +87,9 @@ test('并发提交只接受一张；丢失响应按请求键恢复，不重复�
   const row=(await f.create('a',m,key,200)).report;
   assert.equal((await f.create('a',m,key,200)).report.id,row.id);
   assert.equal((await f.call('a','/api/reports?requestKey='+key)).report.id,row.id);
-  await f.call('a','/api/reports',{messageId:m.id,reason:'更换举报原因',requestKey:key},409);
+  await f.call('a','/api/reports',{messageId:m.id,typeCode:'other',reason:'更换举报原因',requestKey:key},409);
   assert.equal((await f.sql('SELECT count(*) n FROM reports'))[0].n,1);
-  const other=await f.message('c','d');const data={messageId:other.id,reason:'并发测试',requestKey:crypto.randomUUID()};
+  const other=await f.message('c','d');const data={messageId:other.id,typeCode:'other',reason:'并发测试',requestKey:crypto.randomUUID()};
   const request=()=>f.call('c','/api/reports',data,[200,201]);
   // Real SQL trigger concurrency is also exercised by the D1 HTTP regression.
   await Promise.all([request(),request()]);assert.equal((await f.sql('SELECT count(*) n FROM reports WHERE reporter_id=?','c'))[0].n,1);
@@ -178,9 +178,9 @@ test('参数调整实际改变容量；受理时冻结的成功上限不会被�
   await publish({...policy,successLimit:3});await f.create('a',m,undefined,409);
 });
 
-test('调高原因长度后原已受理请求仍可重放，保持原工单和金额',async t=>{
+test('分类调整后原已受理请求仍可重放，保持原工单和金额',async t=>{
   const f=await fixture(t),m=await f.message(),key=crypto.randomUUID(),row=(await f.create('a',m,key)).report;
-  const current=await f.call('admin','/api/admin/report-policy'),policy={...current.policy,reasonMinLength:50},reason='调整字数';
+  const current=await f.call('admin','/api/admin/report-policy'),policy={...current.policy,reportTypes:current.policy.reportTypes.filter(t=>t.code!=='other')},reason='调整分类';
   const p=await f.call('admin','/api/admin/report-policy/preview',{policy,reason});await f.call('admin','/api/admin/report-policy/publish',{...p,reason});
   assert.equal((await f.create('a',m,key,200)).report.id,row.id);
 });
@@ -195,4 +195,67 @@ test('账号、队列、失败窗口及图片引用查询使用对应索引',asy
     ["SELECT 1 FROM message_images WHERE image_key='img/synthetic' LIMIT 1",'idx_message_images_key'],
     ["SELECT 1 FROM report_images WHERE image_key='img/synthetic' LIMIT 1",'idx_report_images_key'],
   ])assert((await f.sql('EXPLAIN QUERY PLAN '+query)).some(row=>row.detail.includes(index)),query);
+});
+
+test('举报类型必选且校验码值；选填原因支持空值、单字、长中文和特殊字符',async t=>{
+  const f=await fixture(t),m=await f.message();
+  for(const typeCode of [undefined,'unknown','legacy'])await f.call('a','/api/reports',{messageId:m.id,typeCode,requestKey:crypto.randomUUID()},400);
+  assert.equal((await f.sql('SELECT count(*) n FROM reports'))[0].n,0);
+  const options=await f.call('a','/api/reports/states',{messageIds:[m.id]});assert.equal(options.reportTypes.length,9);
+  for(const [index,reason] of [undefined,'','。','说明😀 <script>\n"\u0000'.repeat(1500)].entries()){
+    const type=options.reportTypes[index];
+    const row=(await f.call('a','/api/reports',{messageId:m.id,typeCode:type.code,typeLabel:'伪造分类名',reason,requestKey:crypto.randomUUID()},201)).report;
+    assert.equal(row.typeCode,type.code);assert.equal(row.typeLabel,type.label);assert.equal(row.reason,(reason || '').replace(/\u0000/g,''));
+    if(index===3){
+      for(const [actor,url] of [['a','/api/reports'],['admin','/api/admin/reports']]){
+        const preview=(await f.call(actor,url)).reports.find(r=>r.id===row.id);
+        assert.equal(preview.reason,[...row.reason].slice(0,200).join(''));assert.equal(preview.typeLabel,type.label);
+      }
+      assert.equal((await f.call('admin',`/api/reports/${row.id}`)).report.reason,row.reason);
+    }
+    await f.decide(row.id);
+  }
+});
+
+test('只改变分类也视为不同提交内容；已受理分类不可篡改',async t=>{
+  const f=await fixture(t),m=await f.message(),key=crypto.randomUUID(),row=(await f.create('a',m,key)).report;
+  await f.call('a','/api/reports',{messageId:m.id,typeCode:'sexual',reason:'合成举报原因',requestKey:key},409);
+  await assert.rejects(f.sql('UPDATE reports SET type_code=?,type_label=? WHERE id=?','sexual','色情低俗',row.id),/REPORT_IMMUTABLE/);
+  assert.equal((await f.call('a',`/api/reports/${row.id}`)).report.typeCode,'other');
+});
+
+test('分类可配置且旧工单名称冻结；不合法的分类配置拒绝发布',async t=>{
+  const f=await fixture(t),m=await f.message(),row=(await f.create('a',m)).report;
+  const current=await f.call('admin','/api/admin/report-policy');
+  for(const reportTypes of [[],[{code:'bad code',label:'非法'}],[{code:'other',label:'重复'},{code:'other',label:'重复码'}]])
+    await f.call('admin','/api/admin/report-policy/preview',{policy:{...current.policy,reportTypes},reason:'非法分类'},400);
+  const policy={...current.policy,reportTypes:[{code:'other',label:'其他内容'}]},reason='调整分类名';
+  const p=await f.call('admin','/api/admin/report-policy/preview',{policy,reason});await f.call('admin','/api/admin/report-policy/publish',{...p,reason});
+  assert.equal((await f.call('a',`/api/reports/${row.id}`)).report.typeLabel,'其他');
+  assert.equal((await f.create('c',await f.message('c','d'))).report.typeLabel,'其他内容');
+});
+
+test('升级保留旧工单及扣分，旧请求可恢复；回滚旧版本不会恢复原因字数门槛',async t=>{
+  const f=await fixture(t,false),m=await f.message(),reason='旧举报原因',requestKey='legacy_test_key';
+  const fingerprint=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([m.id,reason])))).toString('hex');
+  await f.sql(`INSERT INTO reports(id,reporter_id,target_id,thread_id,message_id,reporter_role,target_label,model_uid,thread_title,snapshot,reason,request_key,fingerprint,created_at,creation_policy_id)
+    VALUES('old-report','a','b',?,?,'visitor','model-b','uid-b','合成对话','{"body":"旧消息"}',?,?,?,?, 'reports-v1')`,m.thread,m.id,reason,requestKey,fingerprint,f.now());
+  await f.decide('old-report','upheld');const before=await f.sql('SELECT score,deducted,event_count,revision FROM account_reputations ORDER BY account_id');
+  await f.applyTypes();assert.deepEqual(await f.sql('SELECT score,deducted,event_count,revision FROM account_reputations ORDER BY account_id'),before);
+  const recovered=(await f.call('a','/api/reports',{messageId:m.id,reason,requestKey})).report;
+  assert.equal(recovered.id,'old-report');assert.equal(recovered.typeCode,'legacy');assert.equal(recovered.typeLabel,'未分类');assert.equal(recovered.status,'upheld');
+  await f.call('a','/api/reports',{messageId:m.id,reason,requestKey:crypto.randomUUID()},400);
+  const back=await f.call('admin','/api/admin/report-policy/preview',{version:'reports-v1',reason:'回滚旧规则'});
+  const restored=await f.call('admin','/api/admin/report-policy/rollback',{...back,version:'reports-v1',reason:'回滚旧规则'});
+  assert.equal(restored.policy.reasonMinLength,undefined);assert.equal(restored.policy.reasonMaxLength,undefined);assert.equal(restored.policy.reportTypes.length,9);
+  assert.equal((await f.call('b','/api/reputation')).score,95);
+});
+
+test('匿名直调创建、旧入口、资格、记录和信誉均被拒绝，整体超大请求不落工单',async t=>{
+  const f=await fixture(t),m=await f.message();
+  for(const [url,data] of [['/api/reports',{messageId:m.id,typeCode:'other',requestKey:crypto.randomUUID()}],
+    [`/api/threads/${m.thread}/report`,{typeCode:'other',reason:'匿名举报'}],['/api/reports/states',{messageIds:[m.id]}],['/api/reports',undefined],['/api/reputation',undefined]])
+    await f.call('',url,data,401);
+  await f.call('a','/api/reports',{messageId:m.id,typeCode:'other',reason:'x'.repeat(270000),requestKey:crypto.randomUUID()},413);
+  assert.equal((await f.sql('SELECT count(*) n FROM reports'))[0].n,0);
 });

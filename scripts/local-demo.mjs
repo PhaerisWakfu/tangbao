@@ -1,3 +1,17 @@
+// Anonymous entry hosts are fresh clients; reopening a registered role keeps its session.
+export function localClientUrl(metadata, actor, entryId = "") {
+  if (!/^[a-z][a-z0-9-]{0,39}$/.test(metadata.instance || "") ||
+      !/^[a-z0-9][a-z0-9-]*$/i.test(actor.name || "") ||
+      !Number.isInteger(metadata.port) || metadata.port < 1 || metadata.port > 65535) return null;
+  const anonymous = !actor.email && !actor.operatorId && /^visitor-[ab]$/.test(actor.name);
+  if (anonymous && !/^[a-f0-9]{8}$/.test(entryId)) return null;
+  const name = anonymous ? "guest-" + actor.name.slice(-1) + "-" + entryId : actor.name;
+  const host = name + "-" + metadata.instance;
+  if (host.length > 63) return null;
+  const desk = actor.name === "admin" || actor.name.startsWith("operator-") || actor.operatorId;
+  return "http://" + host + ".localhost:" + metadata.port + (desk ? "/desk" : "/chat");
+}
+
 // This HTML is embedded only in each ignored local wrapper, never a production route.
 export function demoHtml(metadata) {
   const context = JSON.stringify({ nonce: metadata.nonce, instance: metadata.instance, port: metadata.port })
@@ -19,10 +33,11 @@ ${snapshotNotice}
 <section><h2>建议验收顺序</h2><ul><li>匿名聊天一段，再新建第二段，确认出现账号弹层且草稿和附件保留。</li><li>注册合成邮箱，从本页取验证码，完成验证后继续发送。</li><li>刷新或重新打开产品页，确认保持登录和历史可见。</li><li>打开独立设备环境，用同一账号登录，确认历史一致。</li><li>退出账号，确认页面和本地存储清空，下一次进入需要密码登录。</li><li>${metadata.snapshotImport ? "绑定演练优先使用上方专用演练旧模型及其旧模型口令；也可使用本人旧模型的原口令，核对型号后确认绑定。" : "使用尚未拥有模型的已验证账号和上方专用旧模型口令，演练绑定已有模型。"}</li></ul></section></main>
 <script>
 const context=${context};
+${localClientUrl.toString()}
 const text=(parent,value)=>{const cell=document.createElement('td');cell.textContent=value;parent.append(cell);return cell};
 async function get(route){const response=await fetch(route,{headers:{'x-tangbao-local':context.nonce},cache:'no-store'});if(!response.ok)throw new Error('本地面板暂不可用，请确认实例仍在运行');return response.json()}
 async function refresh(){const status=document.getElementById('status');try{const data=await get('/__local/mail');const list=document.getElementById('mail');list.replaceChildren();for(const mail of data.messages){const row=document.createElement('tr');text(row,mail.email);text(row,mail.purpose==='reset'?'重置密码':'验证邮箱');text(row,mail.code);text(row,mail.status);list.append(row)}status.textContent='已刷新，共 '+data.messages.length+' 封可查看验证码的合成邮件。'}catch(error){status.textContent=error.message}}
-async function actors(){const data=await get('/__local/demo-actors');const list=document.getElementById('actors');const legacyList=document.getElementById('legacy-actors');list.replaceChildren();legacyList.replaceChildren();for(const actor of data.actors){const row=document.createElement('tr');if(!actor.email&&actor.operatorId){text(row,actor.operatorId);text(row,actor.password||'未配置专用口令');legacyList.append(row);continue}const cell=text(row,'');const label=actor.label||actor.name;const validHost=/^[a-z0-9][a-z0-9-]*$/i.test(actor.name)&&/^[a-z0-9][a-z0-9-]*$/i.test(context.instance)&&Number.isInteger(context.port)&&context.port>0&&context.port<65536;if(validHost){const link=document.createElement('a');link.href='http://'+actor.name+'-'+context.instance+'.localhost:'+context.port+(actor.name==='admin'||actor.name.startsWith('operator-')||actor.operatorId?'/desk':'/chat');link.target='_blank';link.rel='noopener';link.textContent=label;cell.append(link)}else cell.textContent=label;text(row,actor.email||'匿名访客');text(row,actor.password||'无需登录');list.append(row)}document.getElementById('legacy-empty').hidden=legacyList.childElementCount>0}
+async function actors(){const data=await get('/__local/demo-actors');const list=document.getElementById('actors');const legacyList=document.getElementById('legacy-actors');list.replaceChildren();legacyList.replaceChildren();for(const actor of data.actors){const row=document.createElement('tr');if(!actor.email&&actor.operatorId){text(row,actor.operatorId);text(row,actor.password||'未配置专用口令');legacyList.append(row);continue}const cell=text(row,'');const label=actor.label||actor.name;const entryId=()=>crypto.randomUUID().replaceAll('-','').slice(0,8);const url=localClientUrl(context,actor,entryId());if(url){const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener';link.textContent=label;if(!actor.email&&!actor.operatorId&&/^visitor-[ab]$/.test(actor.name)){const fresh=()=>{link.href=localClientUrl(context,actor,entryId())};link.addEventListener('click',fresh);link.addEventListener('auxclick',fresh);link.addEventListener('contextmenu',fresh)}cell.append(link)}else cell.textContent=label;text(row,actor.email||'匿名访客');text(row,actor.password||'无需登录');list.append(row)}document.getElementById('legacy-empty').hidden=legacyList.childElementCount>0}
 document.getElementById('refresh').addEventListener('click',refresh);actors().catch(error=>{document.getElementById('status').textContent=error.message});refresh();
 </script></html>`;
 }
