@@ -1,5 +1,6 @@
 ADMIN_PASSWORD=change-me
 ADMIN_SECRET=change-me-to-a-long-random-string
+# 邮件每日预算用到 90% 时推送到飞书群；留空只写日志
 FEISHU_WEBHOOK=
 
 # 账号与事务邮件：本地默认禁用；local:* 沙箱自动生成独立测试密钥

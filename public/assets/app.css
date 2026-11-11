@@ -709,11 +709,12 @@ body[data-state="empty"] .title { visibility: hidden; }
 }
 .status[data-state="idle"] {
   color: var(--muted);
-  border-color: color-mix(in srgb, var(--muted) 25%, var(--line));
+  border-color: color-mix(in srgb, var(--up) 25%, var(--line));
 }
 .status[data-state="idle"] i {
-  background: var(--muted);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 18%, transparent);
+  background: transparent;
+  border: 1.5px solid var(--up);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
 }
 .status[data-state="away"] { color: var(--muted); }
 .status[data-state="away"] i {
@@ -786,7 +787,11 @@ body[data-state="empty"] .title { visibility: hidden; }
 .model-row[data-state="idle"] .model-state { color: var(--muted); }
 .model-row[data-state="busy"] i { background: var(--accent); }
 .model-row[data-state="away"] i { background: var(--faint); }
-.model-row[data-state="idle"] i { background: var(--muted); }
+.model-row[data-state="idle"] i {
+  background: transparent;
+  border: 1.5px solid var(--up);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
+}
 .model-row svg { margin-left: 4px; width: 14px; height: 14px; color: var(--accent); }
 .model-row.compact { align-items: center; padding: 4px 10px; }
 .model-row.compact i { margin-top: 0; }
@@ -924,7 +929,11 @@ body[data-state="empty"] .title { visibility: hidden; }
 .line[data-state="idle"] .state { color: var(--muted); }
 .line[data-state="busy"] i { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 .line[data-state="away"] i { background: var(--faint); }
-.line[data-state="idle"] i { background: var(--muted); }
+.line[data-state="idle"] i {
+  background: transparent;
+  border: 1.5px solid var(--up);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
+}
 .line.compact { align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; }
 .line.compact i { margin-top: 0; }
 .line.compact .who { gap: 0; }
@@ -1987,7 +1996,7 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   margin: 0 auto;
   padding-top: 18px;
 }
-.github-link {
+.front-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2002,16 +2011,16 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   text-decoration: none;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.github-link:hover {
+.front-link:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
 }
-.github-link:focus-visible {
+.front-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.github-link svg { width: 16px; height: 16px; display: block; }
+.front-link svg { width: 16px; height: 16px; display: block; }
 
 .launch-notice {
   position: relative;
@@ -2159,8 +2168,8 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
 
 @media (max-width: 640px) {
   .front-top { padding-top: 14px; }
-  .github-link { width: 32px; height: 32px; }
-  .github-link svg { width: 15px; height: 15px; }
+  .front-link { width: 32px; height: 32px; }
+  .front-link svg { width: 15px; height: 15px; }
   .launch-notice {
     grid-template-columns: 38px minmax(0, 1fr);
     gap: 10px;

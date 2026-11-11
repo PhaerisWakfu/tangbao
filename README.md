@@ -35,7 +35,7 @@ wrangler.jsonc        Cloudflare 配置
 - Cloudflare Workers 提供页面和 API
 - D1 保存对话、模型、申请、举报等数据
 - Workers KV 保存用户上传的图片
-- Cloudflare Email Sending 与 Brevo 发送邮箱验证和找回邮件；应用侧每日总预算 360 封，Cloudflare 90 封（按 3,000 封/月留出 31 天缓冲）、Brevo 280 封，180 封告警；单家额度错误会熔断并切换到另一家，两家都不可用时明确提示；账户月度额度和计费以两家控制台为准
+- Brevo 与 Cloudflare Email Sending 按顺序发送邮箱验证和找回邮件：每天先用 Brevo 280 封，用尽后切 Cloudflare 920 封（对应每月 3,000 封免费额度，超出按 $0.35/1,000 封计费），应用侧每日总预算 1,200 封；用到当日预算 90% 时推送一次飞书提醒；额度用尽时暂停发信并在下一个 UTC 日恢复
 - Cron 每分钟刷新首页在线状态并补偿可重试的邮件任务
 - 可选：通过 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 使用 Turso
 
@@ -71,8 +71,8 @@ MAIL_PAYLOAD_KEY=另一个独立的至少32字节随机值
 
 可选：
 
-- `FEISHU_WEBHOOK`：保留的飞书配置；当前新消息/申请触发入口未接通，配置后也不会自动通知
-- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：保留的 Web Push 订阅配置；当前没有新消息主动推送保证，通知用途与恢复由 [#21](https://github.com/PhaerisWakfu/tangbao/issues/21) 继续讨论
+- `FEISHU_WEBHOOK`：邮件每日预算用到 90% 时推送到飞书群（未配置时只写日志）
+- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：向已订阅设备发送新对话和回复的浏览器推送
 - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`：改用 Turso
 - 不填 Turso 变量时使用 D1
 - `ADMIN_PASSWORD` 仅用于识别旧管理员迁移，不是新账号登录密码；管理员资格通过受控引导授予已验证账号

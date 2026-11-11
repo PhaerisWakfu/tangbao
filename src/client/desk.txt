@@ -1718,7 +1718,7 @@ function preparePad() {
   basePen.lineCap = "round";
   basePen.lineJoin = "round";
   renderBase();
-  paint();
+  paintSketch();
 }
 
 function applyZoomSize() {
@@ -1776,7 +1776,7 @@ function renderBase() {
   }
 }
 
-function paint() {
+function paintSketch() {
   pen.setTransform(1, 0, 0, 1, 0, 0);
   pen.clearRect(0, 0, pad.width, pad.height);
   pen.drawImage(baseCanvas, 0, 0);
@@ -1887,7 +1887,7 @@ function fillAt(x, y) {
   const color = penColor;
   if (!floodFill(basePen, Math.round(x * padSize.dpr), Math.round(y * padSize.dpr), color, FILL_TOLERANCE)) return;
   commit({ type: "fill", x, y, color, tolerance: FILL_TOLERANCE });
-  paint();
+  paintSketch();
 }
 
 function hasContent() {
@@ -2002,7 +2002,7 @@ pad.addEventListener("pointerdown", (event) => {
     size: erasing ? Math.max(penSize * 4, 16) : penSize,
     points: [padPoint(event)],
   };
-  paint();
+  paintSketch();
 });
 pad.addEventListener("pointermove", (event) => {
   if (!pad.hasPointerCapture(event.pointerId)) return;
@@ -2013,7 +2013,7 @@ pad.addEventListener("pointermove", (event) => {
   }
   if (!currentStroke) return;
   currentStroke.points.push(padPoint(event));
-  paint();
+  paintSketch();
 });
 function endStroke(event) {
   if (event && pad.hasPointerCapture(event.pointerId)) pad.releasePointerCapture(event.pointerId);
@@ -2028,7 +2028,7 @@ function endStroke(event) {
     commit({ type: "stroke", stroke });
     renderBase();
   }
-  paint();
+  paintSketch();
 }
 pad.addEventListener("pointerup", endStroke);
 pad.addEventListener("pointercancel", endStroke);
@@ -2077,14 +2077,14 @@ function undoSketch() {
   if (!cursor) return;
   cursor -= 1;
   renderBase();
-  paint();
+  paintSketch();
 }
 
 function redoSketch() {
   if (cursor >= actions.length) return;
   cursor += 1;
   renderBase();
-  paint();
+  paintSketch();
 }
 
 $("#sketch-undo").addEventListener("click", undoSketch);
@@ -2093,7 +2093,7 @@ $("#sketch-clear").addEventListener("click", () => {
   if (!hasContent()) return;
   commit({ type: "clear" });
   renderBase();
-  paint();
+  paintSketch();
 });
 $("#sketch-close").addEventListener("click", closeSketch);
 $("#sketch-cancel").addEventListener("click", closeSketch);
