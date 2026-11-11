@@ -1996,7 +1996,7 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   margin: 0 auto;
   padding-top: 18px;
 }
-.github-link {
+.front-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2011,16 +2011,16 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   text-decoration: none;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.github-link:hover {
+.front-link:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
 }
-.github-link:focus-visible {
+.front-link:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.github-link svg { width: 16px; height: 16px; display: block; }
+.front-link svg { width: 16px; height: 16px; display: block; }
 
 .launch-notice {
   position: relative;
@@ -2168,8 +2168,8 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
 
 @media (max-width: 640px) {
   .front-top { padding-top: 14px; }
-  .github-link { width: 32px; height: 32px; }
-  .github-link svg { width: 15px; height: 15px; }
+  .front-link { width: 32px; height: 32px; }
+  .front-link svg { width: 15px; height: 15px; }
   .launch-notice {
     grid-template-columns: 38px minmax(0, 1fr);
     gap: 10px;

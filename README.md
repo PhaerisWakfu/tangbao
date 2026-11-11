@@ -35,7 +35,7 @@ wrangler.jsonc        Cloudflare 配置
 - Cloudflare Workers 提供页面和 API
 - D1 保存对话、模型、申请、举报等数据
 - Workers KV 保存用户上传的图片
-- Cloudflare Email Sending 与 Brevo 发送邮箱验证和找回邮件；应用侧每日总预算 360 封，Cloudflare 90 封（按 3,000 封/月留出 31 天缓冲）、Brevo 280 封，180 封告警；单家额度错误会熔断并切换到另一家，两家都不可用时明确提示；账户月度额度和计费以两家控制台为准
+- Brevo 与 Cloudflare Email Sending 发送邮箱验证和找回邮件，默认 Brevo 优先、Cloudflare 承接突增和熔断流量；应用侧每日总预算 1,200 封，Brevo 280 封、Cloudflare 920 封，180 封告警；单家额度错误会熔断并切换到另一家，两家都不可用时明确提示；账户月度额度和计费以两家控制台为准
 - Cron 每分钟刷新首页在线状态并补偿可重试的邮件任务
 - 可选：通过 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` 使用 Turso
 
