@@ -11,7 +11,7 @@
 - 账号新建对话支持跨设备历史。旧匿名历史由用户主动选择关联，并验证原对话凭证；不根据 IP、visitor ID 或历史申请邮箱自动认领。
 - 登录默认长期保持，使用约 400 天的持久 cookie，并在活跃使用时续期。退出撤销当前会话、清理本站 cookie 和客户端缓存，下一次需要密码登录；设置不提供切换账号功能。
 - 模型停用影响该模型接单和回复，账号停用影响账号所有会话；两项操作分开。
-- 发信使用 Brevo 与 Cloudflare Email Sending，默认顺序为 Brevo 优先、Cloudflare 承接突增流量和熔断切换。应用侧每日总预算 1,200 封：Brevo 280、Cloudflare 920；用到当日预算 90% 时按 UTC 日期去重，推送一次飞书提醒（未配置 `FEISHU_WEBHOOK` 时只写日志）。单家额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时提示额度已满。不另设应用侧月度限制；两家账户的月度额度和计费以各自控制台为准。
+- 发信统一走 Cloudflare Email Sending。应用侧每日总预算 920 封（账户每天 1,000 封，留出余量）；用到当日预算 90% 时按 UTC 日期去重，推送一次飞书提醒（未配置 `FEISHU_WEBHOOK` 时只写日志）。日额度用尽时打开 5 分钟熔断并暂停发信，下一个 UTC 日恢复。不另设应用侧月度限制；账户月度额度和计费以控制台为准。Brevo 曾作为溢出通道短暂启用，因出口 IP 被 QQ 判为 `blocked by Admin` 已停用；相关代码保留但不在发送列表内。
 
 邮箱验证只证明对邮箱的控制权，不代表实名或内容安全保证。糖包的模型仍由人回复。
 
@@ -67,7 +67,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 ## Cloudflare Email Sending
 
-生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人建议为 `糖包 <noreply@mail.phaeris.cn>`。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用。发信默认先走 Brevo：使用已验证的 `send.phaeris.cn` 和 `noreply@send.phaeris.cn`，应用内预算 280 封；Brevo 额度用尽或熔断时切到 Cloudflare，应用内按每天 920 封控制（账户每天 1,000 封，留出余量）。总预算 1,200 封，保留 180 封告警和单家 5 分钟熔断。发件人地址随实际通道变化，收件人看到的 From 可能在两家之间切换。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
+生产站点为 `https://tangbao.phaeris.cn`，发信子域为 `mail.phaeris.cn`，发件人为 `糖包 <noreply@mail.phaeris.cn>`，统一经 Cloudflare Email Sending 发送。部署者已确认 Workers Paid、D1、Cloudflare DNS 和 Email Sending 可用；应用内按每天 920 封控制（账户每天 1,000 封，留出余量），保留 90% 飞书提醒和 5 分钟熔断。Cloudflare 账户的月度包含额度和超额计费以控制台为准；真实收件箱送达仍需单独验收。
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
@@ -81,9 +81,10 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 MAIL_MODE=disabled                 # disabled | test | cloudflare
 MAIL_FROM=糖包 <noreply@mail.phaeris.cn>
 APP_ORIGIN=https://tangbao.phaeris.cn
-MAIL_DAILY_LIMIT=1200
-MAIL_PROVIDERS=brevo,cloudflare
+MAIL_DAILY_LIMIT=920
+MAIL_PROVIDERS=cloudflare
 CLOUDFLARE_DAILY_LIMIT=920
+# Brevo 配置保留但未启用（出口 IP 曾被 QQ 拒收）
 BREVO_DAILY_LIMIT=280
 BREVO_FROM=糖包 <noreply@send.phaeris.cn>
 # 邮件每日预算用到 90% 时推送到飞书群；留空只写日志
