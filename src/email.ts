@@ -105,11 +105,12 @@ function providerLimit(env: MailEnv, provider: MailProvider): number {
   return value;
 }
 
-// MAIL_PROVIDERS is the send order. Production runs Cloudflare first for its
-// monthly free allowance, then Brevo. Providers without credentials drop out.
+// MAIL_PROVIDERS is the send order. Production runs Brevo first because a
+// steady single sender domain matters more than using every free allowance;
+// Cloudflare is the overflow. Providers without credentials drop out.
 function mailProviders(env: MailEnv): MailProvider[] {
   if (env.MAIL_MODE === "test") return ["cloudflare"];
-  const configured = (env.MAIL_PROVIDERS || "cloudflare,brevo")
+  const configured = (env.MAIL_PROVIDERS || "brevo,cloudflare")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter((item): item is MailProvider => item === "cloudflare" || item === "brevo");
