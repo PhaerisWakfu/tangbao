@@ -17,7 +17,7 @@
     const x=button('×',close,'account-help-close'); x.setAttribute('aria-label','关闭');
     head.append(h,x); const content=el('div','report-content'); card.append(head,content); d.append(card); document.body.append(d);
     d.addEventListener('click',event=>{if(event.target===d) close();}); TangbaoModal.bind(d,close); dialogs.add(d);
-    return { node:d, content, close, open:()=>TangbaoModal.open(d), head };
+    return { node:d, content, close, open:()=>TangbaoModal.open(d), head, title:h, closeButton:x };
   }
   function errorNode() { const n=el('p','report-error'); n.setAttribute('role','alert'); n.hidden=true; return n; }
   function showError(node,error) { node.textContent=error?.message || '暂时无法完成，请重试。'; node.hidden=false; }
@@ -53,7 +53,7 @@
     const d=host || dialog('举报记录'), err=errorNode(), gen=generation, view={};d.recordView=view;
     const valid=()=>gen===generation && d.node.isConnected && d.recordView===view;
     d.content.replaceChildren();
-    if(onBack){const back=button('',()=>{d.recordView=null;onBack();},'report-back');back.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5.5 5 5.5"/></svg>';back.setAttribute('aria-label','返回举报记录');back.title='返回举报记录';if(d.head)d.head.prepend(back);else d.content.append(back);}
+    if(onBack){const back=button('',()=>{d.recordView=null;onBack();},'report-back');back.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5.5 5 5.5"/></svg>';back.setAttribute('aria-label','返回举报记录');back.title='返回举报记录';if(d.head && d.title && d.closeButton){const tools=el('div','report-dialog-tools');d.head.classList.add('report-dialog-stacked');tools.append(back,d.closeButton);d.head.replaceChildren(tools,d.title);}else d.content.append(back);}
     d.content.append(err);if(!host)d.open();
     try { const {report}=await request('/api/reports/'+id); if(!valid()) return; result(d.content,report); }
     catch(e){ if(valid()) showError(err,e); }
