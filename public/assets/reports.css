@@ -13,7 +13,7 @@
 .report-dialog .account-help-card header h2{flex:1}
 .report-content{min-width:0;overflow-wrap:anywhere}
 .report-evidence{margin:12px 0;padding:12px 16px;border-left:2px solid var(--accent);background:var(--hover);white-space:pre-wrap;max-height:220px;overflow:auto}
-.report-context{color:var(--ink-2);font-size:14px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.report-context{color:var(--ink-2);font-size:14px;border-top:1px solid var(--line);border-bottom:0;margin:16px 0 0;padding-top:12px}
 .report-context-label{margin:0 0 4px;color:var(--muted);font-size:12px}
 .report-context p{white-space:pre-wrap}
 .report-label{display:block;margin:18px 0 12px;color:var(--ink-2);font-size:14px}
@@ -85,6 +85,11 @@
 
 /* 举报记录的一句话说明 */
 .report-summary{margin:12px 0 18px;color:var(--ink-2);font-size:14px;line-height:1.7}
+.report-back{display:inline-flex;align-items:center;gap:4px;margin:0 0 12px;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.report-content>.report-back{padding:0;border:0;border-radius:0;background:transparent;color:var(--muted);font:inherit;font-size:13px}
+.report-content>.report-back:hover{color:var(--accent);background:transparent}
+.report-back::before{content:"←";font-size:14px;line-height:1}
+.report-back:hover{color:var(--accent)}
 .report-list-reason{color:var(--muted);font-size:12px}
 .report-field-label{color:var(--muted);font-size:12px;line-height:1.6}
 .report-field{margin-top:12px}

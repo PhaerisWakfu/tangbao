@@ -28,20 +28,22 @@
     box.append(shots);
   }
   function evidence(box, row, context=false) {
+    if(row.message?.body || row.images?.length) {
+      box.append(el('p','report-context-label','被举报的这条'));
+      if(row.message?.body) box.append(el('blockquote','report-evidence',row.message.body));
+      images(box,row.images);
+    }
     if(context && row.message?.context?.length) {
       const wrap=el('div','report-context');
-      wrap.append(el('p','report-context-label','前文'));
-      row.message.context.forEach(m=>{ const p=el('p','',m.body || '图片消息'); const who=el('b','',m.role==='visitor'?'用户：':'模型：'); p.prepend(who); wrap.append(p); }); box.append(wrap);
+      wrap.append(el('p','report-context-label','前文（举报之前）'));
+      row.message.context.forEach(m=>{ const p=el('p','',m.body || '图片消息'); const who=el('b','',m.role==='visitor'?'用户：':'模型：'); p.prepend(who); wrap.append(p); });
+      box.append(wrap);
     }
-    if(row.message?.body) box.append(el('blockquote','report-evidence',row.message.body));
-    images(box,row.images);
   }
   function result(box,row) {
     const head=el('div','report-detail-head');
     const status=el('span','report-status',statusName[row.status] || row.status);status.dataset.status=row.status;
     head.append(status,el('strong','report-detail-title',`对话：${row.title || '举报记录'}`));box.append(head);
-    const statusText=row.status==='pending'?'正在等待管理员审核':row.status==='upheld'?'管理员已判定举报成立':'管理员未判定举报成立';
-    box.append(el('p','report-summary',row.direction==='sent'?`你举报了${objectName(row.targetLabel)}的这条消息，${statusText}。`:`有人举报了你的这条消息，${statusText}。`));
     const details=el('dl','report-detail');
     const item=(label,value)=>{if(value===undefined || value===null || value==='')return;details.append(el('dt','',label),el('dd','',value));};
     item('举报类型',row.typeLabel);
@@ -58,7 +60,7 @@
     const d=host || dialog('举报记录'), err=errorNode(), gen=generation, view={};d.recordView=view;
     const valid=()=>gen===generation && d.node.isConnected && d.recordView===view;
     d.content.replaceChildren();
-    if(onBack)d.content.append(button('返回记录',()=>{d.recordView=null;onBack();}));
+    if(onBack)d.content.append(button('返回记录',()=>{d.recordView=null;onBack();},'report-back'));
     d.content.append(err);if(!host)d.open();
     try { const {report}=await request('/api/reports/'+id); if(!valid()) return; result(d.content,report); }
     catch(e){ if(valid()) showError(err,e); }
