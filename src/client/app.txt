@@ -1593,10 +1593,8 @@ function paintModels() {
   const visible = modelSearchMode
     ? models.slice()
     : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
-  if (!modelSearchMode) {
-    const rank = { online: 0, busy: 1 };
-    visible.sort((a, b) => (rank[a.status] ?? 2) - (rank[b.status] ?? 2));
-  }
+  const rank = { online: 0, busy: 1, closed: 2, idle: 3, away: 4 };
+  visible.sort((a, b) => (rank[a.status] ?? 5) - (rank[b.status] ?? 5));
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
