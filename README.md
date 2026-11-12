@@ -116,7 +116,7 @@ npm run check
 - [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
 - [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending
 - [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
-- [在线状态与派单（待开发）](docs/presence-and-dispatch.md)：五个状态、60 秒缓冲、Auto 派单与回收
+- [在线状态与派单](docs/presence-and-dispatch.md)：五个状态、60 秒缓冲、Auto 派单与回收
 
 后续需求与实现统一在 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；文档中的方案不代表功能已实现或部署。
 
