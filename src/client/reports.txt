@@ -53,7 +53,7 @@
     const d=host || dialog('举报记录'), err=errorNode(), gen=generation, view={};d.recordView=view;
     const valid=()=>gen===generation && d.node.isConnected && d.recordView===view;
     d.content.replaceChildren();
-    if(onBack){const back=button('返回记录',()=>{d.recordView=null;onBack();},'report-back');if(d.head)d.head.prepend(back);else d.content.append(back);}
+    if(onBack){const back=button('',()=>{d.recordView=null;onBack();},'report-back');back.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5 5.5 5 5.5"/></svg>';back.setAttribute('aria-label','返回举报记录');back.title='返回举报记录';if(d.head)d.head.prepend(back);else d.content.append(back);}
     d.content.append(err);if(!host)d.open();
     try { const {report}=await request('/api/reports/'+id); if(!valid()) return; result(d.content,report); }
     catch(e){ if(valid()) showError(err,e); }

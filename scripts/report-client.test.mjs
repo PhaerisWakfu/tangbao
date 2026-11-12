@@ -62,7 +62,7 @@ test('本人信誉加载时切换账号，旧分数不会写入新账号的设�
 test('记录详情复用当前弹窗；返回列表后迟到的详情不再追加',async()=>{
   const {context:c,dialogs,flatten}=setup(['openRecord']),pending=defer(),host=c.dialog('举报记录');c.request=()=>pending.promise;
   const loading=c.openRecord('case',host,()=>host.content.replaceChildren(node('p','','原记录列表')));
-  assert.equal(dialogs.length,1);flatten(host.content).find(n=>n.textContent==='返回记录').action();
+  assert.equal(dialogs.length,1);flatten(host.content).find(n=>n.className==='report-back').action();
   pending.resolve({report:report('case')});await loading;
   assert.equal(host.content.children.length,1);assert.equal(host.content.children[0].textContent,'原记录列表');
 });

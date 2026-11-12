@@ -85,11 +85,9 @@
 
 /* 举报记录的一句话说明 */
 .report-summary{margin:12px 0 18px;color:var(--ink-2);font-size:14px;line-height:1.7}
-.report-back{display:inline-flex;align-items:center;gap:4px;margin:0 0 12px;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
-.report-content>.report-back{padding:0;border:0;border-radius:0;background:transparent;color:var(--muted);font:inherit;font-size:13px}
-.report-content>.report-back:hover{color:var(--accent);background:transparent}
-.report-back::before{content:"←";font-size:14px;line-height:1}
-.report-back:hover{color:var(--accent)}
+.report-back{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin:0 6px 0 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;flex:none}
+.report-back svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.report-back:hover{color:var(--accent);background:var(--hover)}
 .report-list-reason{color:var(--muted);font-size:12px}
 .report-field-label{color:var(--muted);font-size:12px;line-height:1.6}
 .report-field{margin-top:12px}
@@ -118,9 +116,8 @@
 .account-profile-status-row .reputation-badge{height:auto;min-height:0;margin-top:3px;padding:2px 7px;gap:5px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--accent);font-size:10.5px;font-weight:400;line-height:1.5;box-sizing:border-box}
 .account-profile-status-row .reputation-badge-icon{width:12px;height:12px;flex-basis:12px}
 .account-profile-status-row .reputation-badge-icon svg{width:12px;height:12px}
-.report-dialog header .report-back{flex:none;margin:0 10px 0 0;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:400;line-height:1;cursor:pointer}
-.report-dialog header .report-back::before{content:"←";margin-right:4px}
-.report-dialog header .report-back:hover{color:var(--accent);background:transparent}
+.report-dialog header .report-back{width:30px;height:30px;margin:0 6px 0 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);flex:none}
+.report-dialog header .report-back:hover{color:var(--accent);background:var(--hover)}
 .message-report[data-state="locked"]{color:var(--muted);opacity:.6}
 .message-report[data-state="locked"]:hover{color:var(--accent);opacity:.85}
 
