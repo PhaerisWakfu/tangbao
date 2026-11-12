@@ -166,14 +166,12 @@
   async function adminList(container,onOpen,model) {
     const view={};listViews.set(container,view);
     const gen=generation,valid=()=>gen===generation && container.isConnected && listViews.get(container)===view, tools=el('div','report-filters');
-    const filter=el('div','report-filter');
-    let menu=null;
-    const trigger=button(statusName[reviewStatus],()=>{const open=menu.hidden;menu.hidden=!open;trigger.setAttribute('aria-expanded',String(open));},'report-filter-button');
-    trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');
-    menu=el('div','report-filter-menu');menu.hidden=true;menu.setAttribute('role','listbox');
-    Object.entries(statusName).forEach(([value,label])=>{const option=button(label,()=>{reviewStatus=value;reviewCursor=null;menu.hidden=true;trigger.textContent=label;trigger.setAttribute('aria-expanded','false');void adminList(container,onOpen,model);},'report-filter-option');option.setAttribute('role','option');option.setAttribute('aria-selected',String(value===reviewStatus));menu.append(option);});
-    trigger.addEventListener('blur',()=>setTimeout(()=>{if(menu.hidden)return;menu.hidden=true;trigger.setAttribute('aria-expanded','false');},120));
-    filter.append(trigger,menu);tools.append(filter);
+    const select=el('select','report-filter-select');
+    select.setAttribute('aria-label','举报状态');
+    Object.entries(statusName).forEach(([value,label])=>{const option=el('option','',label);option.value=value;select.append(option);});
+    select.value=reviewStatus;
+    select.addEventListener('change',()=>{reviewStatus=select.value;reviewCursor=null;void adminList(container,onOpen,model);});
+    tools.append(select);
     const list=el('div','talks-list'),err=errorNode(),next=button('下一页',()=>{reviewCursor=next.dataset.cursor;void adminList(container,onOpen,model);});
     const prev=button('返回首页',()=>{reviewCursor=null;void adminList(container,onOpen,model);});prev.hidden=!reviewCursor;
     next.hidden=true;
