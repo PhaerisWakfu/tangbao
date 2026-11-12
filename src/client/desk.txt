@@ -190,7 +190,7 @@ function applyWorkState(accepting) {
 
 function applyPresence(status) {
   const state = status?.status || (status?.online ? "online" : "away");
-  const present = state === "online" || state === "busy";
+  const present = state === "online" || state === "idle" || state === "busy" || state === "closed";
   body.dataset.presence = present ? "awake" : "asleep";
   if (seat.super) {
     try {
@@ -1207,7 +1207,7 @@ function operatorSeat(operator) {
     statusNote.className = "seat-status";
     statusNote.dataset.state = operator.status || "away";
     statusNote.textContent =
-      operator.status === "online" ? "在线" : operator.status === "busy" ? "忙碌" : "离开";
+      operator.status === "online" ? "在线" : operator.status === "idle" ? "暂离" : operator.status === "busy" ? "忙碌" : operator.status === "closed" ? "打烊" : "离开";
     metaRow.append(statusNote);
     name.append(metaRow);
   }

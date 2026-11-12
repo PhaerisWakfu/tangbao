@@ -716,6 +716,15 @@ body[data-state="empty"] .title { visibility: hidden; }
   border: 1.5px solid var(--up);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
 }
+.status[data-state="closed"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--line));
+}
+.status[data-state="closed"] i {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .status[data-state="away"] { color: var(--muted); }
 .status[data-state="away"] i {
   background: var(--faint);
@@ -791,6 +800,12 @@ body[data-state="empty"] .title { visibility: hidden; }
   background: transparent;
   border: 1.5px solid var(--up);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
+}
+.model-row[data-state="closed"] .model-state { color: var(--accent); }
+.model-row[data-state="closed"] i {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .model-row svg { margin-left: 4px; width: 14px; height: 14px; color: var(--accent); }
 .model-row.compact { align-items: center; padding: 4px 10px; }
@@ -933,6 +948,12 @@ body[data-state="empty"] .title { visibility: hidden; }
   background: transparent;
   border: 1.5px solid var(--up);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
+}
+.line[data-state="closed"] .state { color: var(--accent); }
+.line[data-state="closed"] i {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .line.compact { align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; }
 .line.compact i { margin-top: 0; }
