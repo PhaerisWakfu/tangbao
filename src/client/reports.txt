@@ -30,6 +30,7 @@
   function evidence(box, row, context=false) {
     if(context && row.message?.context?.length) {
       const wrap=el('div','report-context');
+      wrap.append(el('p','report-context-label','前文'));
       row.message.context.forEach(m=>{ const p=el('p','',m.body || '图片消息'); const who=el('b','',m.role==='visitor'?'用户：':'模型：'); p.prepend(who); wrap.append(p); }); box.append(wrap);
     }
     if(row.message?.body) box.append(el('blockquote','report-evidence',row.message.body));
@@ -38,17 +39,19 @@
   function result(box,row) {
     const head=el('div','report-detail-head');
     const status=el('span','report-status',statusName[row.status] || row.status);status.dataset.status=row.status;
-    head.append(status,el('strong','report-detail-title',row.title || '举报记录'));box.append(head);
+    head.append(status,el('strong','report-detail-title',`对话：${row.title || '举报记录'}`));box.append(head);
+    const statusText=row.status==='pending'?'正在等待管理员审核':row.status==='upheld'?'管理员已判定举报成立':'管理员未判定举报成立';
+    box.append(el('p','report-summary',row.direction==='sent'?`你举报了${objectName(row.targetLabel)}的这条消息，${statusText}。`:`有人举报了你的这条消息，${statusText}。`));
     const details=el('dl','report-detail');
     const item=(label,value)=>{if(value===undefined || value===null || value==='')return;details.append(el('dt','',label),el('dd','',value));};
     item('举报类型',row.typeLabel);
     if(row.direction==='sent')item('举报对象',objectName(row.targetLabel));else item('来源','收到的举报');
-    item('举报原因',row.reason);
-    item('审核说明',row.reviewReason);
+    item('举报说明',row.reason);
+    item('审核意见',row.reviewReason);
     item('处理时间',row.decidedAt ? date(row.decidedAt) : '');
     item('信誉变化',row.deduction>0 ? `−${row.deduction} 分 · ${row.scoreBefore} → ${row.scoreAfter}` : '');
     box.append(details);
-    if(row.message){box.append(el('h4','report-section-title','证据消息'));evidence(box,row,true);}
+    if(row.message){box.append(el('h4','report-section-title','被举报消息'));evidence(box,row,true);}
     box.append(el('time','report-date',`提交于 ${date(row.createdAt)}`));
   }
   async function openRecord(id,host,onBack) {
@@ -142,9 +145,12 @@
   async function showReputation() {
     const d=dialog('信誉分'),err=errorNode(),gen=generation;d.content.append(err);d.open();
     try { const data=await request('/api/reputation');if(gen!==generation || !d.node.isConnected)return;
-      const score=el('p','reputation-value',`${data.score} 分`),rules=el('ul','reputation-rules');
-      ['举报成功，扣对方信誉分。','举报失败，扣自己信誉分。',`${data.minimumReportScore} 分以下不能发起举报。`].forEach(t=>rules.append(el('li','',t)));
-      d.content.append(score,rules);
+      const value=el('p','reputation-value',`${data.score} 分`);
+      const lead=el('p','reputation-lead','信誉分记录你在举报里的表现。新账号从 100 分开始，分数越高越能正常使用举报。');
+      const blocks=[['举报别人','举报成功，对方会被扣分。对同一个账号成功举报一次后，就不能再举报他。'],['被举报','如果对方举报你且成立，你会被扣分；如果举报不成立，不会扣你的分。'],['举报失败','如果你的举报被判定不成立，会扣你自己的分。7 天内失败次数越多，扣得越多。'],['什么时候不能举报',`低于 ${data.minimumReportScore} 分不能发起新举报。同一对象同时只能有 1 条待审核，最多同时等 3 个对象。`],['记录在哪里看','在账号设置 → 举报记录里，可以查看自己提交和收到的举报。']];
+      const list=el('div','reputation-blocks');
+      blocks.forEach(([title,text])=>{const block=el('section','reputation-block');block.append(el('h3','',title),el('p','',text));list.append(block);});
+      d.content.append(value,lead,list,el('p','reputation-note','分值可能随站点规则调整，具体扣分以审核确认页为准。'));
     }catch(e){if(gen===generation)showError(err,e);}
   }
   async function openRecords() {
@@ -162,8 +168,14 @@
   async function adminList(container,onOpen,model) {
     const view={};listViews.set(container,view);
     const gen=generation,valid=()=>gen===generation && container.isConnected && listViews.get(container)===view, tools=el('div','report-filters');
-    const select=el('select');select.setAttribute('aria-label','举报状态');Object.entries(statusName).forEach(([value,label])=>{const o=el('option','',label);o.value=value;select.append(o);});select.value=reviewStatus;
-    select.addEventListener('change',()=>{reviewStatus=select.value;reviewCursor=null;void adminList(container,onOpen,model);});tools.append(select);
+    const filter=el('div','report-filter');
+    let menu=null;
+    const trigger=button(statusName[reviewStatus],()=>{const open=menu.hidden;menu.hidden=!open;trigger.setAttribute('aria-expanded',String(open));},'report-filter-button');
+    trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');
+    menu=el('div','report-filter-menu');menu.hidden=true;menu.setAttribute('role','listbox');
+    Object.entries(statusName).forEach(([value,label])=>{const option=button(label,()=>{reviewStatus=value;reviewCursor=null;menu.hidden=true;trigger.textContent=label;trigger.setAttribute('aria-expanded','false');void adminList(container,onOpen,model);},'report-filter-option');option.setAttribute('role','option');option.setAttribute('aria-selected',String(value===reviewStatus));menu.append(option);});
+    trigger.addEventListener('blur',()=>setTimeout(()=>{if(menu.hidden)return;menu.hidden=true;trigger.setAttribute('aria-expanded','false');},120));
+    filter.append(trigger,menu);tools.append(filter);
     const list=el('div','talks-list'),err=errorNode(),next=button('下一页',()=>{reviewCursor=next.dataset.cursor;void adminList(container,onOpen,model);});
     const prev=button('返回首页',()=>{reviewCursor=null;void adminList(container,onOpen,model);});prev.hidden=!reviewCursor;
     next.hidden=true;
@@ -173,7 +185,7 @@
       const stamp=JSON.stringify([reviewStatus,reviewCursor,model,data]);if(container.dataset.reportStamp===stamp)return;
       container.dataset.reportStamp=stamp;container.replaceChildren(tools,list,err);
       if(!data.reports.length)list.append(el('p','quiet','暂无举报'));
-      data.reports.forEach(row=>{const op=row.reporterRole==='operator',rel=`${op?`模型「${row.modelLabel || row.targetLabel || '未知'}」`:'普通用户'} 举报 ${op?'普通用户':`模型「${row.targetLabel || row.modelLabel || '未知'}」`}`;const b=button('',()=>onOpen(row.id),'audit-line report-record');b.append(el('strong','',row.title),el('span','report-type',row.typeLabel),el('span','report-relation',rel));if(row.reason)b.append(el('span','',row.reason));b.append(el('time','',date(row.createdAt)));list.append(b);});
+      data.reports.forEach(row=>{const op=row.reporterRole==='operator',rel=`${op?`模型「${row.modelLabel || row.targetLabel || '未知'}」`:'普通用户'} 举报 ${op?'普通用户':`模型「${row.targetLabel || row.modelLabel || '未知'}」`}`;const b=button('',()=>onOpen(row.id),'audit-line report-record');b.append(el('strong','',row.title),el('span','report-type',row.typeLabel),el('span','report-relation',rel));if(row.reason)b.append(el('span','report-list-reason',`举报说明：${row.reason}`));b.append(el('time','',date(row.createdAt)));list.append(b);});
       next.hidden=!data.cursor;next.dataset.cursor=data.cursor || '';tools.append(prev,next);
     }catch(e){if(valid()){container.replaceChildren(tools,list,err);showError(err,e);}}
   }
@@ -192,13 +204,13 @@
       const party=(role,name,score)=>{const p=el('div','report-party');p.append(el('span','report-party-role',role),el('strong','',name),el('small','',`信誉 ${score} 分`));return p;};
       parties.append(party('举报人',operator?`模型「${report.modelLabel || report.targetLabel || '未知'}」`:'普通用户',report.reporterScore),el('span','report-party-arrow','→'),party('被举报人',operator?'普通用户':`模型「${report.targetLabel || report.modelLabel || '未知'}」`,report.targetScore));
       box.append(parties);
-      const content=el('section','report-section');content.append(el('h4','report-section-title','举报内容'),el('p','report-type',report.typeLabel));if(report.reason)content.append(el('p','report-reason',report.reason));box.append(content);
+      const content=el('section','report-section');content.append(el('h4','report-section-title','举报内容'));const info=el('dl','report-detail');info.append(el('dt','','举报类型'),el('dd','',report.typeLabel));if(report.reason)info.append(el('dt','','举报说明'),el('dd','',report.reason));content.append(info);box.append(content);
       const evidenceBox=el('section','report-section');evidenceBox.append(el('h4','report-section-title','被举报消息'));evidence(evidenceBox,report,true);box.append(evidenceBox);
       const meta=el('div','report-meta');
       if(report.threadAvailable && onThread)meta.append(button('查看对话',()=>onThread(report.threadId),'text-btn'));
       box.append(meta);container.append(box);
-      if(report.status!=='pending'){const outcome=el('section','report-section report-outcome'),top=el('div','report-outcome-top');const status=el('span','report-status',statusName[report.status]);status.dataset.status=report.status;top.append(status);if(report.decidedAt)top.append(el('time','report-date',date(report.decidedAt)));top.append(el('p','report-deduction',`${report.status==='upheld'?'被举报人':'举报人'}信誉 ${report.scoreBefore} → ${report.scoreAfter}`));outcome.append(top);if(report.reviewReason)outcome.append(el('p','report-reason',report.reviewReason));box.append(outcome);return;}
-      const label=el('label','report-label','审核原因'),input=el('textarea');input.rows=3;input.maxLength=report.reviewReasonMaxLength;label.append(input);
+      if(report.status!=='pending'){const outcome=el('section','report-section report-outcome'),top=el('div','report-outcome-top');const status=el('span','report-status',statusName[report.status]);status.dataset.status=report.status;top.append(el('span','report-field-label','审核结果'),status);if(report.decidedAt)top.append(el('time','report-date',date(report.decidedAt)));top.append(el('p','report-deduction',`${report.status==='upheld'?'被举报人':'举报人'}信誉 ${report.scoreBefore} → ${report.scoreAfter}`));outcome.append(top);if(report.reviewReason){const opinion=el('div','report-field');opinion.append(el('span','report-field-label','审核意见'),el('p','report-reason',report.reviewReason));outcome.append(opinion);}box.append(outcome);return;}
+      const label=el('label','report-label','审核意见'),input=el('textarea');input.rows=3;input.maxLength=report.reviewReasonMaxLength;label.append(input);
       const actions=el('div','report-review-actions');let inFlight=false;
       const decide=async outcome=>{
         if(inFlight)return;inFlight=true;actions.querySelectorAll('button').forEach(b=>b.disabled=true);err.hidden=true;
