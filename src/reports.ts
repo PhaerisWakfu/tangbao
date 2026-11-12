@@ -14,7 +14,7 @@ export type ReportPolicy = {
 type Policy = { id: string; policy: ReportPolicy };
 type Case = {
   id: string; reporter_id: string; target_id: string; thread_id: string; message_id: string;
-  type_code: string; type_label: string; reporter_role: string; target_label: string; thread_title: string; snapshot: string; reason: string;
+  type_code: string; type_label: string; reporter_role: string; target_label: string; model_uid: string; thread_operator: string | null; thread_title: string; snapshot: string; reason: string;
   request_key: string; fingerprint: string; created_at: number; creation_policy_id: string;
   status: 'pending' | 'upheld' | 'rejected'; review_reason: string | null; decided_at: number | null;
   decision_policy_id: string | null; affected_id: string | null; nominal_penalty: number | null;
@@ -48,7 +48,8 @@ function assertAdmin(account: Account, env: ReportEnv, owner = false): void {
   if (!account.roles.includes('admin') || owner && !policyOwner) return fail(403, 'REPORT_ADMIN_REQUIRED', '没有操作权限。');
 }
 async function find(env: ReportEnv, id: string): Promise<Case> {
-  const row = await env.DB.prepare('SELECT * FROM reports WHERE id=?').bind(id).first<Case>();
+  const row = await env.DB.prepare(`SELECT r.*, (SELECT t.operator_id FROM threads t WHERE t.id=r.thread_id) AS thread_operator
+    FROM reports r WHERE r.id=?`).bind(id).first<Case>();
   if (!row) return fail(404, 'REPORT_NOT_FOUND', '举报记录不存在。'); return row;
 }
 function mayRead(row: Case, account: Account) {
@@ -63,7 +64,9 @@ function dto(row: Case, account: Account, detail = false) {
     scoreBefore: own ? row.score_before : null, scoreAfter: own ? row.score_after : null };
   if (detail) result.message = JSON.parse(row.snapshot);
   if (account.roles.includes('admin')) Object.assign(result, { reporterId: row.reporter_id, targetId: row.target_id,
-    targetLabel: row.target_label, threadId: row.thread_id, reporterRole: row.reporter_role,
+    reporterRole: row.reporter_role, modelUid: row.model_uid,
+    modelLabel: row.target_label && row.target_label !== '用户' ? row.target_label : row.thread_operator,
+    targetLabel: row.target_label, threadId: row.thread_id,
     nominalPenalty: row.nominal_penalty, scoreBefore: row.score_before, scoreAfter: row.score_after,
     creationPolicy: row.creation_policy_id, decisionPolicy: row.decision_policy_id });
   return result;
@@ -238,7 +241,8 @@ function cursorOf(url: URL) {
 async function listing(env: ReportEnv, account: Account, url: URL, audit: boolean) {
   const p = await current(env); const limit = Math.min(p.policy.maxPageSize, Math.max(1, Math.floor(Number(url.searchParams.get('limit'))) || p.policy.pageSize));
   // Long reasons and evidence belong to the detail read, not every queue refresh.
-  const columns = `id,reporter_id,target_id,thread_id,reporter_role,target_label,thread_title,type_code,type_label,
+  const columns = `id,reporter_id,target_id,thread_id,reporter_role,target_label,model_uid,
+    (SELECT t.operator_id FROM threads t WHERE t.id=reports.thread_id) AS thread_operator,thread_title,type_code,type_label,
     substr(reason,1,200) AS reason,status,created_at,decided_at,review_reason,affected_id,nominal_penalty,
     score_before,score_after,creation_policy_id,decision_policy_id`;
   const cursor = cursorOf(url); const tail = cursor ? ' AND (created_at<? OR (created_at=? AND id<?))' : '';

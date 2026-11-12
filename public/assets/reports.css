@@ -40,3 +40,41 @@
 .report-type{color:var(--accent)}
 .report-label select{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:11px 12px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
 .report-label select:focus-visible,.report-label textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 举报审核：先关系、再内容、再证据 */
+.report-review-head{padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.report-kicker{margin:0 0 6px;color:var(--muted);font-size:12px;letter-spacing:.04em}
+.report-review-head h3{margin:0 0 6px;font-size:20px;line-height:1.4;overflow-wrap:anywhere}
+.report-sub{margin:0;color:var(--muted);font-size:12px}
+.report-party-grid{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:center;margin:0 0 22px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--hover)}
+.report-party{display:flex;flex-direction:column;gap:3px;min-width:0}
+.report-party-role{color:var(--muted);font-size:12px}
+.report-party strong{font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.report-party small{color:var(--muted);font-size:12px}
+.report-party-arrow{color:var(--accent);font-size:18px;line-height:1}
+.report-section{margin:20px 0}
+.report-section-title{margin:0 0 10px;color:var(--muted);font-size:12px;font-weight:500;letter-spacing:.04em}
+.report-meta{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0}
+.report-meta .report-date{margin:0}
+.report-outcome{display:block;padding-top:16px;border-top:1px solid var(--line)}
+.report-outcome-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.report-outcome .report-date{margin:0}
+.report-outcome .report-deduction{margin:0}
+.report-detail{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 16px;margin:16px 0}
+.report-detail dt{color:var(--muted);font-size:13px}
+.report-detail dd{margin:0;overflow-wrap:anywhere}
+.report-detail-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.report-detail-title{font-size:15px;overflow-wrap:anywhere}
+.report-relation{color:var(--muted);font-size:12px}
+.report-status{display:inline-flex;align-items:center;width:max-content;padding:2px 8px;border-radius:999px;background:var(--hover);color:var(--accent);font-size:12px;font-weight:500;line-height:1.6}
+.report-status[data-status="rejected"]{color:var(--muted)}
+.report-deduction{color:var(--accent);font-size:13px}
+
+/* 账号设置里的信誉按钮 */
+.reputation-badge{gap:5px;padding:4px 10px 4px 8px;border-radius:999px;background:var(--bg);color:var(--accent);font-size:12px;font-weight:500;line-height:1.5;transition:background .15s,border-color .15s}
+.reputation-badge-icon{display:inline-flex;width:15px;height:15px;flex:0 0 15px}
+.reputation-badge-icon svg{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.reputation-badge:hover{background:var(--hover);border-color:var(--accent)}
+.reputation-badge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:600px){.report-party-grid{grid-template-columns:1fr;gap:8px}.report-party-arrow{display:none}.report-detail{grid-template-columns:1fr}.report-detail dt{margin-top:6px}.report-review-head h3{font-size:18px}}
+

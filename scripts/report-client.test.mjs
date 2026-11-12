@@ -57,7 +57,7 @@ test('提交结果未知时重试保留原内容及请求键；先查原请求�
 test('本人信誉加载时切换账号，旧分数不会写入新账号的设置',async()=>{
   const {context:c}=setup(['attachAccount']);const pending=defer(),container=node();c.request=()=>pending.promise;
   const loading=c.attachAccount(container,{verified:true});c.generation++;pending.resolve({score:82,minimumReportScore:60});await loading;
-  assert.equal(container.children[0].textContent,'信誉…');assert.equal(container.children[0].disabled,true);
+  const badge=container.children[0];assert.equal(badge.children[1].textContent,'信誉…');assert.equal(badge.disabled,true);
 });
 test('记录详情复用当前弹窗；返回列表后迟到的详情不再追加',async()=>{
   const {context:c,dialogs,flatten}=setup(['openRecord']),pending=defer(),host=c.dialog('举报记录');c.request=()=>pending.promise;
