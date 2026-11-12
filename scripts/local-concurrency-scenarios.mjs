@@ -87,6 +87,8 @@ export async function runConcurrencyScenarios({ actor, admin, operatorA, operato
     const existing=`${prefix}-existing`;
     await db(`INSERT INTO threads(id,token_hash,title,created_at,updated_at,operator_id,awaiting,account_id)
       VALUES(${quote(existing)},'synthetic','已有对话续聊',${now},${now},${quote(a)},0,${quote(user.state.accountId)})`);
+    await db(`INSERT INTO settings(key,value) VALUES('home_last_seen',${now}) ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+      INSERT INTO settings(key,value) VALUES('home_away_at','0') ON CONFLICT(key) DO UPDATE SET value=excluded.value;`);
     await user.request("/api/threads",{method:"POST",body:{body:"满模型拒绝新建",operator:a},status:429});
     const other=await user.request("/api/threads",{method:"POST",body:{body:"其他模型仍可新建",operator:b}});assert.equal(other.operator,b);
     await user.request(`/api/threads/${existing}/messages`,{method:"POST",body:{body:"满队列仍可继续原对话"}});
