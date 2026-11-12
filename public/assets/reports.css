@@ -116,12 +116,10 @@
 .account-profile-status-row .reputation-badge{height:auto;min-height:0;margin-top:3px;padding:2px 7px;gap:5px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--accent);font-size:10.5px;font-weight:400;line-height:1.5;box-sizing:border-box}
 .account-profile-status-row .reputation-badge-icon{width:12px;height:12px;flex-basis:12px}
 .account-profile-status-row .reputation-badge-icon svg{width:12px;height:12px}
-.report-dialog header .report-back{width:30px;height:30px;margin:0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);flex:none}
+/* 下钻式标题栏：返回、标题、关闭同一行 */
+.report-dialog header{align-items:center}
+.report-dialog header .report-back{width:30px;height:30px;margin:0 4px 0 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);flex:none}
 .report-dialog header .report-back:hover{color:var(--accent);background:var(--hover)}
-.report-dialog header.report-dialog-stacked{display:block}
-.report-dialog-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
-.report-dialog-tools .report-back{margin:0}
-.report-dialog header.report-dialog-stacked h2{flex:none}
 .message-report[data-state="locked"]{color:var(--muted);opacity:.6}
 .message-report[data-state="locked"]:hover{color:var(--accent);opacity:.85}
 
