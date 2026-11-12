@@ -143,7 +143,7 @@ npm run local:legacy:backup -- --instance manual-legacy
 
 ## 用已有 D1 备份建立本地副本
 
-本地导入不需要登录 Cloudflare。使用完整结构及数据 SQL、真实已执行迁移 JSON 和全新实例名；取得云端备份的命令见 [部署交接手册](accounts-rollout.md#二导入测试副本执行新增迁移)。
+本地导入不需要登录 Cloudflare。使用完整结构及数据 SQL、真实已执行迁移 JSON 和全新实例名；取得云端备份的命令见 [部署交接手册](archive/accounts-rollout.md#二导入测试副本执行新增迁移)。
 
 ```sh
 npm run local:clone -- --instance accounts-copy --port 8896 --snapshot ./private-assets/account-copy/source.sql --baseline ./private-assets/account-copy/baseline.json
@@ -159,7 +159,7 @@ SQL 只有图片引用，KV 文件需要独立副本；不为补图回连生产 
 
 ## 上线与回退
 
-云端原生邮件、独立试运行、Secret 配置、管理员引导、D1/KV 迁移和回退统一按 [部署交接手册](accounts-rollout.md) 执行。本地回归工具保持模拟邮件，不再提供本机 Token/Account ID 远程发信路径。
+云端原生邮件、独立试运行、Secret 配置、管理员引导、D1/KV 迁移和回退统一按 [部署交接手册](archive/accounts-rollout.md) 执行。本地回归工具保持模拟邮件，不再提供本机 Token/Account ID 远程发信路径。
 
 管理员引导复用 `scripts/bootstrap-admin.mjs`。先通过产品页注册并验证账号，取得目标账号 ID，再明确指定配置和本地/远程目标。脚本默认只生成可审阅 SQL，不执行；例如本地预览：
 
