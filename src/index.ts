@@ -111,6 +111,9 @@ const REPLY_TIMEOUT = 10 * 60_000;
 // Hand an unanswered first message to someone else once the owner has been
 // gone for a while (90s to notice + 5 minutes of waiting).
 const RESCUE_AFTER = ONLINE_TTL + 5 * 60_000;
+// Only redistribute first messages with recent activity. Older strands are
+// historical backlog, not someone still waiting for an answer.
+const RESCUE_MAX_AGE = 48 * HOUR;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
@@ -1940,10 +1943,11 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
            )
          )
        )
+       AND t.updated_at >= ?
      ORDER BY t.updated_at ASC
      LIMIT ?`,
   )
-    .bind(scope, HOME_MODEL, HOME_MODEL, rescueBefore, slotsLeft)
+    .bind(scope, HOME_MODEL, HOME_MODEL, rescueBefore, now - RESCUE_MAX_AGE, slotsLeft)
     .all<{ id: string }>();
   if (!candidates.results.length) return 0;
 
@@ -1974,6 +1978,7 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
              )
            )
          )
+         AND updated_at >= ?
          AND EXISTS (
            SELECT 1 FROM operators o
            WHERE o.id = ? AND o.active = 1 AND o.accepting = 1 AND ${OWNER_READY} AND o.last_seen_at >= ? AND ${ownership.sql}
@@ -1990,6 +1995,7 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
         HOME_MODEL,
         HOME_MODEL,
         rescueBefore,
+        now - RESCUE_MAX_AGE,
         operatorId,
         freshAfter,
         ...ownership.values,
