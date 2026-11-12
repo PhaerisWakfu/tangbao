@@ -144,6 +144,6 @@ Refs #N
 
 ## 当前接手事项
 
-首次接手发现及实时进展由 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；账号入口为 [#5](https://github.com/PhaerisWakfu/tangbao/issues/5)，工程整备入口为 [#10](https://github.com/PhaerisWakfu/tangbao/issues/10)。规范变化回写可复用文档并关联 Issue，文档及流程建设由 [#4](https://github.com/PhaerisWakfu/tangbao/issues/4) 跟踪。
+首次接手发现及实时进展由 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；账号规则见 [账号设计](accounts.md)，工程整备入口为 [#10](https://github.com/PhaerisWakfu/tangbao/issues/10)，当前在途需求入口为 [Epic #25](https://github.com/PhaerisWakfu/tangbao/issues/25)。规范变化回写可复用文档并关联 Issue，文档及流程建设由 [#4](https://github.com/PhaerisWakfu/tangbao/issues/4) 跟踪。
 
 本地协作规则、给维护者看的分析/Todo 快照、报告、截图和会话产物不属于提交范围，统一放入被忽略的位置。前端规范、账号设计、本文及本地部署手册等可复用文档保持可提交；公开文档不引用本地专属文件。提交前同时检查 `git diff --cached` 和忽略结果，不使用强制添加绕过边界。
