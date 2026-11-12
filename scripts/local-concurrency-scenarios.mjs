@@ -78,7 +78,7 @@ export async function runConcurrencyScenarios({ actor, admin, operatorA, operato
     const user=actor("queue-admission-review"); await user.register();
     const a=operatorA.state.operatorId,b=operatorB.state.operatorId,now=Date.now();
     const prefix=`synthetic-admission-${randomBytes(6).toString("hex")}`;
-    await db("UPDATE threads SET awaiting=0; UPDATE operators SET last_seen_at=0;");
+    await db(`UPDATE threads SET awaiting=0; UPDATE operators SET last_seen_at=${now}, away_at=0;`);
     await db(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<400)
       INSERT INTO threads(id,token_hash,title,created_at,updated_at,operator_id,queued,auto_home,awaiting)
       SELECT ${quote(prefix)}||'-'||n,'synthetic','合成准入边界',${now},${now},
