@@ -93,10 +93,11 @@ export async function runConcurrencyScenarios({ actor, admin, operatorA, operato
     const other=await user.request("/api/threads",{method:"POST",body:{body:"其他模型仍可新建",operator:b}});assert.equal(other.operator,b);
     await user.request(`/api/threads/${existing}/messages`,{method:"POST",body:{body:"满队列仍可继续原对话"}});
     assert.equal((await user.request(`/api/threads/${existing}`)).messages.at(-1).body,"满队列仍可继续原对话");
-    for(const [operator,queued] of [["tangbao-vme50-flash",false],["",true]]){
-      const created=await user.request("/api/threads",{method:"POST",body:{body:"主模型与消息池不受普通模型准入上限限制",operator}});
-      assert.equal(created.queued,queued);assert.equal(created.operator,queued?"tangbao-pool":operator);
-    }
+    const homeCreated=await user.request("/api/threads",{method:"POST",body:{body:"主模型与消息池不受普通模型准入上限限制",operator:"tangbao-vme50-flash"}});
+    assert.equal(homeCreated.queued,false);assert.equal(homeCreated.operator,"tangbao-vme50-flash");
+    await db(`UPDATE settings SET value='0' WHERE key='home_last_seen'; UPDATE operators SET last_seen_at=0 WHERE id<>${quote(a)};`);
+    const poolCreated=await user.request("/api/threads",{method:"POST",body:{body:"主模型与消息池不受普通模型准入上限限制",operator:""}});
+    assert.equal(poolCreated.queued,true);assert.equal(poolCreated.operator,"tangbao-pool");
     await db(`UPDATE threads SET awaiting=0 WHERE id IN (${quote(prefix+'-1')},${quote(prefix+'-2')})`);
     const admitted=await user.request("/api/threads",{method:"POST",body:{body:"19条时仍允许新建",operator:a}});assert.equal(admitted.operator,a);
     await db(`DELETE FROM threads WHERE id LIKE ${quote(prefix+'%')}`);
