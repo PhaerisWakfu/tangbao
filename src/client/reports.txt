@@ -17,7 +17,7 @@
     const x=button('×',close,'account-help-close'); x.setAttribute('aria-label','关闭');
     head.append(h,x); const content=el('div','report-content'); card.append(head,content); d.append(card); document.body.append(d);
     d.addEventListener('click',event=>{if(event.target===d) close();}); TangbaoModal.bind(d,close); dialogs.add(d);
-    return { node:d, content, close, open:()=>TangbaoModal.open(d) };
+    return { node:d, content, close, open:()=>TangbaoModal.open(d), head };
   }
   function errorNode() { const n=el('p','report-error'); n.setAttribute('role','alert'); n.hidden=true; return n; }
   function showError(node,error) { node.textContent=error?.message || '暂时无法完成，请重试。'; node.hidden=false; }
@@ -53,7 +53,7 @@
     const d=host || dialog('举报记录'), err=errorNode(), gen=generation, view={};d.recordView=view;
     const valid=()=>gen===generation && d.node.isConnected && d.recordView===view;
     d.content.replaceChildren();
-    if(onBack)d.content.append(button('返回记录',()=>{d.recordView=null;onBack();},'report-back'));
+    if(onBack){const back=button('返回记录',()=>{d.recordView=null;onBack();},'report-back');if(d.head)d.head.prepend(back);else d.content.append(back);}
     d.content.append(err);if(!host)d.open();
     try { const {report}=await request('/api/reports/'+id); if(!valid()) return; result(d.content,report); }
     catch(e){ if(valid()) showError(err,e); }
@@ -62,9 +62,10 @@
   function observeRevision(next) { if(revision!==next){revision=next;invalidate();} }
   function schedule() { if(queued) return; queued=true; queueMicrotask(()=>{queued=false;void refresh();}); }
   function paint(entry,state) {
-    entry.state=state; entry.b.hidden=['locked','unavailable'].includes(state.state);
-    entry.b.setAttribute('aria-label',state.state==='pending'?'查看举报进度':'举报');
-    entry.b.dataset.tip=state.state==='pending'?'待审核':'举报';
+    entry.state=state; entry.b.hidden=state.state==='unavailable'; entry.b.disabled=false; entry.b.dataset.state=state.state;
+    const locked=state.state==='locked';
+    entry.b.setAttribute('aria-label',locked?'已举报成功':state.state==='pending'?'查看举报进度':'举报');
+    entry.b.dataset.tip=locked?'已举报成功':state.state==='pending'?'待审核':'举报';
   }
   async function refresh() {
     if(busy || !window.TangbaoAccount?.account?.verified) return;
@@ -84,6 +85,7 @@
     if(!message.canReport || !window.TangbaoAccount?.account?.verified) return;
     const b=button('',()=>{
       const entry=[...entries].find(e=>e.b===b); if(!entry?.state)return;
+      if(entry.state.state==='locked'){const d=dialog('已举报成功');d.content.append(el('p','','你已成功举报过这个账号。同一账号只能成功举报一次，不能再次举报。'));d.open();return;}
       if(entry.state.state==='restricted'){const d=dialog('无法举报');d.content.append(el('p','',`${limits.minimumReportScore} 分以下不能发起举报。`));d.open();return;}
       if(entry.state.state==='pending')void openRecord(entry.state.reportId);else void openSubmit({...message,reportLabel:label});
     },'message-report'); b.innerHTML=icon; b.setAttribute('aria-label','举报'); b.hidden=true;
@@ -102,7 +104,7 @@
     const typeLabel=el('label','report-label','举报类型'),select=el('select');select.required=true;
     const placeholder=el('option','','请选择');placeholder.value='';select.append(placeholder);
     reportTypes.forEach(t=>{const option=el('option','',t.label);option.value=t.code;select.append(option);});select.value='';typeLabel.append(select);
-    const label=el('label','report-label','举报原因（选填）'),input=el('textarea');input.rows=4;label.append(input);
+    const label=el('label','report-label','举报说明（选填）'),input=el('textarea');input.rows=4;label.append(input);
     const err=errorNode();let requestKey=crypto.randomUUID(),attempt=null;
     const submit=button('提交举报',async()=>{
       const next=attempt || {typeCode:select.value,reason:input.value.trim()};

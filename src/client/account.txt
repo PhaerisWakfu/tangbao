@@ -486,7 +486,7 @@
       if (account.verified) {
         addPushAction("account", "开启糖包消息通知", "糖包回复你的对话时提醒；需要允许浏览器通知");
       }
-      if (account.verified) addAction("举报记录", "", () => window.TangbaoReports.openRecords());
+      if (account.verified) addAction("举报记录", "查看自己提交和收到的举报", () => window.TangbaoReports.openRecords());
       addAction("修改密码", "修改后其他设备的登录也会失效", () => switchMode("change"));
       content.append(actions);
 
