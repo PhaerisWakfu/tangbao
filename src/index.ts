@@ -113,7 +113,7 @@ const REPLY_TIMEOUT = 10 * 60_000;
 const RESCUE_AFTER = ONLINE_TTL + 5 * 60_000;
 // Only redistribute first messages with recent activity. Older strands are
 // historical backlog, not someone still waiting for an answer.
-const RESCUE_MAX_AGE = 48 * HOUR;
+const RESCUE_MAX_AGE = 24 * HOUR;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
