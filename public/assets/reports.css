@@ -1,0 +1,126 @@
+.account-profile-status-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.account-profile-status-row .reputation-badge{margin-left:0}
+.reputation-badge{display:inline-flex;vertical-align:middle;align-items:center;margin-left:10px;padding:3px 9px;border:1px solid var(--line-2);border-radius:8px;background:var(--hover);color:var(--accent);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.reputation-badge[data-level="low"]{color:var(--danger,#b85c47)}
+.reputation-badge:disabled{color:var(--muted);cursor:default}
+.reputation-value{font-size:36px;font-weight:600;margin:8px 0 20px;color:var(--accent)}
+.reputation-rules{margin:0;padding-left:20px;line-height:2;color:var(--ink-2)}
+.message-report{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:6px;border:0;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer}
+.message-report svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
+.message-report:hover{color:var(--accent);background:var(--hover)}
+.message-report[hidden],.report-dialog[hidden]{display:none}
+.report-observer{display:inline-block;width:1px;height:1px}
+.report-dialog .account-help-card{overflow:auto;max-height:calc(90dvh - 28px)}
+.report-dialog .account-help-card header h2{flex:1}
+.report-content{min-width:0;overflow-wrap:anywhere}
+.report-evidence{margin:12px 0;padding:12px 16px;border-left:2px solid var(--accent);background:var(--hover);white-space:pre-wrap;max-height:220px;overflow:auto}
+.report-context{color:var(--ink-2);font-size:14px;border-top:1px solid var(--line);border-bottom:0;margin:16px 0 0;padding-top:12px}
+.report-context-label{margin:0 0 4px;color:var(--muted);font-size:12px}
+.report-context p{white-space:pre-wrap}
+.report-label{display:block;margin:18px 0 12px;color:var(--ink-2);font-size:14px}
+.report-label textarea{display:block;box-sizing:border-box;width:100%;margin-top:8px;padding:12px;resize:vertical;min-height:86px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px;line-height:1.6}
+.report-primary,.report-review-actions button,.report-filters button,.report-content>button{padding:9px 18px;border:1px solid var(--line-2);border-radius:9px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer}
+.report-primary,.report-review-actions .report-primary,.report-content>.report-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.report-content button:disabled,.report-review button:disabled{opacity:.55;cursor:wait}
+.report-error{color:var(--danger,#b85c47);font-size:14px;margin:12px 0}
+.report-status{color:var(--accent);font-weight:600}
+.report-reason{white-space:pre-wrap;line-height:1.7}
+.report-date{display:block;color:var(--muted);font-size:12px;margin:8px 0}
+.report-images{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.report-images img{display:block;max-width:160px;max-height:140px;object-fit:contain;border-radius:8px}
+.report-record{display:flex;flex-direction:column;align-items:flex-start;text-align:left;width:100%;gap:6px;padding:16px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;cursor:pointer;overflow-wrap:anywhere}
+.report-record time{font-size:12px;color:var(--muted)}
+.report-record:hover{color:var(--accent)}
+.report-filters,.report-review-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.report-filters select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line-2);border-radius:8px;padding:8px}
+.report-review{width:100%;max-width:760px;margin:0 auto;padding:0 4px 24px;box-sizing:border-box}
+.report-message-acts{display:flex;align-items:center;gap:4px;margin-top:8px;color:var(--muted)}
+.report-message-acts .copy{display:inline-flex;padding:6px;background:transparent;border:0;color:inherit;cursor:pointer}
+.report-message-acts .copy svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.35}
+@media(max-width:600px){.message-report{width:36px;height:36px}.report-dialog .account-help-card{max-height:calc(94dvh - 20px)}.report-images img{max-width:130px}.report-review-actions button{flex:1}.report-record{padding:14px 0}}
+
+.report-type{color:var(--accent)}
+.report-label select{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:11px 12px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.report-label select:focus-visible,.report-label textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 举报审核：先关系、再内容、再证据 */
+.report-review-head{padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.report-kicker{margin:0 0 6px;color:var(--muted);font-size:12px;letter-spacing:.04em}
+.report-review-head h3{margin:0 0 6px;font-size:20px;line-height:1.4;overflow-wrap:anywhere}
+.report-sub{margin:0;color:var(--muted);font-size:12px}
+.report-party-grid{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:center;margin:0 0 22px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--hover)}
+.report-party{display:flex;flex-direction:column;gap:3px;min-width:0}
+.report-party-role{color:var(--muted);font-size:12px}
+.report-party strong{font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.report-party small{color:var(--muted);font-size:12px}
+.report-party-arrow{color:var(--accent);font-size:18px;line-height:1}
+.report-section{margin:20px 0}
+.report-section-title{margin:0 0 10px;color:var(--ink);font-size:14px;font-weight:600;letter-spacing:0}
+.report-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.report-section-head .report-section-title{margin:0}
+.report-section-head .text-btn{flex:none;font-size:13px}
+.report-meta{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0}
+.report-meta .report-date{margin:0}
+.report-outcome{display:block;padding-top:16px;border-top:1px solid var(--line)}
+.report-outcome-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.report-outcome .report-date{margin:0}
+.report-outcome .report-deduction{margin:0}
+.report-outcome-detail{margin:12px 0 0}
+.report-detail{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 16px;margin:16px 0}
+.report-detail dt{color:var(--muted);font-size:13px}
+.report-detail dd{margin:0;overflow-wrap:anywhere}
+.report-detail-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.report-detail-title{font-size:18px;line-height:1.4;overflow-wrap:anywhere}
+.report-relation{color:var(--muted);font-size:12px}
+.report-status{display:inline-flex;align-items:center;width:max-content;padding:3px 9px;border-radius:999px;background:var(--hover);color:var(--accent);font-size:13px;font-weight:500;line-height:1.5}
+.report-status[data-status="rejected"]{color:var(--muted)}
+.report-deduction{color:var(--accent);font-size:13px}
+
+/* 账号设置里的信誉按钮 */
+.reputation-badge{gap:5px;padding:4px 10px 4px 8px;border-radius:999px;background:var(--bg);color:var(--accent);font-size:12px;font-weight:500;line-height:1.5;transition:background .15s,border-color .15s}
+.reputation-badge-icon{display:inline-flex;width:15px;height:15px;flex:0 0 15px}
+.reputation-badge-icon svg{display:block;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.reputation-badge:hover{background:var(--hover);border-color:var(--accent)}
+.reputation-badge:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:600px){.report-party-grid{grid-template-columns:1fr;gap:8px}.report-party-arrow{display:none}.report-detail{grid-template-columns:1fr}.report-detail dt{margin-top:6px}.report-review-head h3{font-size:18px}}
+
+/* 举报记录的一句话说明 */
+.report-summary{margin:12px 0 18px;color:var(--ink-2);font-size:14px;line-height:1.7}
+.report-back{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin:0 6px 0 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer;flex:none}
+.report-back svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.report-back:hover{color:var(--accent);background:var(--hover)}
+.report-list-reason{color:var(--muted);font-size:12px}
+.report-field-label{color:var(--muted);font-size:12px;line-height:1.6}
+.report-field{margin-top:12px}
+.report-field .report-field-label{display:block;margin-bottom:4px}
+.report-field .report-reason{margin:0}
+
+/* 举报筛选：自定义下拉 */
+.report-filter{position:relative;display:inline-flex}
+.report-filter-button{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+.report-filter-button::after{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translateY(-1px);opacity:.7}
+.report-filter-button:hover{border-color:var(--accent);color:var(--accent)}
+.report-filter-menu{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:100%;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 10px 24px rgba(0,0,0,.16)}
+.report-filter-menu[hidden]{display:none}
+.report-filter-option{display:block;width:100%;padding:8px 10px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:14px;text-align:left;white-space:nowrap;cursor:pointer}
+.report-filter-option:hover,.report-filter-option[aria-selected="true"]{background:var(--hover);color:var(--accent)}
+
+/* 信誉说明 */
+.reputation-lead{margin:0 0 18px;color:var(--ink-2);font-size:14px;line-height:1.8}
+.reputation-blocks{display:flex;flex-direction:column}
+.reputation-block{padding:12px 0;border-top:1px solid var(--line)}
+.reputation-block h3{margin:0 0 4px;font-size:14px;font-weight:600}
+.reputation-block p{margin:0;color:var(--ink-2);font-size:14px;line-height:1.7}
+.reputation-note{margin:14px 0 0;color:var(--muted);font-size:12px}
+
+/* 信誉按钮和“邮箱已验证”同尺寸、同字号 */
+.account-profile-status-row .reputation-badge{height:auto;min-height:0;margin-top:3px;padding:2px 7px;gap:5px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--accent);font-size:10.5px;font-weight:400;line-height:1.5;box-sizing:border-box}
+.account-profile-status-row .reputation-badge-icon{width:12px;height:12px;flex-basis:12px}
+.account-profile-status-row .reputation-badge-icon svg{width:12px;height:12px}
+/* 下钻式标题栏：返回、标题、关闭同一行 */
+.report-dialog header{align-items:center}
+.report-dialog header .report-back{width:30px;height:30px;margin:0 4px 0 0;padding:0;border:0;border-radius:50%;background:transparent;color:var(--muted);flex:none}
+.report-dialog header .report-back:hover{color:var(--accent);background:var(--hover)}
+.message-report[data-state="locked"]{color:var(--muted);opacity:.6}
+.message-report[data-state="locked"]:hover{color:var(--accent);opacity:.85}
+
+

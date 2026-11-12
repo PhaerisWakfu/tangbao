@@ -25,6 +25,7 @@ wrangler.accounts-source.jsonc
 *.dump
 *.backup
 .thinkrail/
+/.workbuddy/
 .vscode/
 .idea/
 

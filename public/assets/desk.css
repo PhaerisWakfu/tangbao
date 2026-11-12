@@ -1199,3 +1199,5 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   #audit .talks-list { overflow: visible; height: auto; }
   #audit .talks-col { display: block; }
 }
+
+#pane-thread > .message-nav { flex: none; padding-inline: max(24px, calc((100% - 46rem) / 2)); }

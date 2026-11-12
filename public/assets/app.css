@@ -1283,21 +1283,6 @@ body[data-state="chat"] .stage {
   text-wrap: pretty;
 }
 .fine span { display: block; margin-top: 3px; font-size: 0.95em; }
-.fine .report-link {
-  display: inline-block;
-  margin-top: 7px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--faint);
-  font: inherit;
-  font-size: 11px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.fine .report-link:hover { color: var(--accent); }
-.fine .report-link[hidden] { display: none; }
 .claim-prompt .claim-card { width: min(432px, 100%); padding: 24px 24px 22px; }
 .claim-card header { align-items: flex-start; gap: 16px; }
 .claim-card header > div { flex: 1; min-width: 0; }
@@ -1393,37 +1378,6 @@ body[data-state="chat"] .stage {
 }
 .rename-actions .primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); color: var(--on-accent); }
 
-.report-card { width: min(420px, 100%); }
-.report-lead { margin: 2px 0 12px; font-size: 13.5px; line-height: 1.7; color: var(--ink-2); }
-.report-target {
-  margin: 0 0 14px;
-  padding: 9px 11px;
-  border-radius: 10px;
-  background: var(--bg);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.report-card textarea {
-  width: 100%;
-  min-height: 116px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.65;
-  resize: vertical;
-}
-.report-card textarea:focus {
-  border-color: var(--line-2);
-  outline: 2px solid color-mix(in srgb, var(--accent) 16%, transparent);
-  outline-offset: 0;
-}
-.report-card .primary { margin-top: 14px; }
 .plus { position: relative; }
 .plus-btn {
   display: inline-grid;
@@ -2233,6 +2187,25 @@ body.settled .front :is(.memo, .tray, .line, .enter, .become) {
   }
 }
 
+/* Keep the existing overlay layout when promoted to the native modal top layer. */
+dialog.apply, dialog.viewer, dialog.sketch {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: var(--ink);
+}
+dialog.apply::backdrop, dialog.viewer::backdrop, dialog.sketch::backdrop { background: transparent; }
+
+.message-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; }
+.message-nav[hidden], .message-nav button[hidden] { display: none; }
+.message-nav button { min-height: 40px; margin: 0; }
+.message-nav span { color: var(--muted); font-size: 13px; }
+.stage > .message-nav { width: min(var(--col), calc(100% - 48px)); margin: 0 auto; }
+.message-nav span { min-width: 0; overflow-wrap: anywhere; }
 .sketch {
   position: fixed;
   inset: 0;

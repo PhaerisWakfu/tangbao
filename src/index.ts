@@ -13,9 +13,17 @@ import mdJs from "./client/md.txt";
 import swJs from "./client/sw.txt";
 import manifestJson from "./client/manifest.txt";
 import accountJs from "./client/account.txt";
+import modalJs from "./client/modal.txt";
+import messagesJs from "./client/messages.txt";
+import reportsJs from "./client/reports.txt";
+import { reportRoute } from "./reports";
 import { AuthError, authRoute, getAccount, requireAccount, assertOrigin, disableAccount, processMailOutbox, type AuthEnv } from "./auth";
 import { accountBusinessRoute, getGuest, withGuestCookie, consumeRate, encryptReplay, decryptReplay, imageSignature, legacySeat } from "./account-business";
 import { consumeMailEvents } from "./mail-events";
+import { processImageCleanup, cleanupUncommittedImages, isDefiniteDatabaseRejection } from "./image-cleanup";
+import { assertSchemaReady, SchemaNotReadyError } from "./schema";
+import { readRequestBytes, readRequestForm } from "./request-body";
+import { processRateCleanup } from "./rate-cleanup";
 
 class HttpError extends Error {
   constructor(
@@ -191,66 +199,21 @@ class TursoDatabase {
   }
 }
 
-let reportsSchemaReady = false;
-const SCHEMA_KEY = "schema_v";
-const SCHEMA_VERSION = "2";
-
-async function ensureReportSchema(env: AppEnv): Promise<void> {
-  if (reportsSchemaReady) return;
-  try {
-    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
-      .bind(SCHEMA_KEY)
-      .first<{ value: string }>();
-    if (row?.value === SCHEMA_VERSION) {
-      reportsSchemaReady = true;
-      return;
-    }
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN reported_at INTEGER NOT NULL DEFAULT 0").run();
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN report_reason TEXT").run();
-  } catch {}
-  try {
-    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_threads_reported ON threads (reported_at)").run();
-  } catch {}
-  try {
-    await env.DB.prepare("ALTER TABLE threads ADD COLUMN last_role TEXT NOT NULL DEFAULT ''").run();
-  } catch {}
-  try {
-    await env.DB.prepare(
-      `UPDATE threads
-       SET last_role = COALESCE((
-         SELECT role FROM messages m WHERE m.thread_id = threads.id ORDER BY m.created_at DESC LIMIT 1
-       ), '')
-       WHERE last_role = ''`,
-    ).run();
-  } catch {}
-  try {
-    await env.DB.prepare(
-      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-      .bind(SCHEMA_KEY, SCHEMA_VERSION)
-      .run();
-  } catch {}
-  reportsSchemaReady = true;
-}
-
-let tursoCache: { url: string; token: string; client: Client } | null = null;
+let tursoCache: { url: string; token: string; database: TursoDatabase } | null = null;
 
 function useTurso(env: AppEnv): AppEnv {
   if (!env.TURSO_DATABASE_URL || !env.TURSO_AUTH_TOKEN) return env;
   if (!tursoCache || tursoCache.url !== env.TURSO_DATABASE_URL || tursoCache.token !== env.TURSO_AUTH_TOKEN) {
+    const client = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
     tursoCache = {
       url: env.TURSO_DATABASE_URL,
       token: env.TURSO_AUTH_TOKEN,
-      client: createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN }),
+      database: new TursoDatabase(client),
     };
   }
   return {
     ...env,
-    DB: new TursoDatabase(tursoCache.client) as unknown as D1Database,
+    DB: tursoCache.database as unknown as D1Database,
   };
 }
 
@@ -368,9 +331,9 @@ async function recoverSession(request: Request, env: AppEnv, url: URL): Promise<
       if (!(host === "phaeris.cn" || host.endsWith(".phaeris.cn") || host.endsWith(".workers.dev"))) return new Response("来源不正确。", { status: 403 });
     } catch { return new Response("来源不正确。", { status: 403 }); }
   }
-  if (Number(request.headers.get("content-length") || "0") > 1_500_000) return new Response("记录过大，无法自动迁移。", { status: 413 });
   let form: FormData;
-  try { form = await request.formData(); } catch { return new Response("记录格式不正确。", { status: 400 }); }
+  try { form = await readRequestForm(request, 1_500_000, () => new HttpError(413, "记录过大，无法自动迁移。")); }
+  catch (error) { return new Response(error instanceof HttpError ? error.message : "记录格式不正确。", { status: error instanceof HttpError ? error.status : 400 }); }
   const raw = String(form.get("payload") || "");
   if (!raw || raw.length > 1_500_000) return new Response("没有找到可迁移的记录。", { status: 400 });
   let parsed: Record<string, unknown>;
@@ -418,7 +381,9 @@ export default {
     }
     try {
       const scoped = useTurso(env);
-      await ensureReportSchema(scoped);
+      if (requestUrl.pathname.startsWith("/api/") || ["/chat", "/chat.html"].includes(requestUrl.pathname)) {
+        await assertSchemaReady(scoped.DB);
+      }
       const url = new URL(request.url);
       const pagedModels =
         url.pathname === "/api/models" && (url.searchParams.has("q") || url.searchParams.has("page"));
@@ -444,6 +409,13 @@ export default {
       }
       return await route(request, scoped, ctx);
     } catch (err) {
+      if (err instanceof SchemaNotReadyError) {
+        const api = requestUrl.pathname.startsWith("/api/");
+        return new Response(api ? JSON.stringify({ error: err.message, code: err.code }) : err.message, {
+          status: 503,
+          headers: { "content-type": api ? "application/json; charset=utf-8" : "text/plain; charset=utf-8", "cache-control": "no-store", "retry-after": "1" },
+        });
+      }
       if (err instanceof AuthError) return json({ error: err.message, code: err.code }, err.status);
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
       console.log(
@@ -457,15 +429,21 @@ export default {
   },
   async scheduled(_controller, env, ctx): Promise<void> {
     if (env.MAINTENANCE === "1") return;
-    ctx.waitUntil(refreshHomePresence(useTurso(env)));
-    ctx.waitUntil(processMailOutbox(useTurso(env)));
+    const scoped = useTurso(env);
+    await assertSchemaReady(scoped.DB);
+    ctx.waitUntil(refreshHomePresence(scoped));
+    ctx.waitUntil(processMailOutbox(scoped));
+    ctx.waitUntil(processImageCleanup(scoped));
+    ctx.waitUntil(processRateCleanup(scoped));
   },
   async queue(batch, env): Promise<void> {
     if (env.MAINTENANCE === "1") {
       batch.retryAll({ delaySeconds: 60 });
       return;
     }
-    await consumeMailEvents(batch, useTurso(env));
+    const scoped = useTurso(env);
+    await assertSchemaReady(scoped.DB);
+    await consumeMailEvents(batch, scoped);
   },
 } satisfies ExportedHandler<AppEnv>;
 
@@ -480,6 +458,8 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     if (method === "POST" && /\/api\/auth\/(register|email\/resend|email\/change|password\/forgot)$/.test(path)) ctx.waitUntil(processMailOutbox(env));
     return path === "/api/auth/me" ? withGuestCookie(request, env, authenticated) : authenticated;
   }
+  const reporting = await reportRoute(request, env);
+  if (reporting) return reporting;
   const accountResponse = await accountBusinessRoute(request, env);
   if (accountResponse) return accountResponse;
   const accountDisable = path.match(/^\/api\/admin\/accounts\/([A-Za-z0-9_-]{16,80})\/disable$/);
@@ -556,9 +536,6 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   const unblock = path.match(/^\/api\/admin\/threads\/([A-Za-z0-9_-]{16,80})\/unblock$/);
   if (unblock && method === "POST") return unblockThread(request, env, unblock[1]);
 
-  const report = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})\/report$/);
-  if (report && method === "POST") return reportThread(request, env, report[1]);
-
   const visitor = path.match(/^\/api\/threads\/([A-Za-z0-9_-]{16,80})(\/messages)?$/);
   if (visitor) {
     const id = visitor[1];
@@ -613,11 +590,14 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
 
   // 资源用裸地址：页面 HTML 是 no-store，脚本每次回源校验，不靠 URL 上的版本号刷缓存。
   const script =
-    path === "/assets/account.js" ? accountJs
-      : path === "/assets/app.js" ? appJs
-        : path === "/assets/desk.js" ? deskJs
-          : path === "/assets/md.js" ? mdJs
-            : null;
+    path === "/assets/reports.js" ? reportsJs
+      : path === "/assets/messages.js" ? messagesJs
+      : path === "/assets/modal.js" ? modalJs
+        : path === "/assets/account.js" ? accountJs
+          : path === "/assets/app.js" ? appJs
+            : path === "/assets/desk.js" ? deskJs
+              : path === "/assets/md.js" ? mdJs
+                : null;
   if (script && (method === "GET" || method === "HEAD")) {
     return new Response(method === "HEAD" ? null : script, {
       headers: {
@@ -1041,14 +1021,15 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
   const payload = { id, token, title, operator, requested: assignment.requested, fallback: assignment.fallback, queued: Boolean(queued) };
   const encrypted = await encryptReplay(env, payload);
   const stored: { id: string; key: string; type: string }[] = [];
-  const cleanup = () => Promise.all(stored.map(image => env.IMAGES.delete(image.key)));
+  const cleanup = () => cleanupUncommittedImages(env, id, stored);
   let written = false;
   let batchStarted = false;
+  let batchResolved = false;
   try {
     for (const image of incoming.images) {
       const imageId = randomId(16), key = `img/${imageId}`;
-      await env.IMAGES.put(key, image.bytes);
       stored.push({ id: imageId, key, type: image.type });
+      await env.IMAGES.put(key, image.bytes);
     }
     const condition = account
       ? "EXISTS(SELECT 1 FROM accounts WHERE id=? AND verified_at>0 AND status='active')"
@@ -1060,19 +1041,19 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
       env.DB.prepare(`INSERT INTO threads(id,token_hash,title,preview,created_at,updated_at,awaiting,visitor_hash,ip_hash,operator_id,auto_home,queued,last_role,account_id,guest_identity_id)
         SELECT ?,?,?,?,?,?,1,?,?,?,?,?,'visitor',?,? WHERE changes()=1`)
         .bind(id, await sha256(token), title, preview, now, now, visitor || null, ip, operator, autoHome, queued, account?.id || null, guest?.id || null),
-      env.DB.prepare("INSERT INTO messages(id,thread_id,role,body,draw,created_at) SELECT ?,?,'visitor',?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)")
-        .bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now, id),
+      env.DB.prepare("INSERT INTO messages(id,thread_id,role,body,draw,created_at,author_account_id) SELECT ?,?,'visitor',?,?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)")
+        .bind(messageId, id, incoming.body, incoming.draw ? 1 : 0, now, account?.id || null, id),
       ...stored.map((image, position) => env.DB.prepare(`INSERT INTO message_images(id,message_id,image_key,image_type,position)
         SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM threads WHERE id=?)`).bind(image.id, messageId, image.key, image.type, position, id)),
     ];
     if (guest) statements.push(env.DB.prepare("UPDATE guest_identities SET created_count=created_count+1 WHERE id=? AND EXISTS(SELECT 1 FROM threads WHERE id=?)").bind(guest.id, id));
     batchStarted = true;
     const results = await env.DB.batch(statements);
+    batchResolved = true;
     written = results[1].meta.changes === 1;
     if (!written) {
-      await cleanup();
       const previous = await replay();
-      if (previous) return previous;
+      if (previous) { await cleanup(); return previous; }
       throw new AuthError(401, "AUTH_REQUIRED", "第一段可以继续聊。开启新对话前，请注册并验证邮箱。");
     }
   } catch (error) {
@@ -1081,6 +1062,9 @@ async function createThread(request: Request, env: AppEnv, ctx: ExecutionContext
         // A lost provider response does not prove rollback. Never delete linked KV data.
         written = Boolean(await env.DB.prepare("SELECT id FROM threads WHERE id=?").bind(id).first());
       } catch {
+        throw new AuthError(503, "CREATION_UNKNOWN", "发送结果暂时无法确认，请保留内容，使用同一次发送重试。");
+      }
+      if (!written && stored.length && !batchResolved && !isDefiniteDatabaseRejection(error)) {
         throw new AuthError(503, "CREATION_UNKNOWN", "发送结果暂时无法确认，请保留内容，使用同一次发送重试。");
       }
     }
@@ -1099,9 +1083,8 @@ async function sha256Bytes(bytes: ArrayBuffer): Promise<string> {
 async function readThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   const thread = await loadOwned(env, id, bearer(request), request);
   const seen = await attachIdentity(env, thread, request, thread.operator_id);
-  const before = new URL(request.url).searchParams.get("before") || "";
-  const [{ messages, hasMore }, operator] = await Promise.all([
-    listMessages(env, id, before),
+  const [messages, operator] = await Promise.all([
+    listMessages(env, id, new URL(request.url).searchParams, thread.account_id, "tangbao"),
     operatorPresence(env, thread.operator_id),
   ]);
   const status = statusPayload(publicPresence(operator.status));
@@ -1110,10 +1093,10 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
     operator: thread.operator_id,
     awaiting: thread.awaiting === 1,
     queued: thread.queued === 1,
-    reported: thread.reported_at > 0,
+    reportingRevision: thread.reporting_revision || 0,
+    reported: false,
     blocked: seen.blocked,
-    messages,
-    hasMore,
+    ...messages,
     status,
     operatorStatus: status,
   });
@@ -1121,45 +1104,24 @@ async function readThread(request: Request, env: AppEnv, id: string): Promise<Re
 
 async function deleteThread(request: Request, env: AppEnv, id: string): Promise<Response> {
   await loadOwned(env, id, bearer(request), request);
-  const images = await env.DB.prepare(
-    "SELECT image_key FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
-  )
-    .bind(id)
-    .all<{ image_key: string }>();
+  const now = Date.now();
   await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO image_cleanup_jobs (image_key, thread_id, attempts, next_attempt_at, created_at)
+       SELECT image_key, ?, 0, ?, ? FROM message_images
+       WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)
+         AND NOT EXISTS(SELECT 1 FROM report_images r WHERE r.image_key=message_images.image_key)
+       ON CONFLICT(image_key) DO NOTHING`,
+    ).bind(id, now, now, id),
+    env.DB.prepare(
+      "DELETE FROM message_images WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
+    ).bind(id),
     env.DB.prepare("DELETE FROM messages WHERE thread_id = ?").bind(id),
     env.DB.prepare("DELETE FROM threads WHERE id = ?").bind(id),
   ]);
-  await Promise.all(images.results.map((row) => env.IMAGES.delete(row.image_key)));
-  return json({ ok: true });
-}
-
-function reportReasonOf(value: unknown): string {
-  if (typeof value !== "string") throw new HttpError(400, "写一下举报原因。");
-  const text = sanitize(value);
-  if ([...text].length < 2) throw new HttpError(400, "写一下举报原因。");
-  if ([...text].length > 500) throw new HttpError(400, "举报原因太长了。");
-  return text;
-}
-
-async function reportThread(request: Request, env: AppEnv, id: string): Promise<Response> {
-  const thread = await loadOwned(env, id, bearer(request), request);
-  const seen = await attachIdentity(env, thread, request, thread.operator_id);
-  if (seen.blocked) throw new HttpError(403, BLOCKED);
-  if (thread.queued === 1 || thread.operator_id === POOL_MODEL) {
-    throw new HttpError(400, "这条还没有模型接手。");
-  }
-  if (!(await allow(env, `report:${thread.token_hash}`, 3, HOUR))) {
-    throw new HttpError(429, "举报先歇一会儿。");
-  }
-  const payload = await readJson(request);
-  const reason = reportReasonOf(payload.reason);
-  const result = await env.DB.prepare(
-    "UPDATE threads SET reported_at = ?, report_reason = ? WHERE id = ? AND reported_at = 0",
-  )
-    .bind(Date.now(), reason, id)
-    .run();
-  if (result.meta.changes !== 1) return json({ ok: true, already: true });
+  await processImageCleanup(env, id).catch(() => {
+    console.log(JSON.stringify({ event: "image_cleanup_deferred" }));
+  });
   return json({ ok: true });
 }
 
@@ -1178,9 +1140,9 @@ async function visitorMessage(request: Request, env: AppEnv, id: string, ctx: Ex
       .first<{ active: number; owner_ready: number }>();
     if (!row || row.active !== 1 || !row.owner_ready) throw new HttpError(400, "这个模型不在。");
   }
-  // The global queue cap protects new conversations. Continuing an existing
-  // thread must remain possible even when that cap is full.
-  await writeMessage(env, id, "visitor", incoming, 1);
+  // Admission applies only to new conversations. Continuing an existing thread
+  // remains possible even when the selected model's new-thread queue is full.
+  await writeMessage(env, id, "visitor", incoming, 1, thread.account_id);
   const shown = caption(incoming.body, incoming.images.length);
   const preview = incoming.draw ? `要一张图 · ${shown}` : shown;
   noteVisitor(
@@ -2030,6 +1992,7 @@ async function pool(request: Request, env: AppEnv): Promise<Response> {
 
 async function queue(request: Request, env: AppEnv): Promise<Response> {
   const seat = await requireSeat(request, env);
+  assertOrigin(request, env);
   const own = seat.operatorId;
   const ownership = seatOwnership(seat, "threads.operator_id");
   const now = Date.now();
@@ -2322,8 +2285,9 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       pinned: number;
     }>();
   if (!thread) throw new HttpError(404, "这屉不在笼里。");
-  const before = new URL(request.url).searchParams.get("before") || "";
-  const { messages, hasMore } = await listMessages(env, id, before);
+  const ownSeat = thread.operator_id === seat.operatorId;
+  const messages = await listMessages(env, id, new URL(request.url).searchParams, ownSeat ? seat.accountId : null, "visitor");
+  const reporting = await env.DB.prepare("SELECT report_revision || ':' || (SELECT revision FROM report_policy_active WHERE singleton=1) AS report_revision FROM account_reputations WHERE account_id=?").bind(seat.accountId).first<{report_revision:string}>();
   const blocked = await isBlocked(env, [thread.token_hash, thread.visitor_hash, accountBlockKey(thread.account_id)], thread.operator_id, [thread.ip_hash]);
   return json({
     thread: {
@@ -2335,8 +2299,8 @@ async function adminRead(request: Request, env: AppEnv, id: string): Promise<Res
       blocked,
       pinned: Boolean(thread.pinned),
     },
-    messages,
-    hasMore,
+    reportingRevision: reporting?.report_revision || 0,
+    ...messages,
   });
 }
 
@@ -2395,7 +2359,7 @@ async function adminReply(request: Request, env: AppEnv, id: string, ctx: Execut
     .first<{ operator_id: string; title: string; account_id: string | null }>();
   if (!exists) throw new HttpError(403, "这笼不是你的。");
   const incoming = await readIncoming(request, "写一句可能没用的话，或放一张图。");
-  await writeMessage(env, id, "tangbao", incoming, 0);
+  await writeMessage(env, id, "tangbao", incoming, 0, seat.accountId);
   await touchReply(env, seat, Date.now());
   if (exists.account_id) {
     ctx.waitUntil(notifyAccount(env, exists.account_id, id, exists.title, caption(incoming.body, incoming.images.length)));
@@ -2431,55 +2395,61 @@ async function serveImage(request: Request, env: AppEnv, id: string): Promise<Re
   return new Response(bytes, { headers: { "content-type": row.image_type || "application/octet-stream", "cache-control": "private, no-store" } });
 }
 
-async function listMessages(env: AppEnv, threadId: string, before = ""): Promise<{
-  messages: Array<{ id: string; role: string; body: string; draw: number; createdAt: number; images: { id: string; type: string; url: string }[] }>;
-  hasMore: boolean;
-}> {
-  const pageSize = 50;
-  let rows;
-  if (before) {
-    const cursor = await env.DB.prepare("SELECT id,created_at AS createdAt FROM messages WHERE id=? AND thread_id=?")
-      .bind(before, threadId).first<{ id: string; createdAt: number }>();
-    if (!cursor) throw new HttpError(400, "消息游标已失效，请刷新后重试。");
-    rows = await env.DB.prepare(
-      `SELECT id, role, body, draw, created_at AS createdAt FROM messages
-       WHERE thread_id=? AND (created_at < ? OR (created_at = ? AND id < ?))
-       ORDER BY created_at DESC, id DESC LIMIT ?`,
-    )
-      .bind(threadId, cursor.createdAt, cursor.createdAt, cursor.id, pageSize + 1)
-      .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
-  } else {
-    rows = await env.DB.prepare(
-      `SELECT id, role, body, draw, created_at AS createdAt FROM messages
-       WHERE thread_id=? ORDER BY created_at DESC, id DESC LIMIT ?`,
-    )
-      .bind(threadId, pageSize + 1)
-      .all<{ id: string; role: string; body: string; draw: number; createdAt: number }>();
+async function listMessages(env: AppEnv, threadId: string, query = new URLSearchParams(), viewer: string | null = null, opposingRole = "") {
+  const after = query.get("after"), before = query.get("before");
+  // Existing main pages use timestamp/id cursors. Only the incremental client
+  // opts into write order, so open pages retain their original cursor contract.
+  const writtenOrder = query.get("order") === "written" || Boolean(after);
+  if ((after && before) || query.has("after") && !after || query.has("before") && !before ||
+      [after, before].some(cursor => cursor && !/^[A-Za-z0-9_-]{1,80}$/.test(cursor))) {
+    throw new HttpError(400, "消息位置不正确，请重新打开对话。");
   }
-  const hasMore = rows.results.length > pageSize;
-  const page = rows.results.slice(0, pageSize).reverse();
+  const cursor = after || before;
+  let anchor: { position: number; createdAt: number; id: string } | null = null;
+  if (cursor) {
+    anchor = await env.DB.prepare("SELECT rowid AS position,created_at AS createdAt,id FROM messages WHERE id=? AND thread_id=?")
+      .bind(cursor, threadId).first<{ position: number; createdAt: number; id: string }>();
+    if (!anchor) throw new HttpError(400, "消息位置已失效，请重新打开对话。");
+  }
+  // The thread index contains SQLite's implicit rowid suffix. Unlike timestamps,
+  // a retained message anchor cannot miss a later commit in the same millisecond.
+  const direction = after ? "ASC" : "DESC";
+  const comparison = after ? ">" : "<";
+  const boundary = !anchor ? "" : writtenOrder ? `AND rowid ${comparison} ?`
+    : `AND (created_at ${comparison} ? OR (created_at=? AND id ${comparison} ?))`;
+  const order = writtenOrder ? `rowid ${direction}` : `created_at ${direction},id ${direction}`;
+  const values = !anchor ? [] : writtenOrder ? [anchor.position] : [anchor.createdAt, anchor.createdAt, anchor.id];
+  const rows = await env.DB.prepare(
+    `SELECT id, role, body, draw, created_at AS createdAt, author_account_id AS author FROM messages
+     WHERE thread_id=? ${boundary}
+     ORDER BY ${order} LIMIT 51`,
+  ).bind(threadId, ...values).all<{ id: string; role: string; body: string; draw: number; createdAt: number; author: string | null }>();
+  const more = rows.results.length > 50;
+  const selected = rows.results.slice(0, 50);
+  if (!after) selected.reverse();
   const grouped = new Map<string, { id: string; type: string; url: string }[]>();
-  const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?").bind(threadId).first<{ token_hash: string; account_id: string | null }>();
-  for (let offset = 0; offset < page.length; offset += 80) {
-    const chunk = page.slice(offset, offset + 80);
-    const marks = chunk.map(() => "?").join(", ");
+  if (selected.length) {
     const images = await env.DB.prepare(
-      `SELECT i.id, i.message_id AS messageId, i.image_type AS imageType
-       FROM message_images i WHERE i.message_id IN (${marks}) ORDER BY i.position ASC`,
-    )
-      .bind(...chunk.map((message) => message.id))
-      .all<{ id: string; messageId: string; imageType: string }>();
-    for (const image of images.results) {
-      const list = grouped.get(image.messageId) ?? [];
+      `SELECT id, message_id AS messageId, image_type AS imageType FROM message_images
+       WHERE message_id IN (${selected.map(() => "?").join(",")}) ORDER BY position ASC, id ASC`,
+    ).bind(...selected.map(message => message.id)).all<{ id: string; messageId: string; imageType: string }>();
+    if (images.results.length) {
+      const parent = await env.DB.prepare("SELECT token_hash,account_id FROM threads WHERE id=?")
+        .bind(threadId).first<{ token_hash: string; account_id: string | null }>();
       const expires = Date.now() + 5 * 60_000;
-      const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
-      list.push({ id: image.id, type: image.imageType, url });
-      grouped.set(image.messageId, list);
+      for (const image of images.results) {
+        const list = grouped.get(image.messageId) ?? [];
+        const url = parent && !parent.account_id ? `/api/images/${image.id}?e=${expires}&s=${await imageSignature(env, image.id, parent.token_hash, expires)}` : `/api/images/${image.id}`;
+        list.push({ id: image.id, type: image.imageType, url });
+        grouped.set(image.messageId, list);
+      }
     }
   }
   return {
-    messages: page.map((message) => ({ ...message, images: grouped.get(message.id) ?? [] })),
-    hasMore,
+    messages: selected.map(({author, ...message}) => ({ ...message, canReport: Boolean(viewer && author && author !== viewer && message.role === opposingRole), images: grouped.get(message.id) ?? [] })),
+    hasMore: !after && more,
+    messagePage: { oldest: selected[0]?.id || null, newest: selected.at(-1)?.id || after || null,
+      hasOlder: !after && more, hasNewer: Boolean(after) && more },
   };
 }
 
@@ -2489,39 +2459,60 @@ async function writeMessage(
   role: "visitor" | "tangbao",
   incoming: Incoming,
   awaiting: number,
+  authorAccount: string | null,
 ): Promise<void> {
   const messageId = randomId(16);
   const now = Date.now();
-  const stored = await storeImages(env, incoming.images);
-  const draw = role === "visitor" && incoming.draw ? 1 : 0;
-  const shown = caption(incoming.body, stored.length);
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
-      messageId,
-      threadId,
-      role,
-      incoming.body,
-      draw,
-      now,
-    ),
-    ...imageInserts(env, messageId, stored),
-    env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
-      previewFrom(draw ? `要一张图 · ${shown}` : shown),
-      now,
-      awaiting,
-      role,
-      threadId,
-    ),
-  ]);
+  const stored: { id: string; key: string; type: string }[] = [];
+  let batchStarted = false;
+  try {
+    await storeImages(env, incoming.images, stored);
+    const draw = role === "visitor" && incoming.draw ? 1 : 0;
+    const shown = caption(incoming.body, stored.length);
+    batchStarted = true;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO messages (id, thread_id, role, body, draw, created_at, author_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
+        messageId,
+        threadId,
+        role,
+        incoming.body,
+        draw,
+        now,
+        authorAccount,
+      ),
+      ...imageInserts(env, messageId, stored),
+      env.DB.prepare("UPDATE threads SET preview = ?, updated_at = ?, awaiting = ?, last_role = ? WHERE id = ?").bind(
+        previewFrom(draw ? `要一张图 · ${shown}` : shown),
+        now,
+        awaiting,
+        role,
+        threadId,
+      ),
+    ]);
+  } catch (error) {
+    if (stored.length && batchStarted) {
+      let written: boolean;
+      try {
+        written = Boolean(await env.DB.prepare("SELECT id FROM messages WHERE id = ?").bind(messageId).first());
+      } catch {
+        throw new AuthError(503, "MESSAGE_WRITE_UNKNOWN", "发送结果暂时无法确认，请保留内容，先刷新对话查看，避免重复发送。");
+      }
+      if (written) return;
+      if (!isDefiniteDatabaseRejection(error)) {
+        throw new AuthError(503, "MESSAGE_WRITE_UNKNOWN", "发送结果暂时无法确认，请保留内容，先刷新对话查看，避免重复发送。");
+      }
+    }
+    await cleanupUncommittedImages(env, threadId, stored);
+    throw error;
+  }
 }
 
-async function storeImages(env: AppEnv, images: Incoming["images"]) {
-  const stored: { id: string; key: string; type: string }[] = [];
+async function storeImages(env: AppEnv, images: Incoming["images"], stored: { id: string; key: string; type: string }[]) {
   for (const image of images) {
     const id = randomId(16);
     const key = `img/${id}`;
-    await env.IMAGES.put(key, image.bytes);
     stored.push({ id, key, type: image.type });
+    await env.IMAGES.put(key, image.bytes);
   }
   return stored;
 }
@@ -2580,7 +2571,7 @@ async function presenceHistory(env: AppEnv) {
 
 async function loadOwned(env: AppEnv, id: string, token: string, request: Request) {
   const thread = await env.DB.prepare(
-    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at, account_id FROM threads WHERE id = ?",
+    "SELECT id, token_hash, title, awaiting, visitor_hash, ip_hash, operator_id, queued, reported_at, account_id, (SELECT report_revision || ':' || (SELECT revision FROM report_policy_active WHERE singleton=1) FROM account_reputations WHERE account_id=threads.account_id) AS reporting_revision FROM threads WHERE id = ?",
   )
     .bind(id)
     .first<{
@@ -2594,6 +2585,7 @@ async function loadOwned(env: AppEnv, id: string, token: string, request: Reques
       operator_id: string;
       queued: number;
       reported_at: number;
+      reporting_revision: string;
     }>();
   if (thread?.account_id) {
     const account = await requireAccount(request, env);
@@ -2885,10 +2877,8 @@ function bearer(request: Request): string {
 async function readJson(
   request: Request,
 ): Promise<{ body?: unknown; password?: unknown; awake?: unknown; draw?: unknown; operator?: unknown; suffix?: unknown; email?: unknown; reason?: unknown; blurb?: unknown; openingQuestions?: unknown; endpoint?: unknown; keys?: unknown; pinned?: unknown; title?: unknown; accepting?: unknown; away?: unknown; graceMs?: unknown }> {
-  const declared = Number(request.headers.get("content-length") || "0");
-  if (declared > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
-  const text = await request.text();
-  if (text.length > REQUEST_LIMIT) throw new HttpError(413, "这句太长了。糖包一次看不了这么多。");
+  const text = new TextDecoder().decode(await readRequestBytes(request, REQUEST_LIMIT,
+    () => new HttpError(413, "这句太长了。糖包一次看不了这么多。")));
   if (!text) return {};
   try {
     const parsed: unknown = JSON.parse(text);
@@ -2930,9 +2920,8 @@ function readOperator(value: unknown): string {
 async function readIncoming(request: Request, empty: string): Promise<Incoming> {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
-    const declared = Number(request.headers.get("content-length") || "0");
-    if (declared > MAX_IMAGES * IMAGE_LIMIT + 100_000) throw new HttpError(413, "这些图太大了。先收一收再发。");
-    const form = await request.formData();
+    const form = await readRequestForm(request, MAX_IMAGES * IMAGE_LIMIT + 100_000,
+      () => new HttpError(413, "这些图太大了。先收一收再发。"));
     const raw = form.get("body");
     const text = maskAbuse(typeof raw === "string" ? sanitize(raw) : "");
     if ([...text].length > BODY_LIMIT) throw new HttpError(400, "这句太长了。糖包一次看不了这么多。");

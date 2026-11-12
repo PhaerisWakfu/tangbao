@@ -1,4 +1,5 @@
 import { AuthError, getAccount, requireAccount, type AuthEnv } from "./auth";
+import { readRequestBytes } from "./request-body";
 
 type BusinessEnv = AuthEnv & { ADMIN_SECRET?: string };
 const DAY = 86_400_000;
@@ -82,8 +83,8 @@ export async function legacySeat(request: Request, env: BusinessEnv): Promise<{ 
 }
 
 async function bodyOf(request: Request): Promise<Record<string, unknown>> {
-  const text = await request.text();
-  if (text.length > 12_000) throw new AuthError(413, "BODY_TOO_LARGE", "填写的内容太长了。");
+  const text = new TextDecoder().decode(await readRequestBytes(request, 12_000,
+    () => new AuthError(413, "BODY_TOO_LARGE", "填写的内容太长了。")));
   try {
     const value = JSON.parse(text || "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) throw Error();

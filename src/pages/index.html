@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/assets/katex/katex.min.css">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/account.css">
+  <link rel="stylesheet" href="/assets/reports.css">
 </head>
 <body data-state="empty" data-presence="awake">
   <script>
@@ -89,6 +90,11 @@
           </div>
           <h1>需要我做什么？</h1>
         </div>
+        <nav class="message-nav" id="message-nav" aria-label="对话消息" hidden>
+          <button class="log-more" type="button" id="messages-older" hidden>查看较早消息</button>
+          <button class="log-more" type="button" id="messages-newer" hidden>继续加载新消息</button>
+          <span id="messages-error" role="alert"></span>
+        </nav>
         <div class="log" id="log" aria-live="polite"></div>
       </section>
 
@@ -132,30 +138,12 @@
         </form>
         <div class="chips" id="chips" hidden></div>
       </div>
-      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「<b>能工智人</b>」，回复的是一个<b>叫糖包的人</b>。不是医疗、法律或危机援助。注意文明用语，禁止发送骂人、敏感与色情内容。</span><button class="report-link" type="button" id="report-open" hidden>举报模型</button></p>
+      <p class="fine">糖包也会犯错。重要的事请自己判断。<span>这里的 AI 是「<b>能工智人</b>」，回复的是一个<b>叫糖包的人</b>。不是医疗、法律或危机援助。注意文明用语，禁止发送骂人、敏感与色情内容。</span></p>
     </main>
   </div>
 
-  <div class="apply" id="report" hidden>
-    <div class="apply-card report-card" role="dialog" aria-modal="true" aria-labelledby="report-title">
-      <header>
-        <h2 id="report-title">举报模型</h2>
-        <button type="button" id="report-close" aria-label="关闭">×</button>
-      </header>
-      <p class="report-lead">只用于举报模型的不当回复。请写清楚发生了什么。</p>
-      <p class="report-target" id="report-target"></p>
-      <label class="field">
-        <span>举报原因</span>
-        <textarea id="report-reason" maxlength="500" rows="4" placeholder="发生了什么？"></textarea>
-        <small>最多 500 字。</small>
-      </label>
-      <button class="primary" type="button" id="report-submit">提交举报</button>
-      <p class="err" id="report-err" role="alert"></p>
-    </div>
-  </div>
-
-  <div class="apply claim-prompt" id="claim-prompt" hidden>
-    <div class="apply-card claim-card" role="dialog" aria-modal="true" aria-labelledby="claim-title">
+  <dialog class="apply claim-prompt" id="claim-prompt" aria-labelledby="claim-title" hidden>
+    <div class="apply-card claim-card">
       <header>
         <div>
           <p class="claim-kicker">匿名历史</p>
@@ -170,10 +158,10 @@
         <button class="claim-all" type="button" id="claim-prompt-all">全部关联</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
-  <div class="apply" id="rename-prompt" hidden>
-    <div class="apply-card rename-card" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+  <dialog class="apply" id="rename-prompt" aria-labelledby="rename-title" hidden>
+    <div class="apply-card rename-card">
       <header>
         <h2 id="rename-title">重命名对话</h2>
         <button type="button" id="rename-close" aria-label="关闭">×</button>
@@ -190,10 +178,10 @@
         </div>
       </form>
     </div>
-  </div>
+  </dialog>
 
-  <div class="sketch" id="sketch" hidden>
-    <div class="sketch-card" role="dialog" aria-modal="true" aria-labelledby="sketch-title">
+  <dialog class="sketch" id="sketch" aria-labelledby="sketch-title" hidden>
+    <div class="sketch-card">
       <header>
         <h2 id="sketch-title">画一张</h2>
         <button type="button" id="sketch-close" aria-label="关闭">×</button>
@@ -239,15 +227,18 @@
         <button type="button" class="primary" id="sketch-ok">放进消息</button>
       </footer>
     </div>
-  </div>
+  </dialog>
 
-  <div class="viewer" id="viewer" hidden>
+  <dialog class="viewer" id="viewer" aria-label="查看图片" hidden>
     <button type="button" id="viewer-x" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
-  </div>
+  </dialog>
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/messages.js"></script>
+  <script src="/assets/modal.js"></script>
+  <script src="/assets/reports.js"></script>
   <script src="/assets/account.js"></script>
   <script src="/assets/app.js"></script>
 </body>

@@ -27,6 +27,7 @@ const modelClose = $("#model-close");
 const modelSearch = $("#model-search");
 const historyList = $("#history");
 const titleEl = $("#title");
+const messagePages = new TangbaoMessagePages(api);
 const claimPrompt = $("#claim-prompt");
 const claimPromptCount = $("#claim-prompt-count");
 const renamePrompt = $("#rename-prompt");
@@ -49,13 +50,11 @@ let claiming = false;
 let loggedOut = TangbaoAccount.logoutPending;
 let status = { state: "available", label: "在线", note: "他在", awake: true, online: true, status: "online" };
 let messages = [];
-let messagesThreadId = null;
-let messagesHasMore = false;
-let messagesLoading = false;
 let accountUnread = 0;
 let openAwaiting = true;
 let painted = "";
 let timer = 0;
+let ticking = null;
 let sending = false;
 let sentGuard = { key: "", at: 0 };
 let pendingImages = [];
@@ -75,6 +74,7 @@ let modelSearchHasMore = false;
 let modelSearchHidden = 0;
 let modelSearchSeq = 0;
 let modelSearchTimer = 0;
+let modelMoreRequest = null;
 let making = false;
 let blocked = false;
 const MAX_IMAGES = 6;
@@ -261,6 +261,7 @@ function botRow(message, askedAt) {
     '<button type="button" aria-disabled="true" data-tip="他只写一遍" aria-label="重新生成"><svg class="i"><use href="#i-redo"/></svg></button>' +
     "<time></time>" +
     "</div></div>";
+  TangbaoReports.attachMessage(row.querySelector(".acts"), message, current?.operator === "tangbao-vme50-flash" ? "糖包本人" : current?.operator || "模型");
   const summary = row.querySelector("summary");
   summary.textContent = `已思考（用时 ${spent(took)}）`;
   summary.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-chev"/></svg>');
@@ -318,38 +319,18 @@ function tickPending() {
   row.querySelector("small").textContent = `已用时 ${spent(Date.now() - Number(row.dataset.since))} · ${wait}`;
 }
 
-function mergeMessages(base, incoming) {
-  const byId = new Map();
-  for (const message of base) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
-  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-}
-
 function paint(list) {
-  const keepScroll = arguments[1] === true;
-  const hasMore = typeof messagesHasMore === "boolean" ? messagesHasMore : false;
-  const loadingMore = typeof messagesLoading === "boolean" ? messagesLoading : false;
-  const key = JSON.stringify({ list, openAwaiting, blocked, hasMore, loadingMore });
+  if (!list.length) messagePages.clear();
+  const key = JSON.stringify({ list, openAwaiting, blocked });
   if (key === painted) {
     tickPending();
     return;
   }
-  const previousHeight = stage.scrollHeight;
-  const previousTop = stage.scrollTop;
   painted = key;
   messages = list;
   body.dataset.state = list.length ? "chat" : "empty";
   titleEl.textContent = list.length && current ? current.title || "" : "";
   log.replaceChildren();
-  if (hasMore && list.length) {
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = "log-more";
-    more.disabled = loadingMore;
-    more.textContent = loadingMore ? "正在加载更早消息…" : "上拉加载更早消息";
-    more.addEventListener("click", () => void loadOlderMessages());
-    log.append(more);
-  }
   let askedAt = 0;
   for (const message of list) {
     if (message.role === "visitor") {
@@ -378,34 +359,7 @@ function paint(list) {
     log.append(note);
   }
   tickPending();
-  if (keepScroll) stage.scrollTop = previousTop + (stage.scrollHeight - previousHeight);
-  else stage.scrollTop = stage.scrollHeight;
-}
-
-async function loadOlderMessages() {
-  if (!current || !validId(current.id) || !messagesHasMore || messagesLoading) return;
-  const thread = current;
-  const oldest = messages[0]?.id;
-  if (!oldest) return;
-  messagesLoading = true;
-  painted = "";
-  paint(messages, true);
-  try {
-    const data = await api(`/api/threads/${thread.id}?before=${encodeURIComponent(oldest)}`, { token: thread.token });
-    if (current !== thread) return;
-    messages = mergeMessages(messages, data.messages || []);
-    messagesHasMore = Boolean(data.hasMore);
-    messagesLoading = false;
-    painted = "";
-    paint(messages, true);
-  } catch (error) {
-    if (current === thread) {
-      messagesLoading = false;
-      painted = "";
-      paint(messages, true);
-      showSys(error.message);
-    }
-  }
+  stage.scrollTop = stage.scrollHeight;
 }
 
 function updateUserTitle() {
@@ -475,9 +429,6 @@ function visibleThreads() {
   return [...ownedThreads, ...store.threads];
 }
 
-stage.addEventListener("scroll", () => {
-  if (stage.scrollTop < 60 && messagesHasMore && !messagesLoading && current) void loadOlderMessages();
-});
 
 function renderHistory() {
   historyList.replaceChildren();
@@ -650,14 +601,14 @@ function openRenamePrompt(thread) {
   if (!renamePrompt || !renameInput) return;
   renameTarget = thread;
   renameInput.value = thread.title || "";
-  renamePrompt.hidden = false;
+  TangbaoModal.open(renamePrompt);
   renameInput.focus();
   renameInput.select();
 }
 
 function closeRenamePrompt() {
   if (!renamePrompt) return;
-  renamePrompt.hidden = true;
+  TangbaoModal.close(renamePrompt);
   renameTarget = null;
 }
 
@@ -745,7 +696,7 @@ function claimPromptKey() {
 
 function closeClaimPrompt() {
   if (!claimPrompt) return;
-  claimPrompt.hidden = true;
+  TangbaoModal.close(claimPrompt);
 }
 
 function scheduleClaimPrompt(delay = 700) {
@@ -755,7 +706,7 @@ function scheduleClaimPrompt(delay = 700) {
 
 function showClaimPrompt() {
   if (!claimPrompt || !TangbaoAccount.account?.verified || !store.threads.length) return;
-  if (document.querySelector(".account-dialog")?.open) {
+  if (document.querySelector("dialog[open]")) {
     scheduleClaimPrompt(700);
     return;
   }
@@ -765,7 +716,7 @@ function showClaimPrompt() {
     if (localStorage.getItem(key) === "1") return;
   } catch {}
   claimPromptCount.textContent = String(store.threads.length);
-  claimPrompt.hidden = false;
+  TangbaoModal.open(claimPrompt);
   try { localStorage.setItem(key, "1"); } catch {}
   claimPrompt.querySelector("#claim-prompt-all")?.focus();
 }
@@ -800,7 +751,7 @@ async function syncAccountHistory() {
     historyAccountId = nextId; historySequence++; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false;
     if (current?.owned) {
       viewVersion++; current = null; threadModel = ""; threadQueued = false;
-      painted = ""; paint([]); titleEl.textContent = ""; updateReportEntry();
+      painted = ""; paint([]); titleEl.textContent = "";
       input.value = ""; clearAttach(); body.dataset.state = "empty"; applyBlocked(false);
     }
   }
@@ -814,19 +765,16 @@ window.addEventListener("tb:account-change", () => { syncApplyEntry(); void sync
 window.addEventListener("tb:logout", () => {
   syncApplyEntry();
   setThreadUrl(null);
-
+  messagePages.clear();
   loggedOut = true; historySequence++; viewVersion++;
   clearTimeout(timer); clearTimeout(modelSearchTimer); clearInterval(pendingTimer);
   current = null; ownedThreads = []; ownedPage = 1; ownedHasMore = false; ownedLoading = false; store = { threads: [], activeId: null };
-  messages = []; messagesThreadId = null; messagesHasMore = false; messagesLoading = false;
   accountUnread = 0; updateUserTitle();
   historyAccountId = null; creationAttempt = null; messages = []; painted = "";
   input.value = ""; clearAttach(); making = false; $("#make").hidden = true;
   closeViewer(); closeCard(); closeSide();
-  if (reportModal) reportModal.hidden = true;
-  $("#report-reason").value = "";
   body.dataset.state = "empty"; titleEl.textContent = ""; log.replaceChildren();
-  blocked = false; sending = false; grow(); updateReportEntry(); renderHistory(); showSys("");
+  blocked = false; sending = false; grow(); renderHistory(); showSys("");
 });
 
 async function removeThread(thread) {
@@ -849,28 +797,22 @@ function forget(id) {
   current = null;
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   painted = "";
   openAwaiting = true;
   paint([]);
   renderHistory();
 }
 
-async function refresh() {
+async function refresh(fresh = false) {
   const thread = current;
+  const version = viewVersion;
   if (!thread || !validId(thread.id)) {
     applyModelStatus();
     return;
   }
   try {
-    const data = await api(`/api/threads/${thread.id}`, { token: thread.token });
-    if (current !== thread) return;
-    if (messagesThreadId !== thread.id) {
-      messagesThreadId = thread.id;
-      messages = [];
-      messagesHasMore = false;
-      messagesLoading = false;
-    }
+    const data = await messagePages[fresh ? "fresh" : "load"](`${version}:${thread.id}`, `/api/threads/${thread.id}`, { token: thread.token });
+    if (current !== thread || version !== viewVersion) return;
     const wasQueued = threadQueued;
     threadQueued = Boolean(data.queued);
     if (threadQueued) {
@@ -890,20 +832,21 @@ async function refresh() {
     const previousReported = Boolean(current.reported);
     current.operator = data.operator || "";
     current.queued = Boolean(data.queued);
-    current.reported = Boolean(data.reported);
+    current.reported = false;
+    TangbaoReports.observeRevision(data.reportingRevision);
+    TangbaoReports.refresh();
     if (previousOperator !== current.operator || previousQueued !== current.queued || previousReported !== current.reported || (data.title && data.title !== current.title)) {
       if (data.title) current.title = data.title;
       saveStore();
       renderHistory();
     }
-    updateReportEntry();
-    messages = mergeMessages(messages, data.messages || []);
-    messagesHasMore = Boolean(data.hasMore);
-    messagesLoading = false;
-    paint(messages);
+    const scrollTop = stage.scrollTop;
+    const reading = stage.scrollHeight - stage.clientHeight - scrollTop > 100;
+    paint(data.messages || []);
+    if (reading) stage.scrollTop = scrollTop;
     paintModels();
   } catch (err) {
-    if (current !== thread) return;
+    if (current !== thread || version !== viewVersion) return;
     if (err instanceof ApiError && err.statusCode === 401 && thread.owned) {
       showSys("登录已过期，请重新登录以继续查看账号对话。");
       await TangbaoAccount.refresh().catch(() => null);
@@ -928,14 +871,21 @@ function arm() {
 }
 
 async function tick() {
-  try {
-    await loadModels(false);
-    await refreshUnread();
-    await refresh();
-  } catch {
-    // 下一轮再看。失败不改掉已经写在页面上的话。
-  }
-  arm();
+  if (ticking) return ticking;
+  clearTimeout(timer);
+  ticking = (async () => {
+    try {
+      await loadModels(false);
+      await refreshUnread();
+      await refresh();
+    } catch {
+      // 下一轮再看。失败不改掉已经写在页面上的话。
+    } finally {
+      ticking = null;
+      arm();
+    }
+  })();
+  return ticking;
 }
 
 function closeSide() {
@@ -962,7 +912,7 @@ async function openThread(id) {
   const found = visibleThreads().find((item) => item.id === id);
   if (!found) return;
   const switched = current?.id !== id;
-  viewVersion++;
+  const version = ++viewVersion;
   if (switched) clearDraft();
   current = found;
   setThreadUrl(id);
@@ -974,12 +924,8 @@ async function openThread(id) {
     saveStore();
   }
   messages = [];
-  messagesThreadId = id;
-  messagesHasMore = false;
-  messagesLoading = false;
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   store.activeId = found.owned ? null : id;
   saveStore();
   renderHistory();
@@ -992,7 +938,7 @@ async function openThread(id) {
   try {
     await refresh();
   } catch (err) {
-    showSys(err.message);
+    if (version === viewVersion) showSys(err.message);
   }
 }
 
@@ -1003,13 +949,9 @@ function newChat(pickModel) {
   setThreadUrl(null);
   current = null;
   messages = [];
-  messagesThreadId = null;
-  messagesHasMore = false;
-  messagesLoading = false;
   applyBlocked(false);
   threadModel = "";
   threadQueued = false;
-  updateReportEntry();
   store.activeId = null;
   saveStore();
   painted = "";
@@ -1048,25 +990,40 @@ function extOf(type) {
   return "jpg";
 }
 
-function downloadShots(files) {
+async function downloadShots(files) {
+  const token = current?.token;
   for (const file of files) {
     const link = document.createElement("a");
-    link.href = file.href;
+    try { link.href = await TangbaoMessagePages.imageSource(file.href, token); }
+    catch (error) { showSys(error.message); return; }
     link.download = file.name;
     document.body.append(link);
     link.click();
     link.remove();
+    if (link.href !== file.href) setTimeout(() => URL.revokeObjectURL(link.href), 60000);
   }
 }
 
-function openViewer(src) {
-  $("#viewer-img").src = src;
-  $("#viewer").hidden = false;
+let viewerRequest = 0;
+let viewerBlob = "";
+async function openViewer(src) {
+  const request = ++viewerRequest, version = viewVersion, opener = document.activeElement;
+  try {
+    const resolved = await TangbaoMessagePages.imageSource(src, current?.token);
+    if (request !== viewerRequest || version !== viewVersion) { if (resolved !== src) URL.revokeObjectURL(resolved); return; }
+    if (viewerBlob) URL.revokeObjectURL(viewerBlob);
+    viewerBlob = resolved !== src ? resolved : "";
+    $("#viewer-img").src = resolved;
+    TangbaoModal.open($("#viewer"), opener);
+  } catch (error) { if (version === viewVersion) showSys(error.message); }
 }
 
 function closeViewer() {
-  $("#viewer").hidden = true;
+  viewerRequest++;
+  TangbaoModal.close($("#viewer"));
   $("#viewer-img").removeAttribute("src");
+  if (viewerBlob) URL.revokeObjectURL(viewerBlob);
+  viewerBlob = "";
 }
 
 function appendShot(parent, message) {
@@ -1078,7 +1035,7 @@ function appendShot(parent, message) {
     const img = document.createElement("img");
     img.className = "shot";
     img.alt = "图片，点击放大";
-    img.src = file.href;
+    TangbaoMessagePages.thumbnail(img, file.href, current?.token);
     img.tabIndex = 0;
     img.setAttribute("role", "button");
     const show = () => openViewer(file.href);
@@ -1256,7 +1213,7 @@ async function sendText(text) {
     // merging the server page, otherwise it keeps a second "local" bubble.
     messages = messages.filter((message) => message.id !== "local");
     painted = "";
-    try { await refresh(); } catch (err) { showSys("消息已送达，页面暂时未刷新。" + err.message); }
+    try { await refresh(true); } catch (err) { showSys("消息已送达，页面暂时未刷新。" + err.message); }
   } catch (err) {
     sentGuard.key = "";
     if (version === viewVersion) { painted = ""; paint(prior); showSys(err.message || "消息尚未发送，草稿仍在。"); }
@@ -1343,88 +1300,6 @@ document.addEventListener("keydown", (event) => {
   }
   closeCard();
   closeSide();
-});
-
-const reportOpen = $("#report-open");
-const reportModal = $("#report");
-const reportReason = $("#report-reason");
-const reportTarget = $("#report-target");
-const reportErr = $("#report-err");
-const reportSubmit = $("#report-submit");
-
-function canReport() {
-  return Boolean(
-    current &&
-      current.operator &&
-      current.operator !== "tangbao-pool" &&
-      !current.queued,
-  );
-}
-
-function updateReportEntry() {
-  if (!reportOpen) return;
-  reportOpen.hidden = !canReport();
-  reportOpen.textContent = current?.reported ? "已举报" : "举报模型";
-}
-
-function openReport() {
-  if (!canReport()) {
-    showSys("这条还没有模型接手。");
-    return;
-  }
-  if (current.reported) {
-    showSys("这条已经举报过了。");
-    return;
-  }
-  const label = current.operator === "tangbao-vme50-flash" ? "糖包本人" : current.operator;
-  reportTarget.textContent = `被举报：${label}`;
-  reportReason.value = "";
-  reportErr.textContent = "";
-  reportModal.hidden = false;
-  $("#report-close").focus();
-}
-
-function closeReport() {
-  reportModal.hidden = true;
-  updateReportEntry();
-}
-
-reportOpen?.addEventListener("click", openReport);
-$("#report-close")?.addEventListener("click", closeReport);
-reportModal?.addEventListener("click", (event) => {
-  if (event.target === reportModal) closeReport();
-});
-reportSubmit?.addEventListener("click", async () => {
-  if (!current || !canReport()) return;
-  const reason = reportReason.value.trim();
-  if ([...reason].length < 2) {
-    reportErr.textContent = "写一下举报原因。";
-    return;
-  }
-  reportSubmit.disabled = true;
-  reportErr.textContent = "";
-  try {
-    const data = await api(`/api/threads/${current.id}/report`, {
-      method: "POST",
-      token: current.token,
-      body: { reason },
-    });
-    current.reported = true;
-    saveStore();
-    closeReport();
-    showSys(data.already ? "这条已经举报过了。" : "举报已收到，感谢。");
-  } catch (err) {
-    reportErr.textContent = err.message;
-  } finally {
-    reportSubmit.disabled = false;
-  }
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && reportModal && !reportModal.hidden) {
-    closeReport();
-    return;
-  }
 });
 
 $("#new").addEventListener("click", () => newChat());
@@ -1739,6 +1614,9 @@ async function loadMoreModels() {
   if (!modelSearchMode || !modelSearchHasMore) return;
   const seq = modelSearchSeq;
   const page = modelSearchPage + 1;
+  const request = `${seq}:${page}`;
+  if (modelMoreRequest === request) return;
+  modelMoreRequest = request;
   try {
     const data = await api(
       `/api/models?q=${encodeURIComponent(modelSearchQuery)}&page=${page}`,
@@ -1750,11 +1628,15 @@ async function loadMoreModels() {
     modelSearchHasMore = Boolean(data.hasMore);
     paintModels();
   } catch (err) {
-    showSys(err.message);
+    if (seq === modelSearchSeq) showSys(err.message);
+  } finally {
+    if (modelMoreRequest === request) modelMoreRequest = null;
   }
 }
 
 modelSearch.addEventListener("input", () => {
+  modelSearchSeq++;
+  modelSearchHasMore = false;
   modelSearchMode = Boolean(modelSearch.value.trim());
   clearTimeout(modelSearchTimer);
   modelSearchTimer = setTimeout(() => {
@@ -1789,6 +1671,25 @@ void (async () => {
   void tick();
 })();
 
+TangbaoModal.bind($("#viewer"), closeViewer);
+TangbaoModal.bind(claimPrompt, closeClaimPrompt);
+
+async function loadOlderMessages() {
+  const target = current, version = viewVersion;
+  if (!target || !messagePages.hasOlder || messagePages.pending) return;
+  try {
+    const data = await messagePages.load(`${version}:${target.id}`, `/api/threads/${target.id}`, { token: target.token }, "older");
+    if (target !== current || version !== viewVersion) return;
+    const top = stage.scrollTop, height = stage.scrollHeight;
+    paint(data.messages || []);
+    stage.scrollTop = top + stage.scrollHeight - height;
+  } catch { /* The shared pager exposes a recoverable error beside the button. */ }
+}
+$("#messages-older").addEventListener("click", () => void loadOlderMessages());
+$("#messages-newer").addEventListener("click", () => void refresh().catch(error => showSys(error.message)));
+stage.addEventListener("scroll", () => {
+  if (stage.scrollTop < 60) void loadOlderMessages();
+}, { passive: true });
 const sketch = $("#sketch");
 const sketchViewport = $("#sketch-viewport");
 const pad = $("#sketch-pad");
@@ -2077,14 +1978,14 @@ function openSketch() {
   setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
-  sketch.hidden = false;
+  TangbaoModal.open(sketch, $("#plus"));
   sketchViewport.scrollLeft = 0;
   sketchViewport.scrollTop = 0;
   requestAnimationFrame(preparePad);
 }
 
 function closeSketch() {
-  sketch.hidden = true;
+  TangbaoModal.close(sketch);
 }
 
 pad.addEventListener("pointerdown", (event) => {
@@ -2255,3 +2156,6 @@ document.addEventListener("keydown", (event) => {
     penSize = Math.min(30, penSize + 1);
   }
 });
+
+TangbaoModal.bind(renamePrompt, closeRenamePrompt);
+TangbaoModal.bind(sketch, closeSketch);

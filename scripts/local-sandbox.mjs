@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import ts from "typescript";
 import { runScenarios } from "./local-scenarios.mjs";
-import { demoHtml } from "./local-demo.mjs";
+import { demoHtml, localClientUrl } from "./local-demo.mjs";
 import { importSnapshot } from "./local-snapshot.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -302,7 +302,7 @@ function showInfo(metadata) {
   console.log(`实例：${instance}\n数据及凭据：${directory}\n服务：http://127.0.0.1:${metadata.port}`);
   console.log(`本地验收与验证码：http://127.0.0.1:${metadata.port}/__local/demo?nonce=${metadata.nonce}`);
   for (const role of ["admin", "operator-a", "operator-b", "visitor-a", "visitor-b"]) {
-    console.log(`${role}: http://${role}-${instance}.localhost:${metadata.port}/${role.startsWith("visitor") ? "chat" : "desk"}`);
+    console.log(`${role}: ${localClientUrl(metadata, {name:role}, randomBytes(4).toString("hex"))}`);
   }
 }
 

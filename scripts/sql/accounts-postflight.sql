@@ -1,4 +1,4 @@
--- Read-only. Run only AFTER 0021 and 0022 have both completed.
+-- Read-only. Run only AFTER all migrations in the selected release have completed.
 SELECT name FROM d1_migrations ORDER BY name;
 
 SELECT 'threads' AS entity, COUNT(*) AS records FROM threads;
@@ -22,6 +22,9 @@ WHERE o.owner_account_id IS NOT NULL AND NOT EXISTS (
   SELECT 1 FROM account_roles r WHERE r.account_id=o.owner_account_id AND r.role='operator'
 );
 PRAGMA foreign_key_check;
+
+-- After 0027, count only; never include retained credential values in reports.
+SELECT COUNT(*) AS legacy_credential_copies FROM applications WHERE pass_note IS NOT NULL;
 
 -- Zero administrators is normal just after migration. Before public opening,
 -- at least one verified active administrator must have been bootstrapped.

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/assets/katex/katex.min.css">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/account.css">
+  <link rel="stylesheet" href="/assets/reports.css">
   <link rel="stylesheet" href="/assets/desk.css">
   <link rel="stylesheet" href="/assets/admin.css">
 </head>
@@ -89,6 +90,11 @@
         <button class="shelve" type="button" id="shelve" hidden>稍后处理</button>
         <button class="shelve" type="button" id="block" hidden>拉黑</button>
       </header>
+        <nav class="message-nav" id="message-nav" aria-label="对话消息" hidden>
+          <button class="thread-load-more" type="button" id="messages-older" hidden>查看较早消息</button>
+          <button class="thread-load-more" type="button" id="messages-newer" hidden>继续加载新消息</button>
+          <span id="messages-error" role="alert"></span>
+        </nav>
       <div class="thread" id="thread">
         <p class="quiet">左边是还没回的消息。选一条，在下面写回复。</p>
       </div>
@@ -191,8 +197,8 @@
       </div>
     </section>
   </div>
-  <div class="sketch" id="sketch" hidden>
-    <div class="sketch-card" role="dialog" aria-modal="true" aria-labelledby="sketch-title">
+  <dialog class="sketch" id="sketch" aria-labelledby="sketch-title" hidden>
+    <div class="sketch-card">
       <header>
         <h2 id="sketch-title">画一张</h2>
         <button type="button" id="sketch-close" aria-label="关闭">×</button>
@@ -238,9 +244,9 @@
         <button type="button" class="primary" id="sketch-ok">放进回复</button>
       </footer>
     </div>
-  </div>
-  <div class="apply" id="desk-rename" hidden>
-    <div class="apply-card rename-card" role="dialog" aria-modal="true" aria-labelledby="desk-rename-title">
+  </dialog>
+  <dialog class="apply" id="desk-rename" aria-labelledby="desk-rename-title" hidden>
+    <div class="apply-card rename-card">
       <header>
         <h2 id="desk-rename-title">重命名对话</h2>
         <button type="button" id="desk-rename-close" aria-label="关闭">×</button>
@@ -257,15 +263,18 @@
         </div>
       </form>
     </div>
-  </div>
+  </dialog>
 
-  <div class="viewer" id="viewer" hidden>
+  <dialog class="viewer" id="viewer" aria-label="查看图片" hidden>
     <button type="button" aria-label="关闭">×</button>
     <img id="viewer-img" alt="">
-  </div>
+  </dialog>
   <script src="/assets/katex/katex.min.js"></script>
   <script src="/assets/katex/auto-render.min.js"></script>
   <script src="/assets/md.js"></script>
+  <script src="/assets/messages.js"></script>
+  <script src="/assets/modal.js"></script>
+  <script src="/assets/reports.js"></script>
   <script src="/assets/account.js"></script>
   <script src="/assets/desk.js"></script>
 </body>

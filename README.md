@@ -72,7 +72,7 @@ MAIL_PAYLOAD_KEY=另一个独立的至少32字节随机值
 可选：
 
 - `FEISHU_WEBHOOK`：邮件每日预算用到 90% 时推送到飞书群（未配置时只写日志）
-- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：浏览器推送
+- `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`VAPID_SUBJECT`：向已订阅设备发送新对话和回复的浏览器推送
 - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`：改用 Turso
 - 不填 Turso 变量时使用 D1
 - `ADMIN_PASSWORD` 仅用于识别旧管理员迁移，不是新账号登录密码；管理员资格通过受控引导授予已验证账号
@@ -105,15 +105,18 @@ npm run check
 
 干净检出及 CI 都先运行 `npm run types`，生成不提交到 Git 的 Worker 类型声明，再执行类型检查。
 
-`scripts/smoke.mjs` 会向本地服务写入测试数据，不要指向生产环境。
+`node scripts/smoke.mjs` 是 `local:verify` 的兼容入口，使用全新隔离实例执行当前业务回归，不读取根目录凭据。
 
-旧 smoke、浏览器和截图脚本仍有过时页面/接口断言，修复前不代表当前产品的有效回归；遗留由 [#11](https://github.com/PhaerisWakfu/tangbao/issues/11) 跟踪。迁移脚本已统一使用 `DB` binding；`npm run deploy` 与 `npm run migrate:remote` 已固定指向 `wrangler.production.jsonc`，其他目标（例如 `wrangler.accounts-source.jsonc`）仍须显式追加 `--config`。
+浏览器检查与截图使用 `npm run browser:local -- --instance demo` / `npm run shoot:local -- --instance demo`，先按[本地手册](docs/local-development.md)启动隔离实例。只接受实例名，校验本地服务标记，不接受任意基址或读取根目录凭据。默认 Chrome；`TANGBAO_BROWSER_CHANNEL` 可选择 chrome、msedge、chromium。检查当前首页、/chat、/desk、/about 的宽窄屏入口和共创弹层键盘行为；账号、审批、心跳分配和权限以 `local:verify` 及多身份人工验收为准。截图留在实例的忽略目录，不写入 design。
+
+迁移脚本已统一使用 `DB` binding；`npm run deploy` 与 `npm run migrate:remote` 已固定指向 `wrangler.production.jsonc`，其他目标（例如 `wrangler.accounts-source.jsonc`）仍须显式追加 `--config`。
 
 ## 后续开发入口
 
 - [参与开发](CONTRIBUTING.md)：分支命名（`feat/`、`fix/`、`hotfix/`、`chore/`、`docs/`、`refactor/`）、提交范围与检查入口
 - [前端规范](docs/frontend.md)：样式、交互、响应式、可访问性和验证要求
 - [Issue 工作流程](docs/issue-workflow.md)：需求、开发、Bug、发布和验收
+- [举报与信誉](docs/reports.md)：双向消息举报、审核扣分、本人记录及规则版本
 - [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending
 - [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
 - [在线状态与派单](docs/presence-and-dispatch.md)：五个状态、60 秒缓冲、Auto 派单与回收
@@ -147,3 +150,9 @@ npm run design
 ## 安全
 
 请不要在 Issue 中公开漏洞细节或密钥。报告方式见 [SECURITY.md](SECURITY.md)。
+
+可选 Turso/libSQL 迁移使用 `npm run migrate:turso -- --database .tmp/turso-test.db`，从空库按序应用并维护独立校验台账；再次运行无重复写入，失败事务回滚，已执行 SQL 变化或无台账的非空库会拒绝。已有数据库先核对基线，不自动重放历史 SQL。远程需要另行授权，使用 `--remote`，仅从环境读取 `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`，不在命令或文档中放密钥；本地兼容通过不等于真实 Turso 验收。
+
+对话消息按页读取：首屏最近 50 条，上拉或点击“查看较早消息”逐页展开历史；后续刷新只获取已知位置之后的新消息。单次增量超过 50 条时，可点击“继续加载新消息”，已有历史保留。接口 `before` / `after` 游标只在同一已授权对话内有效，不能同时使用，不提供任意分页大小。
+
+部署前按[本地部署手册](docs/local-development.md#严格迁移与缺失提示)核对所选版本的全部迁移，再开放请求。已打开的旧页面保留原分页兼容，刷新后使用增量读取。在线状态及默认型号目录仍缓存约 300 秒，后台队列和授权对话不使用公共缓存；状态显示可能滞后，不能当作实时送达保证。

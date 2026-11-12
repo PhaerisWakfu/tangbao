@@ -144,7 +144,7 @@ npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file
 npx wrangler d1 migrations list DB --remote --config wrangler.accounts-test.jsonc
 ```
 
-检查 `preflight.json` 的迁移记录，与 `baseline.json` 逐项一致。本次已核实的源版本是连续 `0001_init.sql` 至 `0020_clear_blocked_waiting.sql`；应当只剩 `0021_accounts.sql`、`0022_account_admin_audit.sql` 待执行。旧七类核心记录数留作迁移后对照；历史异常引用、共享旧口令组不删记录掩盖。
+检查 `preflight.json` 的迁移记录，与 `baseline.json` 逐项一致。本次已核实的账号改造前源版本是连续 `0001_init.sql` 至 `0020_clear_blocked_waiting.sql`。待执行清单以所选部署提交的 `migrations/` 为准：账号功能包含 `0021_accounts.sql`、`0022_account_admin_audit.sql`；若部署包含后续图片清理/严格迁移修复的版本，还必须应用 `0023_image_cleanup_jobs.sql`、`0024_app_schema_version.sql`。旧七类核心记录数留作迁移后对照；历史异常引用、共享旧口令组不删记录掩盖。
 
 **记录缺失、不一致、出现未知迁移，或者导入报错就停止。** 不在源库修表，不把 0001–0020 全部重跑，也不盲目手填“已执行”。保存原 SQL、baseline 和错误，反馈维护者。导入中断后的目标库保留现场，重新演练使用新的空 D1，不能在半成功库上反复导入。本地规范化导入已经验证，云端直接导入仍须实际检查；外键建表顺序等报错参考 [D1 导入说明](https://developers.cloudflare.com/d1/best-practices/import-export-data/)。
 
@@ -155,9 +155,11 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.accounts-test.jso
 npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file scripts/sql/accounts-postflight.sql --json > private-assets/accounts-test/postflight.json
 ```
 
-新增 SQL 留痕为 [0021_accounts.sql](../../migrations/0021_accounts.sql)、[0022_account_admin_audit.sql](../../migrations/0022_account_admin_audit.sql)、[0023_thread_pins.sql](../../migrations/0023_thread_pins.sql)、[0024_thread_reads.sql](../../migrations/0024_thread_reads.sql)、[0025_operator_accepting.sql](../../migrations/0025_operator_accepting.sql)、[0026_presence_away.sql](../../migrations/0026_presence_away.sql)、[0027_mail_providers.sql](../../migrations/0027_mail_providers.sql) 和 [0028_account_push.sql](../../migrations/0028_account_push.sql)。不要单独 execute 这些文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
+新增 SQL 留痕为 [0021_accounts.sql](../../migrations/0021_accounts.sql)、[0022_account_admin_audit.sql](../../migrations/0022_account_admin_audit.sql)、[0023_thread_pins.sql](../../migrations/0023_thread_pins.sql)、[0024_thread_reads.sql](../../migrations/0024_thread_reads.sql)、[0025_operator_accepting.sql](../../migrations/0025_operator_accepting.sql)、[0026_presence_away.sql](../../migrations/0026_presence_away.sql)、[0027_mail_providers.sql](../../migrations/0027_mail_providers.sql) 和 [0028_account_push.sql](../../migrations/0028_account_push.sql)。后续合并分支还包含 [0026_security_maintenance.sql](../../migrations/0026_security_maintenance.sql) 和 [0027_clear_legacy_credentials.sql](../../migrations/0027_clear_legacy_credentials.sql)；完整目录以当前 `migrations/` 为准。不要单独 execute 这些文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
 
-迁移后应有全部 28 份版本记录；旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
+`0027` 清理当前数据库中的旧口令明文副本，保留原验证摘要和模型状态。部署后只核对 postflight 的 `legacy_credential_copies=0`，不输出原值；这一步不清理已有备份或平台恢复点。恢复旧备份时须在开放服务前接续全部迁移并再次核对，不恢复旧口令展示能力。
+
+迁移后版本记录必须与所选部署提交的迁移目录逐项一致，不固定按 22 份判断。当前代码要求 `settings` 中 key 为 `app_schema_version` 的值为 `31`（包含 `0031_report_types.sql` 举报类型升级）；缺失时相关入口返回 `503 SCHEMA_NOT_READY`，不会自动补表，处理方式见[严格迁移说明](local-development.md#严格迁移与缺失提示)。旧 `threads/messages/message_images/operators/applications/blocks/push_subscriptions` 行数与副本迁移前一致。无效/重复模型 UID、无账号 owner、无运营者角色 owner 四项均为 0；`foreign_key_check` 无结果。管理员刚迁移后为 0 是正常的，后续引导后至少为 1。
 
 这条导入流程针对尚未启用账号的 0001–0020 源库。将来复制已经升级的 0021/0022 数据库时，须另行处理复制来的账号会话、验证码、认领证明、outbox 和通知任务，不能直接启动真实发信。
 

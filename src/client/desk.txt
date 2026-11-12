@@ -6,6 +6,7 @@ const desk = $("#desk");
 const pile = $("#pile");
 const thread = $("#thread");
 const reply = $("#reply");
+const messagePages = new TangbaoMessagePages(api);
 const answer = $("#answer");
 const presence = $("#presence");
 const presenceLabel = $("#presence-label");
@@ -83,18 +84,17 @@ let auditModelPage = 1;
 let auditModelQuery = "";
 let auditModelTimer = 0;
 let auditState = "";
+let activeReportId = null;
 let applyToken = 0;
 let auditToken = 0;
 let applyStamp = "";
 let auditStamp = "";
 let selected = null;
+let threadViewVersion = 0;
 let shown = "";
-let threadMessages = [];
-let threadHasMore = false;
-let threadLoadingMore = false;
-let threadData = null;
-let threadMessagesId = null;
 let timer = 0;
+let ticking = null;
+let pollingAccountId = null;
 let heartbeatTimer = 0;
 let presenceWarmup = false;
 const HIDDEN_GRACE = 5 * 60 * 1000;
@@ -345,24 +345,15 @@ function foldPile(title, items, kind) {
   pile.append(details);
 }
 
-function mergeThreadMessages(base, incoming) {
-  const byId = new Map();
-  for (const message of base) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
-  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+function messageScroller() {
+  return window.matchMedia("(max-width: 860px)").matches ? document.scrollingElement : thread;
 }
 
-function renderThread(data, keepScroll = false) {
-  threadData = data.thread;
-  if (threadMessagesId !== data.thread.id) {
-    threadMessages = [];
-    threadHasMore = false;
-    threadMessagesId = data.thread.id;
-  }
-  threadMessages = mergeThreadMessages(threadMessages, data.messages || []);
-  threadHasMore = Boolean(data.hasMore);
+function renderThread(data) {
+  TangbaoReports.observeRevision(data.reportingRevision);
+  TangbaoReports.refresh();
   $("#slip-title").textContent = data.thread.title;
-  const last = threadMessages.at(-1);
+  const last = data.messages.at(-1);
   const own = data.thread.operatorId === seat.operatorId;
   const locked = readonly || !own;
   const shelve = $("#shelve");
@@ -392,22 +383,14 @@ function renderThread(data, keepScroll = false) {
   $("#answer").placeholder = last && last.role === "visitor" && last.draw
     ? "他要一张图。画完放进来，或写一句。"
     : "写一句可能没用的话";
-  const key = JSON.stringify({ messages: threadMessages, hasMore: threadHasMore, loading: threadLoadingMore });
+  const key = JSON.stringify(data.messages);
   if (key === shown) return;
-  const previousHeight = thread.scrollHeight;
-  const previousTop = thread.scrollTop;
+  const scroller = messageScroller();
+  const top = scroller.scrollTop;
+  const reading = Boolean(shown) && scroller.scrollHeight - scroller.clientHeight - top > 100;
   shown = key;
   thread.replaceChildren();
-  if (threadHasMore) {
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = "thread-load-more";
-    more.disabled = threadLoadingMore;
-    more.textContent = threadLoadingMore ? "正在加载更早消息…" : "上拉加载更早消息";
-    more.addEventListener("click", () => void loadOlderThread());
-    thread.append(more);
-  }
-  for (const message of threadMessages) {
+  for (const message of data.messages) {
     const wrap = document.createElement("div");
     wrap.className = message.role === "tangbao" ? "me" : "them";
     if (message.body) {
@@ -435,6 +418,9 @@ function renderThread(data, keepScroll = false) {
         img.tabIndex = 0;
         img.setAttribute("role", "button");
         img.addEventListener("click", () => openViewer(src));
+        img.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openViewer(src); }
+        });
         shots.append(img);
       }
       wrap.append(shots);
@@ -442,42 +428,17 @@ function renderThread(data, keepScroll = false) {
     const meta = document.createElement("small");
     const who = message.role === "tangbao" ? (locked ? "糖包" : "你") : "对方";
     meta.textContent = message.draw ? `${who} · 要一张图 · ${clock(message.createdAt)}` : `${who} · ${clock(message.createdAt)}`;
+    if (message.canReport) {
+      const acts = document.createElement("div"); acts.className = "report-message-acts";
+      const copy = document.createElement("button"); copy.type="button";copy.className="copy";copy.setAttribute("aria-label","复制");
+      copy.innerHTML='<svg viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="2.2"/><path d="M13 7V5.7A1.7 1.7 0 0 0 11.3 4H5.7A1.7 1.7 0 0 0 4 5.7v5.6A1.7 1.7 0 0 0 5.7 13H7"/></svg>';
+      copy.addEventListener("click",()=>void navigator.clipboard.writeText(message.body || "").catch(()=>{replyErr.textContent="复制失败，请重试。";}));
+      acts.append(copy); TangbaoReports.attachMessage(acts,message);wrap.append(acts);
+    }
     wrap.append(meta);
     thread.append(wrap);
   }
-  if (keepScroll) thread.scrollTop = previousTop + (thread.scrollHeight - previousHeight);
-  else thread.scrollTop = thread.scrollHeight;
-}
-
-thread.addEventListener("scroll", () => {
-  if (thread.scrollTop < 40 && threadHasMore && !threadLoadingMore && selected) void loadOlderThread();
-});
-
-async function loadOlderThread() {
-  if (!selected || !threadHasMore || threadLoadingMore || !threadData) return;
-  const id = selected;
-  const oldest = threadMessages[0]?.id;
-  if (!oldest) return;
-  threadLoadingMore = true;
-  shown = "";
-  renderThread({ thread: threadData, messages: threadMessages, hasMore: threadHasMore }, true);
-  try {
-    const data = await api(`/api/admin/threads/${id}?before=${encodeURIComponent(oldest)}`);
-    if (selected !== id) return;
-    threadLoadingMore = false;
-    threadData = data.thread;
-    threadMessages = mergeThreadMessages(threadMessages, data.messages || []);
-    threadHasMore = Boolean(data.hasMore);
-    shown = "";
-    renderThread({ thread: data.thread, messages: threadMessages, hasMore: threadHasMore }, true);
-  } catch (error) {
-    if (selected === id) {
-      threadLoadingMore = false;
-      shown = "";
-      renderThread({ thread: threadData, messages: threadMessages, hasMore: threadHasMore }, true);
-      replyErr.textContent = error.message || "更早的消息没有加载出来。";
-    }
-  }
+  scroller.scrollTop = reading ? top : scroller.scrollHeight;
 }
 
 async function loadQueue() {
@@ -568,6 +529,7 @@ async function saveProfile(event) {
 }
 
 function showPane(name, nav) {
+  if (name !== "thread") { threadViewVersion++; activeReportId=null; TangbaoReports.cancelReview(thread); }
   $("#pane-thread").hidden = name !== "thread";
   $("#pane-apply").hidden = name !== "apply";
   $("#pane-audit").hidden = name !== "audit";
@@ -596,29 +558,33 @@ async function closeDeskThreadNotification(id) {
 }
 
 async function openSlip(id, fromAudit) {
+  TangbaoReports.cancelReview(thread);
+  activeReportId = null;
+  const version = ++threadViewVersion;
   readonly = Boolean(fromAudit);
   setDeskThreadUrl(id);
   void closeDeskThreadNotification(id);
   showPane("thread", readonly ? "audit" : "thread");
   if (id !== selected) {
     shown = "";
-    threadMessages = [];
-    threadHasMore = false;
-    threadLoadingMore = false;
-    threadData = null;
-    threadMessagesId = null;
+    reply.hidden = true;
+    $("#block").hidden = true;
+    $("#shelve").hidden = true;
+    thread.replaceChildren();
+    $("#slip-title").textContent = "正在读取…";
   }
   selected = id;
   replyErr.textContent = "";
   try {
-    const data = await api(`/api/admin/threads/${id}`);
-    if (selected !== id) return;
+    const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
+    if (selected !== id || version !== threadViewVersion) return;
     renderThread(data);
     if (!readonly && data.thread.operatorId === seat.operatorId) {
       await api(`/api/admin/threads/${id}/read`, { method: "POST" }).catch(() => {});
     }
     await loadQueue();
   } catch (err) {
+    if (version !== threadViewVersion) return;
     replyErr.textContent = err.message;
     $("#slip-title").textContent = "打不开这条对话";
     $("#slip-meta").textContent = err.message;
@@ -629,6 +595,7 @@ async function openSlip(id, fromAudit) {
     note.textContent = "这条对话暂时打不开。可以点左上角刷新后再试。";
     thread.append(note);
   }
+  if (version !== threadViewVersion) return;
   if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({ behavior: "smooth" });
   if (!reply.hidden) answer.focus();
 }
@@ -679,21 +646,37 @@ async function tick() {
   if (document.hidden) return;
   const account = TangbaoAccount.account;
   if (!account?.verified || (!account.operatorId && !account.roles?.includes("admin"))) return;
-  try {
-    await loadQueue();
-    if (selected && !$("#pane-thread").hidden) renderThread(await api(`/api/admin/threads/${selected}`));
-    if (!$("#pane-apply").hidden) await loadApplications();
-    if (!$("#pane-audit").hidden) await loadAudit();
-  } catch (err) {
-    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
-      resetDeskView();
-      loginErr.textContent = err.message;
-      $("#gate-note").textContent = "当前账号暂时无法进入笼屉，请根据提示处理。";
-      await TangbaoAccount.refresh().catch(() => null);
-      return;
+  if (ticking && pollingAccountId === account.id) return ticking;
+  clearTimeout(timer);
+  const request = (async () => {
+    try {
+      await loadQueue();
+      const id = selected;
+      const version = threadViewVersion;
+      if (id && !activeReportId && !$("#pane-thread").hidden) {
+        const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`);
+        if (selected === id && version === threadViewVersion && !$("#pane-thread").hidden) renderThread(data);
+      }
+      if (!$("#pane-apply").hidden) await loadApplications();
+      if (!$("#pane-audit").hidden) await loadAudit();
+    } catch (err) {
+      if (account.id !== TangbaoAccount.account?.id) return;
+      if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) {
+        resetDeskView();
+        loginErr.textContent = err.message;
+        $("#gate-note").textContent = "当前账号暂时无法进入笼屉，请根据提示处理。";
+        await TangbaoAccount.refresh().catch(() => null);
+      }
+    } finally {
+      if (ticking === request) {
+        ticking = null;
+        arm();
+      }
     }
-  }
-  arm();
+  })();
+  ticking = request;
+  pollingAccountId = account.id;
+  return request;
 }
 
 $("#profile-back").addEventListener("click", () => {
@@ -704,14 +687,14 @@ $("#profile-back").addEventListener("click", () => {
 profileForm.addEventListener("submit", saveProfile);
 
 function closeDeskRename() {
-  deskRename.hidden = true;
+  TangbaoModal.close(deskRename);
   renameTarget = null;
 }
 
 function openDeskRename(id, title) {
   renameTarget = id;
   deskRenameInput.value = title || "";
-  deskRename.hidden = false;
+  TangbaoModal.open(deskRename);
   deskRenameInput.focus();
   deskRenameInput.select();
 }
@@ -811,11 +794,12 @@ let replying = false;
 let replyGuard = { key: "", at: 0 };
 
 function resetDeskView() {
+  messagePages.clear();
   clearTimeout(timer); applyToken++; auditToken++;
+  threadViewVersion++;
   presenceWarmup = false;
   stopPresenceHeartbeat(true);
   selected = null; shown = ""; readonly = false;
-  threadMessages = []; threadHasMore = false; threadLoadingMore = false; threadData = null; threadMessagesId = null;
   seat = { super: false, operatorId: "" };
   thread.replaceChildren(); pile.replaceChildren();
   $("#applications").replaceChildren(); $("#audit").replaceChildren(); $("#pool-list").replaceChildren();
@@ -824,7 +808,7 @@ function resetDeskView() {
   for (const image of pendingImages) URL.revokeObjectURL(image.url);
   pendingImages = []; showAttach();
   $("#profile-suffix").value = ""; $("#profile-blurb").value = ""; paintOpeningRows([]);
-  $("#viewer").hidden = true; $("#viewer-img").removeAttribute("src");
+  closeViewer(); closeSketch();
   closeSlipMenus(); closeDeskRename();
   showPane("thread"); showDesk(false);
 }
@@ -1372,6 +1356,17 @@ auditSearch.addEventListener("input", () => {
   }, 300);
 });
 
+async function openReportReview(id) {
+  activeReportId=id; selected=null; const version=++threadViewVersion; readonly=true; shown="";
+  showPane("thread","audit"); reply.hidden=true;
+  $("#slip-title").textContent="举报审核";$("#slip-meta").textContent="";
+  $("#block").hidden=true;$("#shelve").hidden=true;$("#back-audit").hidden=false;
+  $("#message-nav").hidden=true;
+  await TangbaoReports.adminReview(thread,id,()=>{auditStamp="";},threadId=>openSlip(threadId,true));
+  if (activeReportId!==id || version!==threadViewVersion) return;
+  if (window.matchMedia("(max-width: 860px)").matches) $("#reader").scrollIntoView({block:"start"});
+}
+
 async function loadAudit() {
   const token = ++auditToken;
   const params = new URLSearchParams({ page: String(auditPage), mpage: String(auditModelPage) });
@@ -1390,6 +1385,7 @@ async function loadAudit() {
   const operatorPages = Number(data.operatorPages) || 1;
   const lead = $("#audit-lead");
   if (lead) {
+    lead.hidden = auditState === "reported";
     lead.textContent = "";
     if (!total) {
       lead.textContent = auditModel ? "这个型号还没有对话" : "还没有对话";
@@ -1403,7 +1399,11 @@ async function loadAudit() {
     }
   }
   const mark = JSON.stringify(data);
-  if (mark === auditStamp) return;
+  if (mark === auditStamp) {
+    const cases = $("#new-report-cases");
+    if (auditState === "reported" && cases) await TangbaoReports.adminList(cases, openReportReview, auditModel);
+    return;
+  }
   auditStamp = mark;
   const box = $("#audit");
 
@@ -1482,6 +1482,7 @@ async function loadAudit() {
   const note = document.createElement("span");
   note.className = "talks-note";
   const stateLabel = { waiting: "在等", replied: "已回", reported: "举报" }[auditState];
+  note.hidden = auditState === "reported";
   note.textContent = stateLabel || (auditModel ? "只看这个型号" : "最近更新");
   const filter = document.createElement("div");
   filter.className = "audit-filter";
@@ -1498,11 +1499,17 @@ async function loadAudit() {
   const list = document.createElement("div");
   list.className = "talks-list";
   const threads = data.threads || [];
-  if (!threads.length) {
+  if (!threads.length && auditState !== "reported") {
     const empty = document.createElement("p");
     empty.className = "quiet";
     empty.textContent = auditModel ? "这个型号还没有对话。" : "还没有对话。";
     list.append(empty);
+  }
+  if (auditState === "reported") {
+    const cases = document.createElement("div");cases.id="new-report-cases";
+    void TangbaoReports.adminList(cases, openReportReview, auditModel);
+    list.prepend(cases);
+    if (threads.length) { const label=document.createElement("h3");label.textContent="历史举报";list.append(label); }
   }
   for (const item of threads) list.append(auditLine(item));
   talksCol.append(talksHead, list);
@@ -1514,7 +1521,14 @@ $("#desk-nav").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   readonly = false;
+  const leavingReport = Boolean(activeReportId);
+  TangbaoReports.cancelReview(thread);
+  activeReportId = null;
   const next = button.dataset.view;
+  if (leavingReport && next === "thread") {
+    thread.replaceChildren(); reply.hidden=true; shown="";
+    $("#slip-title").textContent="还没选消息";$("#slip-meta").textContent="";$("#back-audit").hidden=true;
+  }
   showPane(next);
   const reveal = () => {
     if (!window.matchMedia("(max-width: 860px)").matches) return;
@@ -1530,6 +1544,7 @@ $("#desk-nav").addEventListener("click", (event) => {
 });
 
 $("#back-audit").addEventListener("click", () => {
+  activeReportId = null;
   readonly = false;
   showPane("audit");
   void loadAudit();
@@ -1553,13 +1568,17 @@ answer.addEventListener("keydown", (event) => {
 reply.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selected || replying) return;
+  const id = selected;
+  const version = threadViewVersion;
+  const accountId = deskAccountId;
+  const draft = answer.value;
   const text = answer.value.trim();
   const images = pendingImages.slice();
   if (!text && !images.length) {
     replyErr.textContent = "写一句可能没用的话，或放图片。";
     return;
   }
-  const key = `${text}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
+  const key = `${id}\n${text}\n${images.map((item) => `${item.file.size}:${item.file.lastModified}`).join(",")}`;
   const now = Date.now();
   if (replyGuard.key === key && now - replyGuard.at < 1500) return;
   replying = true;
@@ -1573,15 +1592,22 @@ reply.addEventListener("submit", async (event) => {
     for (const item of images) payload.append("images", item.file, item.file.name);
   }
   try {
-    await api(`/api/admin/threads/${selected}`, { method: "POST", body: payload });
-    answer.value = "";
-    clearAttach();
-    shown = "";
-    renderThread(await api(`/api/admin/threads/${selected}`));
+    await api(`/api/admin/threads/${id}`, { method: "POST", body: payload });
+    if (accountId !== deskAccountId) return;
+    if (selected === id && version === threadViewVersion) {
+      if (answer.value === draft) answer.value = "";
+      const sentImages = new Set(images);
+      for (const image of pendingImages) if (sentImages.has(image)) URL.revokeObjectURL(image.url);
+      pendingImages = pendingImages.filter(image => !sentImages.has(image));
+      showAttach();
+      shown = "";
+      const data = await messagePages.fresh(`${version}:${id}`, `/api/admin/threads/${id}`);
+      if (selected === id && version === threadViewVersion) renderThread(data);
+    }
     await loadQueue();
   } catch (err) {
     replyGuard.key = "";
-    replyErr.textContent = err.message;
+    if (accountId === deskAccountId && selected === id && version === threadViewVersion) replyErr.textContent = err.message;
   } finally {
     replying = false;
     button.disabled = false;
@@ -1985,14 +2011,14 @@ function openSketch() {
   setPenMode();
   $("#sketch-color").value = penColor;
   $("#sketch-err").textContent = "";
-  sketch.hidden = false;
+  TangbaoModal.open(sketch, $("#plus"));
   sketchViewport.scrollLeft = 0;
   sketchViewport.scrollTop = 0;
   requestAnimationFrame(preparePad);
 }
 
 function closeSketch() {
-  sketch.hidden = true;
+  TangbaoModal.close(sketch);
 }
 
 pad.addEventListener("pointerdown", (event) => {
@@ -2165,10 +2191,10 @@ document.addEventListener("keydown", (event) => {
 
 function openViewer(src) {
   $("#viewer-img").src = src;
-  $("#viewer").hidden = false;
+  TangbaoModal.open($("#viewer"));
 }
 function closeViewer() {
-  $("#viewer").hidden = true;
+  TangbaoModal.close($("#viewer"));
   $("#viewer-img").removeAttribute("src");
 }
 $("#viewer").addEventListener("click", (event) => {
@@ -2207,3 +2233,26 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => stopPresenceHeartbeat(true, true));
 
 void TangbaoAccount.ready.then(syncDeskAccount);
+
+TangbaoModal.bind($("#viewer"), closeViewer);
+TangbaoModal.bind(sketch, closeSketch);
+
+async function loadOlderMessages() {
+  const id = selected, version = threadViewVersion;
+  if (!id || !messagePages.hasOlder || messagePages.pending) return;
+  try {
+    const data = await messagePages.load(`${version}:${id}`, `/api/admin/threads/${id}`, {}, "older");
+    if (id !== selected || version !== threadViewVersion) return;
+    const scroller = messageScroller();
+    const top = scroller.scrollTop, height = scroller.scrollHeight;
+    renderThread(data);
+    scroller.scrollTop = top + scroller.scrollHeight - height;
+  } catch { /* The shared pager exposes a recoverable error beside the button. */ }
+}
+$("#messages-older").addEventListener("click", () => void loadOlderMessages());
+$("#messages-newer").addEventListener("click", () => void tick());
+thread.addEventListener("scroll", () => {
+  if (messageScroller() === thread && thread.scrollTop < 40) void loadOlderMessages();
+}, { passive: true });
+
+TangbaoModal.bind(deskRename, closeDeskRename);
