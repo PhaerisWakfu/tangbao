@@ -1,5 +1,7 @@
 # Epic #5 部署、数据迁移与验收手册
 
+> **归档说明（2026-11-12）**：本文是账号功能上线时的一次性部署、迁移与验收手册，对应 Epic #5 已关闭。文中“尚未验收”等表述保留当时状态，不再随当前版本更新；当前规则见 [账号设计](../accounts.md)，本地流程见 [本地部署手册](../local-development.md)。
+
 读者：没有参与本次开发、但拥有 Cloudflare 部署权限的维护者。所有命令由部署者在项目根目录执行。对应 [Epic #5](https://github.com/PhaerisWakfu/tangbao/issues/5)、[邮件 #8](https://github.com/PhaerisWakfu/tangbao/issues/8)、[旧模型认领 #9](https://github.com/PhaerisWakfu/tangbao/issues/9) 和 [迁移交付 #17](https://github.com/PhaerisWakfu/tangbao/issues/17)。
 
 本版代码已完成本地账号与真实 D1 副本演练，用户已确认本地流程。**真实 Cloudflare 发信、真实历史图片及云端切换尚未验收，须按本文实际执行后记录结果。** 本文不包含任何现成测试账号、生产密码或验证码。
@@ -153,7 +155,7 @@ npx wrangler d1 migrations apply DB --remote --config wrangler.accounts-test.jso
 npx wrangler d1 execute DB --remote --config wrangler.accounts-test.jsonc --file scripts/sql/accounts-postflight.sql --json > private-assets/accounts-test/postflight.json
 ```
 
-账号 SQL 为 [0021_accounts.sql](../migrations/0021_accounts.sql) 和 [0022_account_admin_audit.sql](../migrations/0022_account_admin_audit.sql)，后续迁移包含图片清理、会话置顶、已读记录、接单开关、暂离、邮件通道、账号推送、开场问题、结构检查、消息分页、[0026_security_maintenance.sql](../migrations/0026_security_maintenance.sql) 及 [0027_clear_legacy_credentials.sql](../migrations/0027_clear_legacy_credentials.sql)。按完整目录应用，不要单独 execute 文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
+新增 SQL 留痕为 [0021_accounts.sql](../../migrations/0021_accounts.sql)、[0022_account_admin_audit.sql](../../migrations/0022_account_admin_audit.sql)、[0023_thread_pins.sql](../../migrations/0023_thread_pins.sql)、[0024_thread_reads.sql](../../migrations/0024_thread_reads.sql)、[0025_operator_accepting.sql](../../migrations/0025_operator_accepting.sql)、[0026_presence_away.sql](../../migrations/0026_presence_away.sql)、[0027_mail_providers.sql](../../migrations/0027_mail_providers.sql) 和 [0028_account_push.sql](../../migrations/0028_account_push.sql)。后续合并分支还包含 [0026_security_maintenance.sql](../../migrations/0026_security_maintenance.sql) 和 [0027_clear_legacy_credentials.sql](../../migrations/0027_clear_legacy_credentials.sql)；完整目录以当前 `migrations/` 为准。不要单独 execute 这些文件而遗漏 `d1_migrations` 记录。[D1 migrations 说明](https://developers.cloudflare.com/d1/reference/migrations/)。
 
 `0027` 清理当前数据库中的旧口令明文副本，保留原验证摘要和模型状态。部署后只核对 postflight 的 `legacy_credential_copies=0`，不输出原值；这一步不清理已有备份或平台恢复点。恢复旧备份时须在开放服务前接续全部迁移并再次核对，不恢复旧口令展示能力。
 
@@ -215,7 +217,7 @@ node scripts/bootstrap-admin.mjs --account-id 替换为已验证账号ID --confi
 
 完整错误边界在测试站另验并回传：验证码 10 分钟过期、连续错误最多 5 次、注册/找回用途隔离、重复提交与模型认领竞争、拉黑/停用和权限隔离。不要为了测额度连发 190 封或伪造供应商失败。未实际触发的 429/超时和真实回执记录为“未验证”，已有本地替身覆盖不能当作真实供应商结论。服务端新对话还有按 IP 的创建限流，连续造数触发时等待窗口，不改生产限额绕过。
 
-邮件预算按 UTC 日期计数，应用侧总预算 360、不设应用侧月度限制；Cloudflare 按每天 90 封控制（3,000 封/月，按 31 天留缓冲）、Brevo 280，分别计数。180 封写告警日志；单家返回日额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时重试/提示额度已满。同账号其他 Worker 的发送还受两家供应商账号额度约束。明确可重试的限流才有界重试，超时 unknown 不盲目重发。一分钟 Cron 不要删。首轮不需要配置邮件事件 Queue；若以后开通，再单独配置订阅、`queues.consumers`、`MAIL_EVENTS_QUEUE`/`MAIL_EVENTS_ACCOUNT_ID` 并验证 delivered/bounce 及去重，详见 [邮件事件约定](accounts.md#cloudflare-email-sending)。未接入时如实标注回执未验收。
+邮件预算按 UTC 日期计数，应用侧总预算 360、不设应用侧月度限制；Cloudflare 按每天 90 封控制（3,000 封/月，按 31 天留缓冲）、Brevo 280，分别计数。180 封写告警日志；单家返回日额度错误时打开该家 5 分钟熔断并切换另一家，两家都不可用时重试/提示额度已满。同账号其他 Worker 的发送还受两家供应商账号额度约束。明确可重试的限流才有界重试，超时 unknown 不盲目重发。一分钟 Cron 不要删。首轮不需要配置邮件事件 Queue；若以后开通，再单独配置订阅、`queues.consumers`、`MAIL_EVENTS_QUEUE`/`MAIL_EVENTS_ACCOUNT_ID` 并验证 delivered/bounce 及去重，详见 [邮件事件约定](../accounts.md#cloudflare-email-sending)。未接入时如实标注回执未验收。
 
 ## 图片数据必须随正式迁移保留
 
@@ -384,4 +386,4 @@ npx wrangler deploy --config wrangler.production.jsonc
 | 图片 | 原 key/引用/实际文件校验结果，新旧画作、多图、下载和越权检查；未补 KV 就写未验收 |
 | 回退与遗留 | 原版本和 DB/KV 恢复点是否可用、失败及未执行项、邮件 Queue 是否接入；有问题保持受限 |
 
-对应文件：迁移前检查 [accounts-preflight.sql](../scripts/sql/accounts-preflight.sql)、迁移后检查 [accounts-postflight.sql](../scripts/sql/accounts-postflight.sql)、图片清单 [accounts-image-inventory.sql](../scripts/sql/accounts-image-inventory.sql)、管理员工具 [bootstrap-admin.mjs](../scripts/bootstrap-admin.mjs)、无密钥配置模板 [wrangler.accounts.example.jsonc](../wrangler.accounts.example.jsonc)。本地模拟和副本操作另见 [本地部署手册](local-development.md)。
+对应文件：迁移前检查 [accounts-preflight.sql](../../scripts/sql/accounts-preflight.sql)、迁移后检查 [accounts-postflight.sql](../../scripts/sql/accounts-postflight.sql)、图片清单 [accounts-image-inventory.sql](../../scripts/sql/accounts-image-inventory.sql)、管理员工具 [bootstrap-admin.mjs](../../scripts/bootstrap-admin.mjs)、无密钥配置模板 [wrangler.accounts.example.jsonc](../../wrangler.accounts.example.jsonc)。本地模拟和副本操作另见 [本地部署手册](../local-development.md)。

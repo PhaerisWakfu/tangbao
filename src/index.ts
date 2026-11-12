@@ -48,7 +48,7 @@ type AppEnv = Env & AuthEnv & {
   IMAGES: KVNamespace;
 };
 
-type PresenceState = "online" | "idle" | "busy" | "away" | "off";
+type PresenceState = "online" | "idle" | "busy" | "closed" | "away" | "off";
 type StatusPayload = {
   state: "available" | "busy";
   label: string;
@@ -113,9 +113,15 @@ const LIST_SIZE = 10;
 const ONLINE_TTL = 90_000;
 const HEARTBEAT_WRITE = 20_000;
 const HIDDEN_GRACE = 5 * 60_000;
-const IDLE_AFTER = 2 * 60_000;
+const AWAY_BUFFER = 60_000;
 const PENDING_CAP = 2;
 const REPLY_TIMEOUT = 10 * 60_000;
+// Hand an unanswered first message to someone else once the owner has been
+// gone for a while (90s to notice + 5 minutes of waiting).
+const RESCUE_AFTER = ONLINE_TTL + 5 * 60_000;
+// Only redistribute first messages with recent activity. Older strands are
+// historical backlog, not someone still waiting for an answer.
+const RESCUE_MAX_AGE = 24 * HOUR;
 const HOME_SEEN_KEY = "home_last_seen";
 const HOME_REPLY_KEY = "home_last_reply";
 const HOME_ASSIGNED_KEY = "home_last_assigned";
@@ -126,7 +132,7 @@ const AUTO_APPROVE_KEY = "auto_approve";
 const encoder = new TextEncoder();
 
 const PUBLIC_CACHE_TTL: Record<string, number> = {
-  "/api/status": 300,
+  "/api/status": 60,
   "/api/models": 30,
   "/api/models/status": 15,
   "/api/presence": 600,
@@ -633,6 +639,14 @@ function publicPresence(state: PresenceState): PresenceState {
   return state === "off" ? "away" : state;
 }
 
+function presentNow(lastSeen: number, awayAt: number, now = Date.now()): boolean {
+  if (awayAt > 0) {
+    if (awayAt <= now) return false;
+    return HIDDEN_GRACE - (awayAt - now) <= AWAY_BUFFER;
+  }
+  return Boolean(lastSeen) && lastSeen >= now - ONLINE_TTL;
+}
+
 function statusOf(
   active: number,
   lastSeen: number,
@@ -643,12 +657,17 @@ function statusOf(
   awayAt = 0,
 ): PresenceState {
   if (!active) return "off";
-  if (awayAt > 0 && awayAt <= now) return "away";
-  if (awayAt <= 0 && (!lastSeen || lastSeen < now - ONLINE_TTL)) return "away";
-  if (!accepting) return "busy";
+  if (awayAt > 0) {
+    if (awayAt <= now) return "away";
+    // The client declares "away" with a five-minute grace. Treat the first
+    // minute as still present, then idle, then away.
+    if (HIDDEN_GRACE - (awayAt - now) > AWAY_BUFFER) return "idle";
+  } else if (!lastSeen || lastSeen < now - ONLINE_TTL) {
+    return "away";
+  }
+  if (!accepting) return "closed";
   if (pending >= PENDING_CAP) return "busy";
   if (pending > 0 && oldestPendingAt && oldestPendingAt < now - REPLY_TIMEOUT) return "busy";
-  if (awayAt > now && awayAt - now <= HIDDEN_GRACE - IDLE_AFTER) return "idle";
   return "online";
 }
 
@@ -657,15 +676,18 @@ function statusPayload(state: PresenceState): StatusPayload {
     state === "online"
       ? { state: "available" as const, label: "在线", note: "他在" }
       : state === "idle"
-        ? { state: "busy" as const, label: "暂离", note: "可能慢" }
+        ? { state: "busy" as const, label: "暂离", note: "刚走开" }
         : state === "busy"
           ? { state: "busy" as const, label: "忙碌", note: "稍等" }
-          : state === "off"
-          ? { state: "busy" as const, label: "停用", note: "不接新话" }
-          : { state: "busy" as const, label: "离开", note: "不在" };
+          : state === "closed"
+            ? { state: "busy" as const, label: "打烊", note: "不接新话" }
+            : state === "off"
+              ? { state: "busy" as const, label: "停用", note: "不接新话" }
+              : { state: "busy" as const, label: "离开", note: "不在" };
+  const present = state === "online" || state === "idle" || state === "busy" || state === "closed";
   return {
     ...copy,
-    awake: state === "online",
+    awake: present,
     online: state === "online",
     status: state,
   };
@@ -813,7 +835,7 @@ async function operatorPresence(env: AppEnv, operatorId: string, now = Date.now(
 
 async function operatorPresent(env: AppEnv, operatorId: string): Promise<boolean> {
   const presence = await operatorPresence(env, operatorId);
-  return presence.status === "online" || presence.status === "idle" || presence.status === "busy";
+  return presence.status === "online" || presence.status === "idle" || presence.status === "busy" || presence.status === "closed";
 }
 
 async function touchSeat(env: AppEnv, seat: Seat, now: number): Promise<void> {
@@ -1278,7 +1300,7 @@ function modelJson(row: Presence) {
     openingQuestions: row.openingQuestions,
     online: row.status === "online",
     status: publicPresence(row.status),
-    awake: row.status === "online",
+    awake: row.status !== "away" && row.status !== "off",
     accepting: row.accepting === 1,
     pending: row.pending,
     lastSeenAt: row.lastSeenAt,
@@ -1307,10 +1329,12 @@ async function listModels(env: AppEnv, url: URL): Promise<Response> {
          GROUP BY operator_id
        ) p ON p.operator_id = o.id
        WHERE o.active = 1 AND ${OWNER_READY}
-         AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
+         AND o.accepting = 1
+         AND o.last_seen_at >= ?
+         AND (o.away_at = 0 OR o.away_at >= ?)
        ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id`,
     )
-      .bind(now, now - ONLINE_TTL)
+      .bind(now - ONLINE_TTL, now + HIDDEN_GRACE - AWAY_BUFFER)
       .all<PresenceRow>();
     const operators = rows.results.map((row) => presenceFromRow(row, now));
     const totalRow = await env.DB.prepare(
@@ -1482,14 +1506,15 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
      ) p ON p.operator_id = o.id
      WHERE o.active = 1 AND ${OWNER_READY}
        AND o.accepting = 1
-       AND (o.away_at > ? OR (o.away_at = 0 AND o.last_seen_at >= ?))
+       AND o.last_seen_at >= ?
+       AND (o.away_at = 0 OR o.away_at >= ?)
        AND COALESCE(p.n, 0) < ?
        AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
        ${blockFilter}
      ORDER BY COALESCE(p.n, 0), o.last_assigned_at, o.id
      LIMIT 1`,
   )
-    .bind(now, now - ONLINE_TTL, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
+    .bind(now - ONLINE_TTL, now + HIDDEN_GRACE - AWAY_BUFFER, PENDING_CAP, now - REPLY_TIMEOUT, ...ids, ...globalIds)
     .first<{ id: string }>();
   return row?.id || HOME_MODEL;
 }
@@ -1497,13 +1522,23 @@ async function autoModelId(env: AppEnv, now = Date.now(), identities: Array<stri
 async function assignOperator(env: AppEnv, value: string, identities: Array<string | null>, ipIdentities: Array<string | null>): Promise<Assignment> {
   const requested = /^tangbao-[a-z0-9-]+$/.test(value) ? value : "";
   if (requested === HOME_MODEL) {
-    return { id: HOME_MODEL, requested, fallback: false, queued: false };
+    const home = await homePresence(env);
+    if (home.status === "online" || home.status === "busy") {
+      return { id: HOME_MODEL, requested, fallback: false, queued: false };
+    }
+    throw new HttpError(409, "糖包现在不接新话，换一个模型或稍后再来。");
   }
   if (requested) {
-    const explicit = await env.DB.prepare(`SELECT o.id FROM operators o WHERE o.id = ? AND o.active = 1 AND ${OWNER_READY}`)
+    const explicit = await env.DB.prepare(
+      `SELECT o.id, o.accepting, o.last_seen_at, o.away_at FROM operators o WHERE o.id = ? AND o.active = 1 AND ${OWNER_READY}`,
+    )
       .bind(requested)
-      .first<{ id: string }>();
+      .first<{ id: string; accepting: number; last_seen_at: number; away_at: number }>();
     if (explicit) {
+      if (!Number(explicit.accepting)) throw new HttpError(409, "这个模型打烊了，暂不接新话。");
+      if (!presentNow(Number(explicit.last_seen_at) || 0, Number(explicit.away_at) || 0)) {
+        throw new HttpError(409, "这个模型现在不在，换一个模型或稍后再来。");
+      }
       return { id: explicit.id, requested, fallback: false, queued: false };
     }
   }
@@ -1779,8 +1814,9 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
     online: 0,
     idle: 1,
     busy: 2,
-    away: 3,
-    off: 4,
+    closed: 3,
+    away: 4,
+    off: 5,
   };
   const ordered = [...operators].sort(
     (a, b) => statusRank[a.status] - statusRank[b.status],
@@ -1839,14 +1875,17 @@ async function audit(request: Request, env: AppEnv): Promise<Response> {
 async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat): Promise<number> {
   if (operatorId === HOME_MODEL) return 0;
   const target = await operatorPresence(env, operatorId, Date.now(), seat);
-  if (!target.active || (target.status !== "online" && target.status !== "idle") || target.pending >= PENDING_CAP) return 0;
+  if (!target.active || target.status !== "online" || target.pending >= PENDING_CAP) return 0;
 
-  let slots = PENDING_CAP - target.pending;
+  let slotsLeft = PENDING_CAP - target.pending;
+  const now = Date.now();
+  const freshAfter = now - ONLINE_TTL;
+  const rescueBefore = now - RESCUE_AFTER;
+  const scope = blockScope(operatorId);
   const candidates = await env.DB.prepare(
     `SELECT t.id
      FROM threads t
-     WHERE t.awaiting = 1 AND t.auto_home = 1
-       AND (t.operator_id = ? OR t.queued = 1)
+     WHERE t.awaiting = 1
        AND NOT EXISTS (
          SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.role = 'tangbao'
        )
@@ -1854,24 +1893,34 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
          SELECT 1 FROM blocks b
          WHERE ${threadBlockMatch("t", "?")}
        )
+       AND (
+         (t.auto_home = 1 AND (t.operator_id = ? OR t.queued = 1))
+         OR (
+           t.auto_home = 0
+           AND t.queued = 0
+           AND t.operator_id <> ?
+           AND NOT EXISTS (
+             SELECT 1 FROM operators o2
+             WHERE o2.id = t.operator_id AND o2.active = 1 AND o2.last_seen_at >= ?
+           )
+         )
+       )
+       AND t.updated_at >= ?
      ORDER BY t.updated_at ASC
      LIMIT ?`,
   )
-    .bind(HOME_MODEL, blockScope(operatorId), slots)
+    .bind(scope, HOME_MODEL, HOME_MODEL, rescueBefore, now - RESCUE_MAX_AGE, slotsLeft)
     .all<{ id: string }>();
   if (!candidates.results.length) return 0;
 
-  const now = Date.now();
-  const freshAfter = now - ONLINE_TTL;
   const ownership = seat ? seatOwnership(seat, "o.id") : { sql: "1=1", values: [] };
   let moved = 0;
   for (const row of candidates.results) {
-    if (slots <= 0) break;
+    if (slotsLeft <= 0) break;
     const result = await env.DB.prepare(
       `UPDATE threads
        SET operator_id = ?, queued = 0
-       WHERE id = ? AND awaiting = 1 AND auto_home = 1
-         AND (operator_id = ? OR queued = 1)
+       WHERE id = ? AND awaiting = 1
          AND NOT EXISTS (
            SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.role = 'tangbao'
          )
@@ -1879,20 +1928,46 @@ async function migrateHomeBacklog(env: AppEnv, operatorId: string, seat?: Seat):
            SELECT 1 FROM blocks b
            WHERE ${threadBlockMatch("threads", "?")}
          )
+         AND (
+           (auto_home = 1 AND (operator_id = ? OR queued = 1))
+           OR (
+             auto_home = 0
+             AND queued = 0
+             AND operator_id <> ?
+             AND NOT EXISTS (
+               SELECT 1 FROM operators o2
+               WHERE o2.id = threads.operator_id AND o2.active = 1 AND o2.last_seen_at >= ?
+             )
+           )
+         )
+         AND updated_at >= ?
          AND EXISTS (
            SELECT 1 FROM operators o
-           WHERE o.id = ? AND o.active = 1 AND ${OWNER_READY} AND o.last_seen_at >= ? AND ${ownership.sql}
+           WHERE o.id = ? AND o.active = 1 AND o.accepting = 1 AND ${OWNER_READY} AND o.last_seen_at >= ? AND ${ownership.sql}
          )
          AND (
            SELECT COUNT(*) FROM threads t
            WHERE t.operator_id = ? AND t.awaiting = 1 AND ${unblockedThread("t")}
          ) < ?`,
     )
-      .bind(operatorId, row.id, HOME_MODEL, blockScope(operatorId), operatorId, freshAfter, ...ownership.values, operatorId, PENDING_CAP)
+      .bind(
+        operatorId,
+        row.id,
+        scope,
+        HOME_MODEL,
+        HOME_MODEL,
+        rescueBefore,
+        now - RESCUE_MAX_AGE,
+        operatorId,
+        freshAfter,
+        ...ownership.values,
+        operatorId,
+        PENDING_CAP,
+      )
       .run();
     if (result.meta.changes !== 1) continue;
     moved += 1;
-    slots -= 1;
+    slotsLeft -= 1;
     await touchAssigned(env, operatorId, now, seat);
   }
   return moved;
@@ -2176,43 +2251,13 @@ async function publicStatus(env: AppEnv): Promise<StatusPayload> {
 
 async function siteStatus(env: AppEnv): Promise<StatusPayload> {
   const now = Date.now();
-  const [home, row] = await Promise.all([
-    homePresence(env, now),
-    env.DB.prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN o.active = 1 AND ${OWNER_READY}
-           AND o.last_seen_at >= ?
-           AND COALESCE(p.n, 0) < ?
-           AND NOT (COALESCE(p.n, 0) > 0 AND p.oldest < ?)
-           THEN 1 ELSE 0 END), 0) AS online,
-         COALESCE(SUM(CASE WHEN o.active = 1 AND ${OWNER_READY}
-           AND o.last_seen_at >= ?
-           AND (COALESCE(p.n, 0) >= ? OR (COALESCE(p.n, 0) > 0 AND p.oldest < ?))
-           THEN 1 ELSE 0 END), 0) AS busy
-       FROM operators o
-       LEFT JOIN (
-         SELECT operator_id, COUNT(*) AS n, MIN(updated_at) AS oldest
-         FROM threads t
-         WHERE t.awaiting = 1 AND t.queued = 0 AND ${unblockedThread("t")}
-         GROUP BY operator_id
-       ) p ON p.operator_id = o.id`,
-    )
-      .bind(
-        now - ONLINE_TTL,
-        PENDING_CAP,
-        now - REPLY_TIMEOUT,
-        now - ONLINE_TTL,
-        PENDING_CAP,
-        now - REPLY_TIMEOUT,
-      )
-      .first<{ online: number | null; busy: number | null }>(),
-  ]);
-  const state: PresenceState =
-    Number(row?.online) > 0 || home.status === "online"
-      ? "online"
-      : Number(row?.busy) > 0 || home.status === "busy"
-        ? "busy"
-        : "away";
+  const { home, operators } = await loadPresence(env, now, true);
+  const all = [home, ...operators];
+  const state: PresenceState = all.some((model) => model.status === "online")
+    ? "online"
+    : all.some((model) => model.status === "busy")
+      ? "busy"
+      : "away";
   const payload = statusPayload(state);
   if (state === "online") payload.note = "有人在";
   return payload;

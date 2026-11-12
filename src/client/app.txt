@@ -182,7 +182,7 @@ function showSys(text) {
 }
 
 function applyStatus(next) {
-  const present = next.status === "online" || next.status === "idle" || next.status === "busy" || Boolean(next.awake);
+  const present = next.status === "online" || next.status === "idle" || next.status === "busy" || next.status === "closed" || Boolean(next.awake);
   status = { ...next, awake: present, online: next.status === "online" };
   body.dataset.presence = present ? "awake" : "asleep";
   try {
@@ -200,10 +200,13 @@ function statusFromState(state) {
     return { state: "available", label: "在线", note: "他在", awake: true, online: true, status: state };
   }
   if (state === "idle") {
-    return { state: "busy", label: "暂离", note: "可能慢", awake: false, online: false, status: state };
+    return { state: "busy", label: "暂离", note: "刚走开", awake: true, online: false, status: state };
   }
   if (state === "busy") {
-    return { state: "busy", label: "忙碌", note: "稍等", awake: false, online: false, status: state };
+    return { state: "busy", label: "忙碌", note: "稍等", awake: true, online: false, status: state };
+  }
+  if (state === "closed") {
+    return { state: "busy", label: "打烊", note: "不接新话", awake: true, online: false, status: state };
   }
   return { state: "busy", label: "离开", note: "不在", awake: false, online: false, status: state };
 }
@@ -226,9 +229,12 @@ function syncApplyEntry() {
 
 function autoStatus() {
   if (models.some((model) => model.status === "online" || model.online === true)) return statusFromState("online");
-  if (models.some((model) => model.status === "idle")) return statusFromState("idle");
   if (models.some((model) => model.status === "busy")) return statusFromState("busy");
-  return statusFromModel(models.find((item) => item.id === autoModel) || models.find((item) => item.home) || null);
+  if (models.some((model) => model.status === "closed")) return statusFromState("closed");
+  if (models.some((model) => model.status === "idle")) return statusFromState("idle");
+  if (!models.length) return statusFromModel(null);
+  const picked = models.find((item) => item.id === autoModel) || models.find((item) => item.home);
+  return picked ? statusFromModel(picked) : statusFromState("away");
 }
 
 function applyModelStatus() {
@@ -1461,16 +1467,14 @@ function paintModels() {
 
   const visible = modelSearchMode
     ? models.slice()
-    : models.filter((model) => model.id === id || model.status === "online" || model.status === "idle" || model.status === "busy" || model.online === true);
-  if (!modelSearchMode) {
-    const rank = { online: 0, idle: 1, busy: 2 };
-    visible.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3));
-  }
+    : models.filter((model) => model.id === id || model.status === "online" || model.status === "busy" || model.online === true);
+  const rank = { online: 0, busy: 1, closed: 2, idle: 3, away: 4 };
+  visible.sort((a, b) => (rank[a.status] ?? 5) - (rank[b.status] ?? 5));
 
   const addRow = (model) => {
     const online = model.status === "online" || model.online === true;
     const state = model.status || (online ? "online" : "away");
-    const selectable = online || state === "idle" || state === "busy";
+    const selectable = online || state === "busy";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "model-row";
@@ -1483,7 +1487,7 @@ function paintModels() {
     button.querySelector("b").textContent = model.id;
     button.querySelector(".who small").textContent = model.blurb || "还没写简介";
     button.querySelector(".model-state").textContent =
-      state === "online" ? "在线" : state === "idle" ? "暂离" : state === "busy" ? "忙碌" : "离开";
+      state === "online" ? "在线" : state === "idle" ? "暂离" : state === "busy" ? "忙碌" : state === "closed" ? "打烊" : "离开";
     if (model.id === id) button.insertAdjacentHTML("beforeend", '<svg class="i"><use href="#i-check"/></svg>');
     button.addEventListener("click", () => {
       if (!selectable) return;
@@ -1569,7 +1573,7 @@ async function loadModels(pick) {
       picked = localStorage.getItem(MODEL_KEY) || "";
       if (picked) localStorage.removeItem(MODEL_KEY);
     } catch {}
-    const fromAbout = models.find((item) => item.id === picked && item.status === "online");
+    const fromAbout = models.find((item) => item.id === picked && (item.status === "online" || item.status === "busy"));
     chosen = fromAbout ? fromAbout.id : AUTO;
   }
   if (!current && chosen) {

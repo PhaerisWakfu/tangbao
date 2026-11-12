@@ -438,6 +438,7 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
 .seat-status[data-state="online"] { color: var(--up); }
 .seat-status[data-state="busy"] { color: var(--accent); }
 .seat-status[data-state="idle"] { color: var(--muted); }
+.seat-status[data-state="closed"] { color: var(--accent); }
 .seat .name { flex: 1; min-width: 0; }
 .seat .name b {
   display: block;
@@ -729,10 +730,16 @@ body[data-presence="asleep"] .seat-err { color: #e5a27a; }
   border: 1.5px solid var(--up);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 18%, transparent);
 }
+.presence[data-state="closed"] .presence-dot {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .presence b { font-size: 13px; font-weight: 600; }
 .presence[data-state="busy"] b { color: var(--accent); }
 .presence[data-state="away"] b { color: var(--muted); }
 .presence[data-state="idle"] b { color: var(--muted); }
+.presence[data-state="closed"] b { color: var(--accent); }
 .work-state {
   flex: none;
   margin-left: auto;

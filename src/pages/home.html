@@ -420,14 +420,15 @@
     function paintModels(models) {
       const lineup = $("#lineup");
       lineup.replaceChildren();
-      const online = models.filter((model) => model.status === "online" || model.status === "idle");
+      const ready = (model) => model.status === "online" || model.status === "busy";
+      const online = models.filter(ready);
       const lead = online.length
         ? (onlineOpen ? online : online.slice(0, 10))
         : models.filter((model) => model.home).slice(0, 1);
       if (!lead.length && models.length) lead.push(models[0]);
 
       const addLine = (model) => {
-        const isOnline = model.status === "online" || model.status === "idle";
+        const isOnline = ready(model);
         const button = document.createElement("button");
         button.type = "button";
         button.className = "line";
@@ -446,7 +447,7 @@
         who.append(blurb);
         const state = document.createElement("small");
         state.className = "state";
-        state.textContent = model.status === "online" ? "在线" : model.status === "idle" ? "暂离" : model.status === "busy" ? "忙碌" : "离开";
+        state.textContent = model.status === "online" ? "在线" : model.status === "idle" ? "暂离" : model.status === "busy" ? "忙碌" : model.status === "closed" ? "打烊" : "离开";
         button.append(dot, who, state);
         button.addEventListener("click", () => {
           if (!isOnline) return;

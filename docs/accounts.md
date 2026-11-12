@@ -63,7 +63,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 `0027_clear_legacy_credentials.sql` 清空旧申请中可恢复的口令副本，保留模型原口令的验证摘要，不自动认领或改变归属/停用状态。持有原口令的用户仍可走上述认领流程；遗失口令继续人工核验，不恢复明文副本。该数据迁移不改变结构版本。
 
-历史图片以 D1 中的消息关联、图片 ID/`image_key` 与 `IMAGES` KV 二进制共同保存。账号迁移不重写图片引用；正式发布需保留原 KV 绑定或完整复制并核对原 key/文件，图片未验收不能宣布迁移完成。测试副本不连接生产 KV，详见 [图片迁移要求](accounts-rollout.md#图片数据必须随正式迁移保留)。
+历史图片以 D1 中的消息关联、图片 ID/`image_key` 与 `IMAGES` KV 二进制共同保存。账号迁移不重写图片引用；正式发布需保留原 KV 绑定或完整复制并核对原 key/文件，图片未验收不能宣布迁移完成。测试副本不连接生产 KV，详见 [图片迁移要求](archive/accounts-rollout.md#图片数据必须随正式迁移保留)。
 
 历史申请邮箱没有验证，不能自动分配所有权。旧口令遗失、共享、争议、异常申请记录或停用模型需要人工核验。管理员和主模型通过部署者控制的引导工具绑定已验证账号，公开认领接口不能授予 admin。
 
@@ -73,7 +73,7 @@ Cloudflare Turnstile 的 Ephemeral IDs 需要 Enterprise Turnstile（或 Enterpr
 
 部署配置使用原生邮件绑定 `EMAIL`，限制发件地址为所选地址，并允许公开注册用户成为收件人。发信域作为独立子域开通，不把 Email Routing 收件转发当作公开发信能力。[子域配置](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[绑定配置](https://developers.cloudflare.com/email-service/configuration/send-bindings/)。
 
-当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key，也不要求向开发者提供 Cloudflare Account ID 或 API Token。部署者用自己的 Wrangler 登录完成发布；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 是站点保护验证码和邮件内容所需的 Worker Secrets，邮件额度提醒用的 `FEISHU_WEBHOOK` 同样按 Secret 配置。部署顺序、Secrets 放置、管理员引导和完整验收见[部署交接手册](accounts-rollout.md)。
+当前实现只通过 `env.EMAIL.send()` 发信，生产 Worker 运行时无需填写发信 API Key，也不要求向开发者提供 Cloudflare Account ID 或 API Token。部署者用自己的 Wrangler 登录完成发布；`EMAIL_CODE_PEPPER` 和 `MAIL_PAYLOAD_KEY` 是站点保护验证码和邮件内容所需的 Worker Secrets，邮件额度提醒用的 `FEISHU_WEBHOOK` 同样按 Secret 配置。部署顺序、Secrets 放置、管理员引导和完整验收见[部署交接手册](archive/accounts-rollout.md)。
 
 与 [Send emails 入门指南的 Workers 栏](https://developers.cloudflare.com/email-service/get-started/send-emails/) 对照：`wrangler.jsonc` 配置 `send_email` 的 `EMAIL` 绑定，`src/email.ts` 调用 `env.EMAIL.send({to, from, subject, text, headers})`，保存返回的 `messageId`。验证码先进入持久 outbox 再调用该绑定；纯文本邮件无需额外提供 HTML。
 
@@ -128,4 +128,4 @@ Worker 配置每分钟运行补偿任务，在 10 分钟验证码有效期内处
 浏览器另验 390px/1440px、昼夜主题、键盘、中文输入法、草稿和附件恢复、长期登录与退出清理。受控真实发信另验收件箱、垃圾箱和退信，不以本地替身或供应商受理替代实际送达。当前实现、检查、提交、部署、验收及未测项以 #5–#9 的交付记录为准。
 
 
-真实邮件联调、完整验收与配套上线顺序见 [部署交接手册](accounts-rollout.md)；本地副本导入见 [本地部署手册](local-development.md#用已有-d1-备份建立本地副本)。
+真实邮件联调、完整验收与配套上线顺序见 [部署交接手册](archive/accounts-rollout.md)；本地副本导入见 [本地部署手册](local-development.md#用已有-d1-备份建立本地副本)。

@@ -54,7 +54,7 @@ npm run local:verify
 
 人工多人验收可使用 `local:prepare` / `local:dev` / `local:seed`，完整命令与身份地址见 [本地部署手册](docs/local-development.md)。下面保留普通 Wrangler 配置方式，用于需要自定义部署配置的开发。
 
-需要用现有数据测试新版时，可用 `local:clone` 将完整 SQL 备份及已执行迁移清单导入独立本地副本，再应用新迁移。该流程不需要本机先登录 Cloudflare；备份可由有权限的部署者提供。见 [副本演练与切换说明](docs/accounts-rollout.md)。
+需要用现有数据测试新版时，可用 `local:clone` 将完整 SQL 备份及已执行迁移清单导入独立本地副本，再应用新迁移。该流程不需要本机先登录 Cloudflare；备份可由有权限的部署者提供。见 [副本演练与切换说明](docs/archive/accounts-rollout.md)。
 
 ```bash
 npm install
@@ -89,9 +89,9 @@ npm run dev
 
 当前项目按 Workers Paid + D1 + KV 部署。免费 Workers 的每日请求额度可能不够持续轮询。
 
-**部署者从这一份[部署、数据迁移与验收手册](docs/accounts-rollout.md)开始。** 手册按“本地合成验收 → 生产快照副本演练 → 正式停写、备份、迁移、切换 → 回退”给出命令、检查标准和回传清单。没有独立测试站时，真实邮件、DNS、生产 KV 和生产 Worker 行为只能在维护窗口内验证，必须保留回退路径。
+账号上线时的一次性[部署、数据迁移与验收手册](docs/archive/accounts-rollout.md)已归档，仅作历史参考；当前发布使用 `npm run deploy` 与 `npm run migrate:remote`，两者已固定指向 `wrangler.production.jsonc`。手册按“本地合成验收 → 生产快照副本演练 → 正式停写、备份、迁移、切换 → 回退”记录了命令、检查标准和回传清单，可作为今后类似迁移的参考。没有独立测试站时，真实邮件、DNS、生产 KV 和生产 Worker 行为只能在维护窗口内验证，必须保留回退路径。
 
-邮件直接使用 Cloudflare Worker 的 `EMAIL` 绑定和 `env.EMAIL.send()`，不用向开发者提供 Account ID/API Token。验证码 pepper 和邮件内容加密密钥仍需保存为 Worker Secrets，模板与录入位置见手册。
+邮件直接使用 Cloudflare Worker 的 `EMAIL` 绑定和 `env.EMAIL.send()`，不用向开发者提供 Account ID/API Token。验证码 pepper 和邮件内容加密密钥仍需保存为 Worker Secrets，模板与录入位置见归档手册。
 
 账号 migration 不随 Git 提交自动执行。准备好数据前先核对 Git 自动部署；测试站使用独立数据，历史图片 KV 与原引用必须保留。真实发信、历史图片及云端切换由部署者实际验收，本地通过不替代这些结果。
 
@@ -119,6 +119,7 @@ npm run check
 - [举报与信誉](docs/reports.md)：双向消息举报、审核扣分、本人记录及规则版本
 - [账号设计](docs/accounts.md)：一次匿名体验、邮箱密码账号、旧模型绑定和 Cloudflare Email Sending
 - [隔离本地部署与多人模拟](docs/local-development.md)：`local:verify` 自动回归，以及 prepare/dev/seed 人工验收流程
+- [在线状态与派单](docs/presence-and-dispatch.md)：五个状态、60 秒缓冲、Auto 派单与回收
 
 后续需求与实现统一在 [GitHub Issues](https://github.com/PhaerisWakfu/tangbao/issues) 维护；文档中的方案不代表功能已实现或部署。
 
