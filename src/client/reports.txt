@@ -27,17 +27,10 @@
     list.forEach(item=>{ const a=el('a'); a.href=item.url; a.target='_blank'; a.rel='noopener'; const img=el('img'); img.src=item.url; img.alt='举报消息图片'; a.append(img); shots.append(a); });
     box.append(shots);
   }
-  function evidence(box, row, context=false) {
+  function evidence(box, row) {
     if(row.message?.body || row.images?.length) {
-      box.append(el('p','report-context-label','被举报的这条'));
       if(row.message?.body) box.append(el('blockquote','report-evidence',row.message.body));
       images(box,row.images);
-    }
-    if(context && row.message?.context?.length) {
-      const wrap=el('div','report-context');
-      wrap.append(el('p','report-context-label','前文（举报之前）'));
-      row.message.context.forEach(m=>{ const p=el('p','',m.body || '图片消息'); const who=el('b','',m.role==='visitor'?'用户：':'模型：'); p.prepend(who); wrap.append(p); });
-      box.append(wrap);
     }
   }
   function result(box,row) {
@@ -53,7 +46,7 @@
     item('处理时间',row.decidedAt ? date(row.decidedAt) : '');
     item('信誉变化',row.deduction>0 ? `−${row.deduction} 分 · ${row.scoreBefore} → ${row.scoreAfter}` : '');
     box.append(details);
-    if(row.message){box.append(el('h4','report-section-title','被举报消息'));evidence(box,row,true);}
+    if(row.message){box.append(el('h4','report-section-title','被举报消息'));evidence(box,row);}
     box.append(el('time','report-date',`提交于 ${date(row.createdAt)}`));
   }
   async function openRecord(id,host,onBack) {
@@ -210,7 +203,7 @@
       const evidenceBox=el('section','report-section'),evidenceHead=el('div','report-section-head');
       evidenceHead.append(el('h4','report-section-title','被举报消息'));
       if(report.threadAvailable && onThread)evidenceHead.append(button('查看对话',()=>onThread(report.threadId),'text-btn'));
-      evidenceBox.append(evidenceHead);evidence(evidenceBox,report,true);box.append(evidenceBox);container.append(box);
+      evidenceBox.append(evidenceHead);evidence(evidenceBox,report);box.append(evidenceBox);container.append(box);
       if(report.status!=='pending'){const outcome=el('section','report-section report-outcome'),top=el('div','report-outcome-top');const status=el('span','report-status',statusName[report.status]);status.dataset.status=report.status;top.append(el('span','report-field-label','审核结果'),status);if(report.decidedAt)top.append(el('time','report-date',date(report.decidedAt)));top.append(el('p','report-deduction',`${report.status==='upheld'?'被举报人':'举报人'}信誉 ${report.scoreBefore} → ${report.scoreAfter}`));outcome.append(top);if(report.reviewReason){const opinion=el('dl','report-detail report-outcome-detail');opinion.append(el('dt','','审核意见'),el('dd','',report.reviewReason));outcome.append(opinion);}box.append(outcome);return;}
       const label=el('label','report-label','审核意见'),input=el('textarea');input.rows=3;input.maxLength=report.reviewReasonMaxLength;label.append(input);
       const actions=el('div','report-review-actions');let inFlight=false;
