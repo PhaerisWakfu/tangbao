@@ -1,8 +1,8 @@
 name: Local verify
 
+# 手动运行：Actions → Local verify → Run workflow。
+# 在 Linux 上跑隔离实例的完整 HTTP 回归，避免 Windows 本地 Miniflare 的目录权限问题。
 on:
-  push:
-    branches: [feat/44-presence-dispatch]
   workflow_dispatch:
 
 permissions:
